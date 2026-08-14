@@ -36,7 +36,10 @@ export function buildFixtureEngine() {
     id: "fxbot",
     venue: "polymarket",
     risk: { maxSlippageBps: 300 },
-    strategy: { id: "flip-flat", config: { entrySpreadPp: 10, maxPositionNotional: 50 } },
+    strategy: {
+      id: "flip-flat",
+      config: { entrySpreadPp: 10, topN: 2, dailyBudgetUsd: 25, positionBudgetPct: 50 },
+    },
     tickIntervalMin: 5,
   });
   const venue = new FixtureVenue(booksFixture);

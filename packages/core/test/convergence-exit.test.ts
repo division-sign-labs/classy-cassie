@@ -5,7 +5,7 @@
 // closes the edge) is not mistaken for the thesis paying out.
 
 import { describe, expect, it } from "vitest";
-import { MemoryStateStore, silentLogger, type Position, type Signal, type SignalSource } from "@quotient-forecasting/cassie-core";
+import { silentLogger, type Position, type Signal, type SignalSource, type StrategyMemory } from "@quotient-forecasting/cassie-core";
 import { FlipFlatStrategy } from "../../../strategies/flip-flat/dist/index.js";
 
 const MARKET = "m-1";
@@ -29,6 +29,16 @@ function position(over: Partial<Position> = {}): Position {
   return { marketRef: MARKET, side: "YES", size: 10, avgPrice: 0.55, ...over };
 }
 
+function strategyMemory(): StrategyMemory {
+  const values = new Map<string, unknown>();
+  return {
+    get: async <T>(key: string) => values.get(key) as T | undefined,
+    set: async <T>(key: string, value: T) => {
+      values.set(key, value);
+    },
+  };
+}
+
 /** `mid` is always the YES mid, as the venue reports it. */
 function ctxWith(signals: Signal[], positions: Position[], mid: number, config: Record<string, unknown> = {}) {
   return {
@@ -40,7 +50,7 @@ function ctxWith(signals: Signal[], positions: Position[], mid: number, config: 
     equity: 1_000,
     now: () => Date.now(),
     log: silentLogger,
-    memory: new MemoryStateStore(),
+    memory: strategyMemory(),
     venue: {
       quote: async () => ({ marketRef: MARKET, bid: mid - 0.01, ask: mid + 0.01, mid, volume24h: 1e6, spreadBps: 40, ts: Date.now() }),
       balances: async () => [{ asset: "pUSD", total: 1_000, available: 1_000 }],

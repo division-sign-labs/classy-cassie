@@ -3,11 +3,12 @@
 // flip → exit + re-entry, fills alerted on the following tick.
 
 import { describe, expect, it } from "vitest";
+import { StateKeys } from "@quotient-forecasting/cassie-core";
 import { buildFixtureEngine } from "./helpers.js";
 
 describe("flip-flat against fixtures (offline e2e)", () => {
   it("enters capped, holds, then flips", async () => {
-    const { engine, venue, alerter } = buildFixtureEngine();
+    const { engine, venue, alerter, state } = buildFixtureEngine();
 
     // Tick 1: flat + YES signal (spread 15pp ≥ 10) → entry, size capped by depth.
     const t1 = await engine.tick();
@@ -24,6 +25,8 @@ describe("flip-flat against fixtures (offline e2e)", () => {
     // 25% of the 40 shares in-band at limit 0.5665.
     expect(positions[0]!.size).toBe(10);
     expect(positions[0]!.avgPrice).toBeCloseTo(0.56, 10);
+    const budget = JSON.parse((await state.get(StateKeys.strategyMemory("daily-entry-budget")))!);
+    expect(budget.placedUsd).toBeCloseTo(5.665, 3);
 
     // Tick 2: same side → hold. Fill from tick 1 is reconciled + alerted now.
     const t2 = await engine.tick();

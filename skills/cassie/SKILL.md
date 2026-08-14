@@ -65,11 +65,11 @@ Every step happens in the terminal; you only leave it to copy-paste dashboard va
 4. **Wallet** — a fresh EOA is generated for the bot (or reused if one exists). The
    private key never leaves the keystore.
 5. **Venue account provisioning** (adapter-driven):
-   - **Polymarket** — two paths. Deposit Wallet deployment and every gasless op
+   - **Polymarket** — two paths. Polymarket account creation and every gasless op
      (approvals, redemption) require a **Relayer or Builder API key** in the client —
      verified live 2026-08-13; solo derivation without either is rejected by the relayer.
-     - *create* (default): programmatic Deposit Wallet. The Builder key prompt accepts
-       Enter to reuse the operator's saved default (from `~/.cassie/defaults.json` or the
+     - *create* (default): create a Polymarket account. The Builder key menu offers
+       **Use default Builder key** when one exists (from `~/.cassie/defaults.json` or the
        `POLYMARKET_BUILDER_KEY/SECRET/PASSPHRASE` env vars), `open` to launch
        polymarket.com → **Settings → Builders** (free) for a new one, or a pasted key
        (the wizard offers to save it as the default). A Relayer key works here too when
@@ -88,9 +88,14 @@ Every step happens in the terminal; you only leave it to copy-paste dashboard va
    - **Lighter** — derives the L1 address. Account registration and API-key provisioning
      happen in the funding flow.
 6. **Strategy** — one strategy: `signals` (follow Quotient signals, hold until the side
-   flips). One confirm accepts the recommended settings: quarter-Kelly sizing, 10pp entry
-   edge, positions until the budget is used. Declining runs the short manual questions;
-   `cassie strategy <botId>` re-tunes any time.
+   flips). The recommended allocation holds up to 2 positions, prioritizes the widest
+   eligible edges for new entries, and requests 50% of the daily entry budget per position;
+   the wizard always asks for the
+   dollar budget (default $25). The budget resets at 00:00 UTC, counts only entry notional
+   actually placed after risk/capacity limits, and does not close positions when it resets.
+   Declining the recommendation asks for top N, daily budget, allocation percentage, entry
+   edge, minimum viable entry, tick interval, and universe. `cassie strategy <botId>`
+   displays or changes the same settings at any time.
 7. **Signals** — live Quotient signals. The wizard reuses a key found from the quotient
    CLI or asks for one. `QUOTIENT_API_KEY` and `QUOTIENT_API_TOKEN` are both honoured
    from the environment. Deterministic fixture sources exist only inside the contributor
@@ -104,9 +109,10 @@ Every step happens in the terminal; you only leave it to copy-paste dashboard va
 All flows print exactly what to send where, then poll until the venue credits.
 
 - **Polymarket**: the bridge (`bridge.polymarket.com`) issues per-chain deposit addresses
-  for the bot's Deposit Wallet. Send USDC to the `evm` address from any supported chain
-  (small amounts can go as USDC directly on Polygon to the same address); it is
-  auto-wrapped to **pUSD**, the Polygon collateral token. Deposits over $50k should use a
+  for the bot's trading address. The wizard labels the trading address **Polygon pUSD
+  only.** Do not send funding assets there; send USDC to the bridge-issued `evm` deposit
+  address from a supported chain, where it is auto-wrapped to **pUSD**, the Polygon
+  collateral token. Deposits over $50k should use a
   third-party bridge (DeBridge/Across/Portal) direct to Polygon USDC to limit slippage.
   After credit, the flow sets trading approvals (one-time, **gasless** via relayer) and
   syncs the CLOB allowance cache. No gas token is ever needed.
@@ -130,7 +136,7 @@ and sign through their own Splits signer set — cassie never touches Splits aut
 `cassie withdraw <botId> <amount|all> --to <address>` sends collateral back out. It shows
 the exact venue, amount, and destination and asks for confirmation. Withdrawals sign with
 the master/L1 key, which lives in the local keystore, so the command runs on the machine
-that holds it. Per venue: **Polymarket** transfers pUSD from the Deposit Wallet on Polygon
+that holds it. Per venue: **Polymarket** transfers pUSD from the trading address on Polygon
 (gasless, uses the operator's Builder/Relayer key); **Hyperliquid** submits a user-signed
 withdrawal of USDC to the destination on Arbitrum ($1 venue fee, arrives in minutes);
 **Lighter** is unwired in the MVP — use the Lighter app with the L1 wallet.
@@ -147,7 +153,8 @@ cassie wallet register-splits <botId>        # print splits-cli signer-attach co
 cassie fund <botId> [--from splits]          # run/re-run the venue funding flow
 cassie withdraw <botId> <amount|all> --to <address>   # send collateral out (signs locally)
 cassie run <botId> [--debug]
-cassie strategy <botId>                      # view/tune strategy settings
+cassie strategy <botId>                      # view/tune top N, daily budget, allocation, guardrails
+cassie strategy <botId> --top 3 --daily-budget 100 --position-budget-pct 33
 cassie deploy <botId>                        # EEUR Container + Worker control plane on YOUR CF account
 cassie reporting <botId> [--no-post|--off]   # configure Ares for this bot only
 cassie portfolio [botId]                     # balances/positions/orders/PnL, per bot + aggregate
@@ -278,7 +285,7 @@ Notes:
   (They previously raised none at all, so they were invisible to every sink.)
 - The card is built server-side from the real trade, so size, price and P&L can't be
   faked and are never sent. cassie only sends the order id, the traded token, and the
-  Deposit Wallet — **the funder, not the signer** (§5.1's classic confusion; sending the
+  trading address — **the funder, not the signer** (§5.1's classic confusion; sending the
   signer fails to resolve the position).
 - Posting runs as an `Alerter` alongside Telegram, wrapped in `SafeAlerter`. An Ares
   outage cannot block, delay, or fail a fill.
@@ -353,8 +360,8 @@ not yet been wired and verified in the deployed Container runtime.
 
 - **Polymarket 401 / "order owner mismatch"** — the classic signer-vs-funder confusion.
   Orders are *signed* by the bot's EOA (`POLY_ADDRESS`, L2 auth); the *funder* is the
-  Deposit Wallet address. Check `~/.cassie/bots/<botId>.json`: `account.signerAddress`
-  must be the keystore EOA, `account.funder` the Deposit Wallet.
+  trading address. Check `~/.cassie/bots/<botId>.json`: `account.signerAddress`
+  must be the keystore EOA, `account.funder` the trading address.
 - **Polymarket "not enough balance/allowance" right after funding or before a first
   sell** — allowance-cache staleness. The funding flow syncs COLLATERAL; the adapter
   syncs CONDITIONAL per token before its first sell. Re-run `cassie fund <botId>` to

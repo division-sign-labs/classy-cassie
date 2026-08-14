@@ -15,7 +15,7 @@ import { ask, confirm, getPassphrase, keystore, makeSetupContext } from "../cont
 import { botConfigPath, loadBotConfig, saveBotConfig } from "../paths.js";
 import { discoverQuotientToken } from "../quotient-token.js";
 import { discoverAresApiKey, discoverAresBuilderCode, verifyAresApiKey } from "../ares-config.js";
-import { RECOMMENDED_STRATEGY, RECOMMENDED_SUMMARY, elicitStrategyConfig } from "./strategy.js";
+import { RECOMMENDED_SUMMARY, elicitRecommendedStrategyConfig, elicitStrategyConfig } from "./strategy.js";
 import { runFund } from "./fund.js";
 
 /**
@@ -61,7 +61,11 @@ async function reuseExistingAccount(
 }
 
 export async function runInit(): Promise<void> {
-  console.log(pc.bold("cassie init — set up a trading bot: wallet, venue, strategy, alerts, funding.\n"));
+  console.log(pc.bold(pc.cyan("\nC A S S I E\n")));
+  console.log("Cassie is experimental, open-source software.");
+  console.log("Check every funding destination carefully: something may go wrong, and you may lose funds.");
+  console.log("Quotient is a publisher; its signals are informational and are not trading advice.\n");
+  console.log(pc.bold("Set up a trading bot: wallet, venue, strategy, alerts, funding.\n"));
 
   const botId = (await ask("Bot id (lowercase, dashes ok)", { default: "bot-1" })).trim();
   let existing: BotConfig | undefined;
@@ -97,16 +101,17 @@ export async function runInit(): Promise<void> {
     urls: parseBotConfig({ id: botId, venue }).venueUrls,
   });
   // An account already provisioned for this bot is reused by default: re-running
-  // the wizard to change a strategy setting should never re-prompt for a Deposit
-  // Wallet the operator already has (and may already have funded).
+  // the wizard to change a strategy setting should never re-provision a Polymarket
+  // account the operator already has (and may already have funded).
   const account = (await reuseExistingAccount(existing, venue)) ?? (await adapter.setup(setupCtx));
 
   // Strategy: one strategy (signals); recommended settings in one keystroke.
   console.log(pc.bold("\nStrategy: signals — follow Quotient signals, hold until the side flips."));
   console.log(pc.dim(`Recommended: ${RECOMMENDED_SUMMARY}.`));
-  const strategyConfig: Record<string, unknown> = (await confirm("Use recommended settings?", true))
-    ? { ...RECOMMENDED_STRATEGY }
-    : await elicitStrategyConfig();
+  const existingStrategy = (existing?.strategy.config ?? {}) as Record<string, unknown>;
+  const strategyConfig: Record<string, unknown> = (await confirm("Use recommended allocation rules?", true))
+    ? await elicitRecommendedStrategyConfig(existingStrategy)
+    : await elicitStrategyConfig(existingStrategy);
   const tickIntervalMin = Number(strategyConfig.tickIntervalMin ?? 5);
 
   // A key may already be exported, in .local.env, or owned by the Quotient

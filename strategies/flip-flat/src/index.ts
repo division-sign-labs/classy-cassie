@@ -9,6 +9,7 @@ import {
   type Position,
   type Signal,
   type Strategy,
+  type StrategyActionResult,
   type StrategyContext,
 } from "@quotient-forecasting/cassie-core";
 
@@ -16,19 +17,14 @@ export const FlipFlatConfigSchema = z.object({
   /** Enter when |prob − price| in percentage points is at least this. */
   entrySpreadPp: z.number().default(10),
   reenterOnFlip: z.boolean().default(true),
-  /**
-   * Position sizing. "quarter-kelly" sizes each entry from the signal's
-   * probability and price (fraction = max(0, f-star/4) of equity), bounded by
-   * maxPositionNotional and the available balance, so positions keep opening
-   * until the budget is used. "fixed" uses maxPositionNotional per position.
-   * Signals without a probability (perps) size as "fixed".
-   */
-  sizing: z.enum(["quarter-kelly", "fixed"]).default("fixed"),
-  /** Per-position notional cap, USD. The engine may cap it further (§9). */
-  maxPositionNotional: z.number().positive().default(50),
+  /** Hold at most the top N eligible signals, ranked by edge. */
+  topN: z.number().int().positive().default(2),
+  /** Cumulative entry notional allowed per UTC day. */
+  dailyBudgetUsd: z.number().positive().default(25),
+  /** Desired notional for each entry as a percentage of the daily budget. */
+  positionBudgetPct: z.number().positive().max(100).default(50),
   /** Entry-only floor after sizing and capacity caps. Exits are never subject to it. */
   minEntryNotional: z.number().nonnegative().default(1),
-  maxOpenPositions: z.number().int().positive().default(5),
   /** Explicit marketRefs, or "from-signals" to trade whatever is signaled. */
   universe: z.union([z.literal("from-signals"), z.array(z.string())]).default("from-signals"),
   tickIntervalMin: z.number().positive().default(5),
@@ -52,6 +48,13 @@ export const FlipFlatConfigSchema = z.object({
 });
 export type FlipFlatConfig = z.output<typeof FlipFlatConfigSchema>;
 
+export const DAILY_BUDGET_MEMORY_KEY = "daily-entry-budget";
+
+interface DailyBudgetState {
+  utcDay: string;
+  placedUsd: number;
+}
+
 /** Edge in percentage points, or undefined when the signal carries no probability. */
 export function signalEdgePp(sig: Signal): number | undefined {
   return sig.spreadPp ?? (sig.prob !== undefined ? Math.abs(sig.prob - sig.refPrice) * 100 : undefined);
@@ -70,6 +73,8 @@ export class FlipFlatStrategy implements Strategy {
     const actions: Action[] = [];
     const signals = await ctx.signals.latest({ venue: ctx.venueId });
     const now = ctx.now();
+    const budget = await this.dailyBudgetState(ctx, now);
+    let remainingBudgetUsd = Math.max(0, cfg.dailyBudgetUsd - budget.placedUsd);
 
     // Latest signal per market, restricted to the configured universe.
     const latestByMarket = new Map<string, Signal>();
@@ -86,9 +91,15 @@ export class FlipFlatStrategy implements Strategy {
       }
     }
 
-    let openCount = ctx.positions.filter((p) => p.size > 0).length;
+    // Resting orders occupy a slot too; otherwise a slow fill could let later
+    // ticks place more entry orders than the configured position limit.
+    const occupiedMarkets = new Set([
+      ...ctx.positions.filter((position) => position.size > 0).map((position) => position.marketRef),
+      ...ctx.openOrders.map((order) => order.marketRef),
+    ]);
+    let openCount = occupiedMarkets.size;
 
-    // Widest edge first. maxOpenPositions and the sizing budget both bind
+    // Widest edge first. topN and the daily budget both bind
     // partway down this list, so iteration order decides which markets get the
     // capital — unordered, that was whichever rows the gateway happened to
     // return first. Signals with no computable edge (perps) sort as 0 and the
@@ -109,17 +120,17 @@ export class FlipFlatStrategy implements Strategy {
       if (!held) {
         // Flat → enter the signaled side when the edge is wide enough.
         if (hasRestingOrder) continue;
-        if (openCount >= cfg.maxOpenPositions) {
+        if (openCount >= cfg.topN) {
           // Say what was passed over, and at what edge — a silent cap reads as
           // "nothing else qualified" when the truth is "we ran out of slots".
           ctx.log.info(
-            `maxOpenPositions ${cfg.maxOpenPositions} reached; skipping ${marketRef}` +
+            `top ${cfg.topN} positions already filled; skipping ${marketRef}` +
               (spreadPp !== undefined ? ` (edge ${spreadPp.toFixed(1)}pp)` : ""),
           );
           continue;
         }
         if (entryConditionMet) {
-          const notional = await this.entryNotional(ctx, cfg, sig);
+          const notional = await this.entryNotional(ctx, cfg, sig, remainingBudgetUsd);
           if (notional <= 0) {
             ctx.log.info(`no sizeable edge or budget for ${marketRef}; skipping`);
             continue;
@@ -132,6 +143,7 @@ export class FlipFlatStrategy implements Strategy {
             minNotional: cfg.minEntryNotional,
             reason: `signal ${sig.id}${spreadPp !== undefined ? ` spread ${spreadPp.toFixed(1)}pp` : ""}`,
           });
+          remainingBudgetUsd -= notional;
           openCount += 1;
         }
         continue;
@@ -141,8 +153,8 @@ export class FlipFlatStrategy implements Strategy {
         // Forecast flipped: exit, then re-enter per config.
         actions.push({ kind: "exit", marketRef, reason: `flip ${held.side}→${sig.side} (signal ${sig.id})` });
         openCount -= 1;
-        if (cfg.reenterOnFlip && entryConditionMet && openCount < cfg.maxOpenPositions && !hasRestingOrder) {
-          const notional = await this.entryNotional(ctx, cfg, sig);
+        if (cfg.reenterOnFlip && entryConditionMet && openCount < cfg.topN && !hasRestingOrder) {
+          const notional = await this.entryNotional(ctx, cfg, sig, remainingBudgetUsd);
           if (notional > 0) {
             actions.push({
               kind: "enter",
@@ -152,6 +164,7 @@ export class FlipFlatStrategy implements Strategy {
               minNotional: cfg.minEntryNotional,
               reason: `flip re-entry (signal ${sig.id})`,
             });
+            remainingBudgetUsd -= notional;
             openCount += 1;
           }
         }
@@ -168,6 +181,22 @@ export class FlipFlatStrategy implements Strategy {
     }
 
     return actions;
+  }
+
+  async onActionResult(ctx: StrategyContext, action: Action, result: StrategyActionResult): Promise<void> {
+    if (action.kind !== "enter" || !result.placed || !(result.placedNotional && result.placedNotional > 0)) return;
+    const now = ctx.now();
+    const current = await this.dailyBudgetState(ctx, now);
+    await ctx.memory.set<DailyBudgetState>(DAILY_BUDGET_MEMORY_KEY, {
+      utcDay: current.utcDay,
+      placedUsd: current.placedUsd + result.placedNotional,
+    });
+  }
+
+  private async dailyBudgetState(ctx: StrategyContext, now: number): Promise<DailyBudgetState> {
+    const utcDay = new Date(now).toISOString().slice(0, 10);
+    const saved = await ctx.memory.get<DailyBudgetState>(DAILY_BUDGET_MEMORY_KEY);
+    return saved?.utcDay === utcDay ? saved : { utcDay, placedUsd: 0 };
   }
 
   /**
@@ -212,29 +241,26 @@ export class FlipFlatStrategy implements Strategy {
     return `converged: ${remainingEdgePp.toFixed(1)}pp edge left at ${curPrice.toFixed(3)}, +${profitPct.toFixed(1)}%`;
   }
 
-  /** USD notional for a new entry, per the configured sizing mode. */
-  private async entryNotional(ctx: StrategyContext, cfg: FlipFlatConfig, sig: Signal): Promise<number> {
-    let notional: number;
-    if (cfg.sizing !== "quarter-kelly" || sig.prob === undefined || !(sig.refPrice > 0 && sig.refPrice < 1)) {
-      notional = cfg.maxPositionNotional;
-    } else {
-      // Quarter Kelly on the signaled side: p = side probability, price = side cost,
-      // b = (1−price)/price, f* = p − (1−p)/b, fraction = max(0, f*/4) of equity.
-      const p = sig.prob;
-      const price = sig.refPrice;
-      const b = (1 - price) / price;
-      const fStar = p - (1 - p) / b;
-      const frac = Math.max(0, fStar / 4);
-      if (frac <= 0) return 0;
-      let available = ctx.equity;
-      try {
-        const balances = await ctx.venue.balances();
-        available = balances.reduce((s, x) => s + x.available, 0);
-      } catch {
-        /* fall back to equity */
-      }
-      notional = Math.min(frac * ctx.equity, cfg.maxPositionNotional, available * 0.95);
+  /** USD notional for a new entry, bounded by today's remaining budget and cash. */
+  private async entryNotional(
+    ctx: StrategyContext,
+    cfg: FlipFlatConfig,
+    sig: Signal,
+    remainingBudgetUsd: number,
+  ): Promise<number> {
+    if (remainingBudgetUsd <= 0) {
+      ctx.log.info(`daily entry budget $${cfg.dailyBudgetUsd.toFixed(2)} exhausted; skipping ${sig.marketRef}`);
+      return 0;
     }
+    let available = ctx.equity;
+    try {
+      const balances = await ctx.venue.balances();
+      available = balances.reduce((s, x) => s + x.available, 0);
+    } catch {
+      /* fall back to equity */
+    }
+    const perPositionUsd = (cfg.dailyBudgetUsd * cfg.positionBudgetPct) / 100;
+    const notional = Math.min(perPositionUsd, remainingBudgetUsd, available * 0.95);
     if (notional < cfg.minEntryNotional) {
       ctx.log.info(
         `entry notional $${notional.toFixed(2)} < minEntryNotional $${cfg.minEntryNotional.toFixed(2)}; skipping ${sig.marketRef}`,

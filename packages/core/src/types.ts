@@ -299,6 +299,14 @@ export interface Strategy {
   id: string;
   /** Called on schedule; pure decision — the engine executes through the risk module. */
   tick(ctx: StrategyContext): Promise<Action[]>;
+  /** Observe the engine result so persistent strategy budgets reflect placed orders only. */
+  onActionResult?(ctx: StrategyContext, action: Action, result: StrategyActionResult): Promise<void>;
+}
+
+export interface StrategyActionResult {
+  placed: boolean;
+  /** Final order notional after engine risk/capacity caps. Present for placed entries. */
+  placedNotional?: number;
 }
 
 // ---------------------------------------------------------------------------

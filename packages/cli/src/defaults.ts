@@ -1,6 +1,6 @@
 // packages/cli/src/defaults.ts
-// Operator-level defaults shared across bots (e.g. a Polymarket Builder key so
-// every new bot can deploy its Deposit Wallet without re-pasting credentials).
+// Operator-level defaults shared across bots (e.g. the Polymarket Builder key so
+// every new bot can create its account without re-pasting credentials).
 // Stored at <CASSIE_HOME>/defaults.json, chmod 0600. Env vars win over the file:
 //   POLYMARKET_BUILDER_KEY / POLYMARKET_BUILDER_SECRET / POLYMARKET_BUILDER_PASSPHRASE
 

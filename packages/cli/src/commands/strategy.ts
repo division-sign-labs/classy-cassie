@@ -8,33 +8,54 @@ import { ask, confirm } from "../context.js";
 import { loadBotConfig, saveBotConfig } from "../paths.js";
 
 export const RECOMMENDED_STRATEGY = {
-  sizing: "quarter-kelly",
+  topN: 2,
+  dailyBudgetUsd: 25,
+  positionBudgetPct: 50,
   entrySpreadPp: 10,
-  maxPositionNotional: 1000,
   minEntryNotional: 1,
-  maxOpenPositions: 100,
   reenterOnFlip: true,
   universe: "from-signals",
   tickIntervalMin: 5,
 } as const;
 
-export const RECOMMENDED_SUMMARY = "quarter-Kelly sizing, 10pp entry edge, positions until the budget is used";
+export const RECOMMENDED_SUMMARY = "up to 2 positions, widest eligible edges first, 50% of the daily budget per entry, 10pp minimum edge";
+
+export async function elicitRecommendedStrategyConfig(
+  current: Record<string, unknown> = {},
+): Promise<Record<string, unknown>> {
+  const dailyBudgetUsd = positiveNumber(
+    "daily entry budget",
+    await ask("Daily entry budget ($, resets at 00:00 UTC)", {
+      default: String(current.dailyBudgetUsd ?? RECOMMENDED_STRATEGY.dailyBudgetUsd),
+    }),
+  );
+  return { ...RECOMMENDED_STRATEGY, dailyBudgetUsd };
+}
 
 export async function elicitStrategyConfig(current: Record<string, unknown> = {}): Promise<Record<string, unknown>> {
   const d = (k: string, fallback: string) => String(current[k] ?? fallback);
-  const sizing = (await ask("Sizing (quarter-kelly / fixed)", { default: d("sizing", "quarter-kelly") })).trim();
-  const entrySpreadPp = Number(await ask("Entry spread (pp)", { default: d("entrySpreadPp", "10") }));
-  const maxPositionNotional = Number(await ask("Max position ($)", { default: d("maxPositionNotional", "1000") }));
-  const minEntryNotional = Number(await ask("Minimum entry ($)", { default: d("minEntryNotional", "1") }));
-  const maxOpenPositions = Number(await ask("Max open positions", { default: d("maxOpenPositions", "100") }));
-  const tickIntervalMin = Number(await ask("Tick interval (min)", { default: d("tickIntervalMin", "5") }));
+  const topN = positiveInteger("top positions", await ask("Top N signal positions", { default: d("topN", "2") }));
+  const dailyBudgetUsd = positiveNumber(
+    "daily entry budget",
+    await ask("Daily entry budget ($, resets at 00:00 UTC)", { default: d("dailyBudgetUsd", "25") }),
+  );
+  const positionBudgetPct = percentage(
+    "budget per position",
+    await ask("Daily budget per position (%)", { default: d("positionBudgetPct", "50") }),
+  );
+  const entrySpreadPp = positiveNumber("entry spread", await ask("Minimum entry edge (pp)", { default: d("entrySpreadPp", "10") }));
+  const minEntryNotional = nonnegativeNumber(
+    "minimum entry",
+    await ask("Minimum viable entry after risk caps ($)", { default: d("minEntryNotional", "1") }),
+  );
+  const tickIntervalMin = positiveNumber("tick interval", await ask("Tick interval (min)", { default: d("tickIntervalMin", "5") }));
   const universeRaw = (await ask("Universe (from-signals or marketRefs)", { default: d("universe", "from-signals") })).trim();
   return {
-    sizing: sizing === "fixed" ? "fixed" : "quarter-kelly",
+    topN,
+    dailyBudgetUsd,
+    positionBudgetPct,
     entrySpreadPp,
-    maxPositionNotional,
     minEntryNotional,
-    maxOpenPositions,
     reenterOnFlip: true,
     universe: universeRaw === "from-signals" ? "from-signals" : universeRaw.split(",").map((s) => s.trim()),
     tickIntervalMin,
@@ -42,6 +63,9 @@ export async function elicitStrategyConfig(current: Record<string, unknown> = {}
 }
 
 export interface StrategyOptions {
+  top?: string;
+  dailyBudget?: string;
+  positionBudgetPct?: string;
   minEntryNotional?: string;
   signalMaxAgeHours?: string;
 }
@@ -49,50 +73,93 @@ export interface StrategyOptions {
 /** `cassie strategy <botId>`: view and tune the bot's strategy and signal guardrails. */
 export async function runStrategy(botId: string, opts: StrategyOptions = {}): Promise<void> {
   const cfg = loadBotConfig(botId);
-  if (opts.minEntryNotional !== undefined || opts.signalMaxAgeHours !== undefined) {
-    const strategyConfig = { ...cfg.strategy.config };
+  const directUpdate = Object.values(opts).some((value) => value !== undefined);
+  if (directUpdate) {
+    const strategyConfig = normalizeStrategyConfig(cfg.strategy.config as Record<string, unknown>);
+    if (opts.top !== undefined) strategyConfig.topN = positiveInteger("top positions", opts.top);
+    if (opts.dailyBudget !== undefined) strategyConfig.dailyBudgetUsd = positiveNumber("daily entry budget", opts.dailyBudget);
+    if (opts.positionBudgetPct !== undefined) {
+      strategyConfig.positionBudgetPct = percentage("budget per position", opts.positionBudgetPct);
+    }
     if (opts.minEntryNotional !== undefined) {
-      strategyConfig.minEntryNotional = parseNumber("minimum entry notional", opts.minEntryNotional, true);
+      strategyConfig.minEntryNotional = nonnegativeNumber("minimum entry notional", opts.minEntryNotional);
     }
     const maxAgeSec =
       opts.signalMaxAgeHours === undefined
         ? cfg.signals.maxAgeSec
-        : parseNumber("signal max age hours", opts.signalMaxAgeHours, false) * 60 * 60;
+        : positiveNumber("signal max age hours", opts.signalMaxAgeHours) * 60 * 60;
     saveBotConfig({
       ...cfg,
       strategy: { ...cfg.strategy, config: strategyConfig },
       signals: { ...cfg.signals, maxAgeSec },
     });
-    console.log(pc.green(`saved strategy guardrails for ${botId}`));
-    console.log(pc.dim(`minimum entry: $${Number(strategyConfig.minEntryNotional ?? 1).toFixed(2)}`));
-    console.log(pc.dim(`signal max age: ${(maxAgeSec / 3600).toFixed(2)}h`));
+    console.log(pc.green(`saved strategy settings for ${botId}`));
+    printStrategy(strategyConfig, maxAgeSec, cfg.risk.maxOrderNotional);
     return;
   }
   console.log(pc.bold(`strategy: signals`));
-  console.log(pc.dim(JSON.stringify(cfg.strategy.config, null, 2)));
-  console.log(pc.dim(`signal max age: ${(cfg.signals.maxAgeSec / 3600).toFixed(2)}h`));
+  printStrategy(cfg.strategy.config as Record<string, unknown>, cfg.signals.maxAgeSec, cfg.risk.maxOrderNotional);
   if (await confirm(`Reset to recommended (${RECOMMENDED_SUMMARY})?`, false)) {
-    saveStrategy(botId, { ...RECOMMENDED_STRATEGY });
+    saveStrategy(botId, await elicitRecommendedStrategyConfig(cfg.strategy.config as Record<string, unknown>));
     return;
   }
   const config = await elicitStrategyConfig(cfg.strategy.config as Record<string, unknown>);
   saveStrategy(botId, config);
 }
 
-function parseNumber(label: string, raw: string, allowZero: boolean): number {
+function positiveNumber(label: string, raw: string): number {
   const value = Number(raw);
-  if (!Number.isFinite(value) || (allowZero ? value < 0 : value <= 0)) {
-    throw new Error(`${label} must be ${allowZero ? "zero or greater" : "greater than zero"}`);
-  }
+  if (!Number.isFinite(value) || value <= 0) throw new Error(`${label} must be greater than zero`);
   return value;
+}
+
+function nonnegativeNumber(label: string, raw: string): number {
+  const value = Number(raw);
+  if (!Number.isFinite(value) || value < 0) throw new Error(`${label} must be zero or greater`);
+  return value;
+}
+
+function positiveInteger(label: string, raw: string): number {
+  const value = positiveNumber(label, raw);
+  if (!Number.isInteger(value)) throw new Error(`${label} must be a whole number`);
+  return value;
+}
+
+function percentage(label: string, raw: string): number {
+  const value = positiveNumber(label, raw);
+  if (value > 100) throw new Error(`${label} must be at most 100%`);
+  return value;
+}
+
+function normalizeStrategyConfig(config: Record<string, unknown>): Record<string, unknown> {
+  const { sizing: _sizing, maxPositionNotional: _maxPositionNotional, maxOpenPositions: _maxOpenPositions, ...current } = config;
+  return current;
+}
+
+function printStrategy(config: Record<string, unknown>, maxAgeSec: number, maxOrderNotional: number): void {
+  const current = { ...RECOMMENDED_STRATEGY, ...normalizeStrategyConfig(config) };
+  const dailyBudgetUsd = Number(current.dailyBudgetUsd);
+  const positionBudgetPct = Number(current.positionBudgetPct);
+  const perEntryUsd = (dailyBudgetUsd * positionBudgetPct) / 100;
+  console.log(`  top N positions:      ${current.topN} (widest eligible edges first)`);
+  console.log(`  daily entry budget:   $${dailyBudgetUsd.toFixed(2)} (resets 00:00 UTC)`);
+  console.log(`  budget per entry:     ${positionBudgetPct}% = $${perEntryUsd.toFixed(2)} before liquidity/risk caps`);
+  console.log(`  minimum entry edge:   ${current.entrySpreadPp}pp`);
+  console.log(`  minimum viable entry: $${Number(current.minEntryNotional).toFixed(2)}`);
+  console.log(`  hard per-order cap:   $${maxOrderNotional.toFixed(2)} (risk module)`);
+  console.log(`  signal max age:       ${(maxAgeSec / 3600).toFixed(2)}h`);
+  console.log(`  tick interval:        ${current.tickIntervalMin} min`);
+  console.log(`  universe:             ${Array.isArray(current.universe) ? current.universe.join(", ") : current.universe}`);
 }
 
 function saveStrategy(botId: string, config: Record<string, unknown>): void {
   const cfg = loadBotConfig(botId);
+  const normalized = normalizeStrategyConfig(config);
   saveBotConfig({
     ...cfg,
-    strategy: { id: "signals", config },
-    tickIntervalMin: Number(config.tickIntervalMin ?? cfg.tickIntervalMin),
+    strategy: { id: "signals", config: normalized },
+    tickIntervalMin: Number(normalized.tickIntervalMin ?? cfg.tickIntervalMin),
   });
   console.log(pc.green(`saved strategy settings for ${botId}`));
+  printStrategy(normalized, cfg.signals.maxAgeSec, cfg.risk.maxOrderNotional);
 }

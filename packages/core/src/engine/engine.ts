@@ -19,6 +19,7 @@ import type {
   SignalSource,
   StateStore,
   Strategy,
+  StrategyActionResult,
   StrategyContext,
   StrategyMemory,
   VenueAccount,
@@ -169,8 +170,9 @@ export class Engine {
         actionsCount = actions.length;
         for (const action of actions) {
           try {
-            const placed = await this.executeAction(action, ctx);
-            if (placed) ordersPlaced += 1;
+            const result = await this.executeAction(action, ctx);
+            if (result.placed) ordersPlaced += 1;
+            await this.d.strategy.onActionResult?.(ctx, action, result);
           } catch (err) {
             errors += 1;
             await this.recordError(seq, `action-${action.kind}`, err, { marketRef: action.marketRef });
@@ -249,14 +251,14 @@ export class Engine {
   // Action execution (risk module runs before every fill, §9)
   // -------------------------------------------------------------------------
 
-  private async executeAction(action: Action, ctx: StrategyContext): Promise<boolean> {
+  private async executeAction(action: Action, ctx: StrategyContext): Promise<StrategyActionResult> {
     const { adapter, account } = this.d;
     switch (action.kind) {
       case "enter": {
         const isPrediction = action.side === "YES" || action.side === "NO";
         const outcome = isPrediction ? (action.side as "YES" | "NO") : undefined;
         const orderSide: OrderSide = action.side === "SHORT" ? "SELL" : "BUY";
-        const placed = await this.placeChecked({
+        return this.placeChecked({
           marketRef: action.marketRef,
           outcome,
           side: orderSide,
@@ -267,17 +269,16 @@ export class Engine {
           alertKind: "entry",
           alertMessage: `enter ${action.side} ${shortRef(action.marketRef)}`,
         });
-        return placed;
       }
       case "exit": {
         const pos = ctx.positions.find((p) => p.marketRef === action.marketRef);
         if (!pos || pos.size <= 0) {
           this.d.log.warn(`exit action for ${action.marketRef} but no position held`);
-          return false;
+          return { placed: false };
         }
         const isPrediction = pos.side === "YES" || pos.side === "NO";
         const orderSide: OrderSide = pos.side === "SHORT" ? "BUY" : "SELL";
-        const placed = await this.placeChecked({
+        const result = await this.placeChecked({
           marketRef: action.marketRef,
           outcome: isPrediction ? (pos.side as "YES" | "NO") : undefined,
           side: orderSide,
@@ -287,12 +288,12 @@ export class Engine {
           alertKind: "exit",
           alertMessage: `exit ${pos.side} ${shortRef(action.marketRef)}${action.reason ? ` (${action.reason})` : ""}`,
         });
-        if (placed) await this.disarmTriggers(action.marketRef);
-        return placed;
+        if (result.placed) await this.disarmTriggers(action.marketRef);
+        return result;
       }
       case "redeem": {
         const pos = ctx.positions.find((p) => p.marketRef === action.marketRef);
-        if (!pos || !adapter.redeem) return false;
+        if (!pos || !adapter.redeem) return { placed: false };
         await adapter.redeem(account, pos);
         await this.alert({
           kind: "resolution",
@@ -300,7 +301,7 @@ export class Engine {
           message: `redeemed resolved position ${pos.side} ${shortRef(action.marketRef)}`,
           data: { size: pos.size },
         });
-        return false;
+        return { placed: false };
       }
     }
   }
@@ -326,7 +327,7 @@ export class Engine {
     reason: string;
     alertKind: AlertEvent["kind"];
     alertMessage: string;
-  }): Promise<boolean> {
+  }): Promise<StrategyActionResult> {
     const { adapter, account, config, botId } = this.d;
     const { book, quote } = await this.quoteFor(p.marketRef, p.outcome);
     const refPrice = p.limitPrice ?? quote.mid;
@@ -350,7 +351,7 @@ export class Engine {
         botId,
         message: `skipped ${p.side} ${shortRef(p.marketRef)}: ${cap.skipReasons.join("; ")}`,
       });
-      return false;
+      return { placed: false };
     }
     const limitPrice = p.limitPrice ?? cap.limitPrice;
     const intent: OrderIntent = {
@@ -381,7 +382,10 @@ export class Engine {
         ...(cap.notes.length ? { capacity: cap.notes.join("; ") } : {}),
       },
     });
-    return true;
+    return {
+      placed: ack.status !== "rejected",
+      ...(p.desiredNotional !== undefined ? { placedNotional: round(intent.size * intent.limitPrice, 6) } : {}),
+    };
   }
 
   // -------------------------------------------------------------------------

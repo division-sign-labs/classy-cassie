@@ -7,6 +7,10 @@ from the [Quotient](https://dev.quotient.social) developer API (separate product
 in this repo routes orders through Quotient infrastructure, and Quotient never holds keys
 or funds.
 
+Cassie is experimental, open-source software. Check every funding destination carefully:
+something may go wrong, and you may lose funds. Quotient is a publisher; its signals are
+informational and are not trading advice.
+
 ## Layout
 
 | path                   | what                                                                 |
@@ -56,7 +60,7 @@ arithmetic, keystore round-trips).
 
 | venue       | status | TP/SL     | Cloudflare deploy | notes |
 |-------------|--------|-----------|-------------------|-------|
-| Polymarket  | ✓      | synthetic (engine-managed) | ✓ | Deposit Wallets, pUSD collateral, gasless approvals, CLOB heartbeat dead-man's-switch |
+| Polymarket  | ✓      | synthetic (engine-managed) | ✓ | Polymarket account, pUSD trading address, bridge-issued funding address, gasless approvals |
 | Hyperliquid | ✓      | native    | ✓                 | master/agent key split; agent key is the only key a runtime sees |
 | Lighter     | ✓      | native    | ✗ local-only      | not yet wired or verified in the deployed Container runtime |
 
@@ -100,6 +104,22 @@ interface Signal {
 Financial fields (P&L, balances, account size) never flow toward the signal API — the
 client's type surface has no method that accepts account state.
 
+### Signal allocation
+
+The signal strategy holds at most the configured top N positions and evaluates competing
+new signals from widest to narrowest edge. Its daily entry budget caps cumulative entry
+notional placed from 00:00–23:59 UTC;
+rejected entries do not count, and liquidity/risk-capped entries consume only their final
+order notional. The default is top 2 and 50% of the daily budget per entry, while `cassie
+init` asks for the dollar budget (default $25).
+
+```sh
+cassie strategy <botId> --top 3 --daily-budget 100 --position-budget-pct 33
+```
+
+The UTC reset replenishes entry capacity; it does not close positions. Every entry remains
+subject to the engine's per-order, liquidity, spread, and volume guardrails.
+
 ## Risk module
 
 Engine-enforced on every order (strategy, manual, or ticket): executable size within a
@@ -117,15 +137,6 @@ guardrails, funding-drag estimates. Every number prints with its provenance; gua
 overrides need a second explicit confirmation. Policy lives in
 [`skills/cassie/thesis/mappings.json`](skills/cassie/thesis/mappings.json) — changing it
 is a file PR, not a code change. See the [skill](skills/cassie/SKILL.md) for the flow.
-
-## Disclaimer
-
-cassie is self-hosted software: your machines, your keys, your risk. It is not investment
-advice, and no outcome is promised or implied. Trading on prediction markets and perps
-venues can lose the entire balance you fund a bot with. Operators are responsible for
-complying with each venue's terms of service and with the laws of their jurisdiction.
-Keys are generated and stored locally; no third party —
-including Quotient — takes custody of funds or credentials.
 
 ## License
 

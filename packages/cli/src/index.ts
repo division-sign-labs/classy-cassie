@@ -21,7 +21,7 @@ const program = new Command();
 program
   .name("cassie")
   .description("open-source, self-hosted, non-custodial trading bot for prediction markets and perps venues")
-  .version("0.1.1");
+  .version("0.1.2");
 
 program.command("init").description("wizard: create a bot (wallet, venue, strategy, alerts, funding)").action(wrap(runInit));
 
@@ -110,7 +110,10 @@ alerts.command("test <botId>").description("send a Telegram test ping").action(w
 
 program
   .command("strategy <botId>")
-  .description("view/tune the bot's strategy settings and signal guardrails")
+  .description("view/tune ranked positions, daily entry budget, allocation, and signal guardrails")
+  .option("--top <n>", "hold at most N signal positions; widest eligible edges enter first")
+  .option("--daily-budget <usd>", "maximum entry notional placed per UTC day")
+  .option("--position-budget-pct <pct>", "percentage of the daily budget requested per entry")
   .option("--min-entry-notional <usd>", "entry-only floor after sizing and capacity caps")
   .option("--signal-max-age-hours <hours>", "maximum age of a live signal")
   .action(wrap(runStrategy));
