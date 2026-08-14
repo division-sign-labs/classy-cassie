@@ -1,0 +1,20 @@
+{
+  "version": 1,
+  "edges": { "low": 0.03, "medium": 0.06, "high": 0.1 },
+  "atr": {
+    "intraday": { "interval": "1h", "lookback": 14, "k": 1.5 },
+    "days": { "interval": "4h", "lookback": 14, "k": 2.0 },
+    "weeks": { "interval": "1d", "lookback": 14, "k": 2.5 },
+    "quarter": { "interval": "1d", "lookback": 20, "k": 3.0 }
+  },
+  "rMultiples": { "small": 1.5, "meaningful": 2.5, "repricing": 4 },
+  "trailingWhen": { "magnitude": "repricing", "timeframes": ["weeks", "quarter"] },
+  "leverageCaps": { "intraday": 10, "days": 5, "weeks": 3, "quarter": 2 },
+  "stopFloorAtrMult": 0.5,
+  "liqBufferStopMult": 2,
+  "maintenanceMarginFrac": 0.005,
+  "riskBudget": { "default": 1, "softCap": 2 },
+  "fundingWarnFracOfTarget": 0.25,
+  "horizonDays": { "intraday": 1, "days": 5, "weeks": 21, "quarter": 90 },
+  "predictionEntrySpreadPp": { "low": 12, "medium": 10, "high": 7 }
+}

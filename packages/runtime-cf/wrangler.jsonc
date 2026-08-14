@@ -1,0 +1,42 @@
+// packages/runtime-cf/wrangler.jsonc
+{
+  "$schema": "./node_modules/wrangler/config-schema.json",
+  "name": "cassie-bot-unconfigured",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-08-14",
+  "compatibility_flags": ["nodejs_compat"],
+  "observability": {
+    "enabled": true,
+    "logs": { "enabled": true }
+  },
+  "containers": [
+    {
+      "name": "cassie-runtime",
+      "class_name": "BotAgent",
+      "image": "./Dockerfile",
+      "image_build_context": "../..",
+      "max_instances": 1,
+      "instance_type": "lite",
+      "rollout_active_grace_period": 0,
+      "rollout_step_percentage": 100,
+      "constraints": {
+        "regions": ["EEUR"]
+      },
+      "ssh": { "enabled": false }
+    }
+  ],
+  "durable_objects": {
+    "bindings": [
+      {
+        "name": "BotAgent",
+        "class_name": "BotAgent"
+      }
+    ]
+  },
+  "migrations": [
+    {
+      "tag": "v1",
+      "new_sqlite_classes": ["BotAgent"]
+    }
+  ]
+}

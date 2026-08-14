@@ -1,0 +1,33 @@
+{
+  "name": "@quotient/cassie",
+  "version": "0.1.0",
+  "type": "module",
+  "license": "Apache-2.0",
+  "description": "Open-source, self-hosted, non-custodial trading bot for prediction markets and perps venues",
+  "bin": {
+    "cassie": "./dist/index.js"
+  },
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "files": ["dist"],
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "@quotient/cassie-core": "workspace:*",
+    "@quotient/cassie-runtime-local": "workspace:*",
+    "commander": "15.0.0",
+    "picocolors": "1.1.1",
+    "prompts": "2.4.2"
+  },
+  "devDependencies": {
+    "@types/node": "24.2.1",
+    "@types/prompts": "2.4.9",
+    "typescript": "5.9.2"
+  }
+}

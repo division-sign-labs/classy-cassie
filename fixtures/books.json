@@ -1,0 +1,13 @@
+{
+  "collateral": 1000,
+  "markets": {
+    "fx-yes-1": {
+      "name": "Fixture: will the flip case run offline?",
+      "volume24h": 50000,
+      "book": {
+        "bids": [[0.54, 50], [0.53, 100], [0.5, 400]],
+        "asks": [[0.56, 40], [0.57, 60], [0.6, 500]]
+      }
+    }
+  }
+}

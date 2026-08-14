@@ -1,0 +1,36 @@
+{
+  "ticks": [
+    {
+      "atTick": 0,
+      "signals": [
+        {
+          "id": "sig-entry-yes",
+          "ts": "2026-08-13T00:00:00Z",
+          "venue": "fixture",
+          "marketRef": "fx-yes-1",
+          "side": "YES",
+          "prob": 0.7,
+          "refPrice": 0.55,
+          "spreadPp": 15,
+          "ttlSec": 600
+        }
+      ]
+    },
+    {
+      "atTick": 2,
+      "signals": [
+        {
+          "id": "sig-flip-no",
+          "ts": "2026-08-13T00:10:00Z",
+          "venue": "fixture",
+          "marketRef": "fx-yes-1",
+          "side": "NO",
+          "prob": 0.7,
+          "refPrice": 0.45,
+          "spreadPp": 15,
+          "ttlSec": 600
+        }
+      ]
+    }
+  ]
+}

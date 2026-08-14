@@ -1,0 +1,28 @@
+{
+  "name": "@quotient/cassie-core",
+  "version": "0.1.0",
+  "type": "module",
+  "license": "Apache-2.0",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "files": ["dist"],
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "@nktkas/hyperliquid": "0.33.3",
+    "@polymarket/client": "0.6.0",
+    "lighter-ts-sdk": "1.0.13",
+    "viem": "2.55.15",
+    "zod": "4.4.3"
+  },
+  "devDependencies": {
+    "@types/node": "24.2.1",
+    "typescript": "5.9.2"
+  }
+}
