@@ -8,26 +8,19 @@
 // steps ourselves first, handing the terminal to wrangler for the parts that
 // need a human, and only then run the piped deploy.
 
-import { spawnSync } from "node:child_process";
 import pc from "picocolors";
 import { ask, confirm, select } from "./context.js";
+import { runWrangler, runWranglerInteractive } from "./wrangler.js";
 
 export type CloudflareStatus = { email: string | null; accounts: { name: string; id: string }[] };
 
 function run(args: string[], cwd: string): { out: string; ok: boolean } {
-  const res = spawnSync("pnpm", ["exec", "wrangler", ...args], {
-    cwd,
-    encoding: "utf8",
-    stdio: ["pipe", "pipe", "pipe"],
-    env: process.env,
-  });
-  return { out: (res.stdout ?? "") + (res.stderr ?? ""), ok: res.status === 0 };
+  return runWrangler(args, { cwd });
 }
 
 /** Hand over the terminal so wrangler's own prompts reach the operator. Carries no secrets. */
 function runInteractive(args: string[], cwd: string): boolean {
-  const res = spawnSync("pnpm", ["exec", "wrangler", ...args], { cwd, stdio: "inherit", env: process.env });
-  return res.status === 0;
+  return runWranglerInteractive(args, { cwd });
 }
 
 /** Parse `wrangler whoami`. Account rows are a box-drawn table of name + 32-hex id. */
@@ -82,7 +75,7 @@ async function ensureLoggedIn(cwd: string): Promise<CloudflareStatus> {
     ].join("\n"),
   );
   if (!(await confirm("Open the browser now?", true))) {
-    throw new Error("Cloudflare login is required to deploy. Run `pnpm exec wrangler login` when you're ready, then re-run `cassie deploy`.");
+    throw new Error("Cloudflare login is required to deploy. Run `npx wrangler login` when you're ready, then re-run `cassie deploy`.");
   }
   runInteractive(["login"], cwd);
 
@@ -90,7 +83,7 @@ async function ensureLoggedIn(cwd: string): Promise<CloudflareStatus> {
   if (!status.email || status.accounts.length === 0) {
     throw new Error(
       "still not logged in to Cloudflare after the browser step.\n" +
-        "Try `pnpm exec wrangler login` on its own to see what it says, then re-run `cassie deploy`.",
+        "Try `npx wrangler login` on its own to see what it says, then re-run `cassie deploy`.",
     );
   }
   console.log(pc.green(`logged in as ${status.email}`));
@@ -118,7 +111,12 @@ async function ensureAccountSelected(status: CloudflareStatus): Promise<string> 
  * can ask — so we replay the deploy with the terminal attached and let it.
  * Returns true if the operator got through it.
  */
-export async function registerWorkersDevSubdomain(cwd: string, workerName: string, accountId: string): Promise<boolean> {
+export async function registerWorkersDevSubdomain(
+  cwd: string,
+  workerName: string,
+  accountId: string,
+  config?: string,
+): Promise<boolean> {
   console.log(
     [
       "",
@@ -135,7 +133,7 @@ export async function registerWorkersDevSubdomain(cwd: string, workerName: strin
   );
   if (!(await confirm("Continue?", true))) return false;
 
-  const ok = runInteractive(["deploy", "--name", workerName], cwd);
+  const ok = runWranglerInteractive(["deploy", "--name", workerName], { cwd, config });
   if (!ok) {
     console.log(
       [

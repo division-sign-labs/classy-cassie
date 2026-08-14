@@ -3,7 +3,7 @@
 // the Splits path prints exact splits-cli invocations, then keeps polling.
 
 import pc from "picocolors";
-import { splitsDisburseCommands, splitsRegisterSignerCommands } from "@quotient/cassie-core";
+import { splitsDisburseCommands, splitsRegisterSignerCommands } from "@quotient-forecasting/cassie-core";
 import { adapterFor, ask, makeSetupContext, requireAccount } from "../context.js";
 import { loadBotConfig, saveBotConfig } from "../paths.js";
 

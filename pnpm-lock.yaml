@@ -20,12 +20,18 @@ importers:
 
   packages/cli:
     dependencies:
-      '@quotient/cassie-core':
+      '@quotient-forecasting/cassie-core':
         specifier: workspace:*
         version: link:../core
-      '@quotient/cassie-runtime-local':
+      '@quotient-forecasting/cassie-runtime-cf':
+        specifier: workspace:*
+        version: link:../runtime-cf
+      '@quotient-forecasting/cassie-runtime-local':
         specifier: workspace:*
         version: link:../runtime-local
+      '@quotient-forecasting/cassie-skill':
+        specifier: workspace:*
+        version: link:../../skills/cassie
       commander:
         specifier: 15.0.0
         version: 15.0.0
@@ -35,6 +41,9 @@ importers:
       prompts:
         specifier: 2.4.2
         version: 2.4.2
+      wrangler:
+        specifier: 4.123.0
+        version: 4.123.0(@cloudflare/workers-types@5.20260814.1)
     devDependencies:
       '@types/node':
         specifier: 24.2.1
@@ -76,9 +85,12 @@ importers:
       '@cloudflare/containers':
         specifier: 0.3.7
         version: 0.3.7
-      '@quotient/cassie-core':
+      '@quotient-forecasting/cassie-core':
         specifier: workspace:*
         version: link:../core
+      '@quotient-forecasting/cassie-runtime-container':
+        specifier: workspace:*
+        version: link:../runtime-container
     devDependencies:
       typescript:
         specifier: 5.9.2
@@ -89,10 +101,10 @@ importers:
 
   packages/runtime-container:
     dependencies:
-      '@quotient/cassie-core':
+      '@quotient-forecasting/cassie-core':
         specifier: workspace:*
         version: link:../core
-      '@quotient/strategy-flip-flat':
+      '@quotient-forecasting/strategy-flip-flat':
         specifier: workspace:*
         version: link:../../strategies/flip-flat
     devDependencies:
@@ -105,10 +117,10 @@ importers:
 
   packages/runtime-local:
     dependencies:
-      '@quotient/cassie-core':
+      '@quotient-forecasting/cassie-core':
         specifier: workspace:*
         version: link:../core
-      '@quotient/strategy-flip-flat':
+      '@quotient-forecasting/strategy-flip-flat':
         specifier: workspace:*
         version: link:../../strategies/flip-flat
       better-sqlite3:
@@ -125,9 +137,11 @@ importers:
         specifier: 5.9.2
         version: 5.9.2
 
+  skills/cassie: {}
+
   strategies/flip-flat:
     dependencies:
-      '@quotient/cassie-core':
+      '@quotient-forecasting/cassie-core':
         specifier: workspace:*
         version: link:../../packages/core
       zod:

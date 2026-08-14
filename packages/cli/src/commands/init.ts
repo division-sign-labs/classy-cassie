@@ -10,7 +10,7 @@ import {
   generateEoa,
   parseBotConfig,
   type BotConfig,
-} from "@quotient/cassie-core";
+} from "@quotient-forecasting/cassie-core";
 import { ask, confirm, getPassphrase, keystore, makeSetupContext } from "../context.js";
 import { botConfigPath, loadBotConfig, saveBotConfig } from "../paths.js";
 import { discoverQuotientToken } from "../quotient-token.js";
@@ -25,7 +25,11 @@ import { runFund } from "./fund.js";
 function describeAccount(account: NonNullable<BotConfig["account"]>): string[] {
   switch (account.venue) {
     case "polymarket":
-      return [`deposit wallet (holds collateral): ${account.funder}`, `signer (signs orders):           ${account.signerAddress}`];
+      return [
+        `trading address:       ${account.funder}`,
+        "Polygon pUSD only.",
+        `signer (signs orders): ${account.signerAddress}`,
+      ];
     case "hyperliquid":
       return [`master address: ${account.masterAddress}`];
     case "lighter":
@@ -193,7 +197,20 @@ export async function runInit(): Promise<void> {
   saveBotConfig(cfg);
   console.log(pc.green(`\nsaved ${botConfigPath(botId)}`));
 
-  if (venue !== "fixture" && (await confirm("Run the funding flow now?", true))) {
+  if (venue === "polymarket") {
+    // Show the bridge-issued destination inside init itself. The trading
+    // address printed during account setup is not a general deposit address.
+    const instructions = await adapter.fundingInstructions(account);
+    const bridge = instructions.addresses.find((address) => address.chain === "evm");
+    if (!bridge) throw new Error("Polymarket bridge returned no EVM deposit address");
+    console.log(pc.bold("\nFunding"));
+    console.log(`Bridge deposit address (${bridge.asset} on a supported EVM chain): ${pc.green(bridge.address)}`);
+    if (await confirm("Continue the funding flow and wait for credit now?", true)) {
+      await runFund(botId, {});
+    } else {
+      console.log(pc.dim(`fund later with: cassie fund ${botId}`));
+    }
+  } else if (venue !== "fixture" && (await confirm("Run the funding flow now?", true))) {
     await runFund(botId, {});
   } else {
     console.log(pc.dim(`fund later with: cassie fund ${botId}`));

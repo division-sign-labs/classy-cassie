@@ -12,8 +12,8 @@ import {
   type BotPortfolio,
   type ErrorRecord,
   type Order,
-} from "@quotient/cassie-core";
-import { SqliteStateStore } from "@quotient/cassie-runtime-local";
+} from "@quotient-forecasting/cassie-core";
+import { SqliteStateStore } from "@quotient-forecasting/cassie-runtime-local";
 import { adapterFor, controlFetch, getKeystoreSecret, isDeployed, requireAccount } from "../context.js";
 import { listBotIds, loadBotConfig, statePath } from "../paths.js";
 import { money, num, renderTable, shortRef } from "../render.js";

@@ -13,7 +13,7 @@ import {
   type AlertEvent,
   type Alerter,
   type VenueAccount,
-} from "@quotient/cassie-core";
+} from "@quotient-forecasting/cassie-core";
 // Relative dist import: core/test has no dependency edge to the strategy
 // package, so the workspace name doesn't resolve from here.
 import { FlipFlatStrategy } from "../../../strategies/flip-flat/dist/index.js";

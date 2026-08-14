@@ -13,7 +13,7 @@
 
 import { z } from "zod";
 import type { Signal, SignalQuery, SignalSource, VenueId } from "../types.js";
-import type { SignalsConfig } from "../config.js";
+import { DEFAULT_SIGNAL_MAX_AGE_SEC, type SignalsConfig } from "../config.js";
 import { boundFetch } from "../http.js";
 
 export const SignalSchema = z.object({
@@ -38,8 +38,8 @@ export function isSignalFresh(sig: Signal, nowMs: number): boolean {
 // Live source — the Quotient gateway's published-signals feed
 // ---------------------------------------------------------------------------
 
-/** Signals are considered stale when the forecast hasn't updated in a day. */
-const LIVE_SIGNAL_TTL_SEC = 86_400;
+type LiveSignalConfig = Pick<SignalsConfig, "baseUrl" | "path"> &
+  Partial<Pick<SignalsConfig, "maxAgeSec">>;
 
 const GatewaySignalSchema = z.object({
   id: z.string(),
@@ -92,18 +92,18 @@ export async function checkLiveSignalAccess(
 export class LiveSignalSource implements SignalSource {
   /** condition_id → YES-token CLOB id (marketRef per the signal contract). */
   readonly #tokenCache = new Map<string, string>();
-  readonly #cfg: Pick<SignalsConfig, "baseUrl" | "path">;
+  readonly #cfg: Pick<SignalsConfig, "baseUrl" | "path" | "maxAgeSec">;
   readonly #token: string;
   readonly #fetchImpl: typeof fetch;
   readonly #clobBase: string;
 
   constructor(
-    cfg: Pick<SignalsConfig, "baseUrl" | "path">,
+    cfg: LiveSignalConfig,
     token: string,
     fetchImpl?: typeof fetch,
     clobBase = "https://clob.polymarket.com",
   ) {
-    this.#cfg = cfg;
+    this.#cfg = { ...cfg, maxAgeSec: cfg.maxAgeSec ?? DEFAULT_SIGNAL_MAX_AGE_SEC };
     this.#token = token;
     this.#fetchImpl = boundFetch(fetchImpl);
     this.#clobBase = clobBase;
@@ -115,8 +115,10 @@ export class LiveSignalSource implements SignalSource {
     for (const raw of rows) {
       const parsed = GatewaySignalSchema.safeParse(raw);
       if (!parsed.success) continue;
-      const sig = await mapGatewayRow(parsed.data, (conditionId) =>
-        resolveYesToken(conditionId, this.#tokenCache, this.#fetchImpl, this.#clobBase),
+      const sig = await mapGatewayRow(
+        parsed.data,
+        (conditionId) => resolveYesToken(conditionId, this.#tokenCache, this.#fetchImpl, this.#clobBase),
+        this.#cfg.maxAgeSec,
       );
       if (!sig) continue;
       if (query.venue && sig.venue !== query.venue) continue;
@@ -130,6 +132,7 @@ export class LiveSignalSource implements SignalSource {
 async function mapGatewayRow(
   g: z.output<typeof GatewaySignalSchema>,
   resolveToken: (conditionId: string) => Promise<string | null>,
+  ttlSec: number,
 ): Promise<Signal | null> {
   if (g.is_active === false) return null;
   const venue = mapVenue(g.market?.venue);
@@ -160,7 +163,7 @@ async function mapGatewayRow(
     prob,
     refPrice,
     spreadPp,
-    ttlSec: LIVE_SIGNAL_TTL_SEC,
+    ttlSec,
   };
 }
 

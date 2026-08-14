@@ -261,6 +261,7 @@ export class Engine {
           outcome,
           side: orderSide,
           desiredNotional: action.notional,
+          minimumNotional: action.minNotional,
           limitPrice: action.limitPrice,
           reason: action.reason ?? "strategy-entry",
           alertKind: "entry",
@@ -316,6 +317,7 @@ export class Engine {
     side: OrderSide;
     desiredNotional?: number;
     desiredSize?: number;
+    minimumNotional?: number;
     limitPrice?: number;
     tif?: "GTC" | "IOC" | "FOK";
     reduceOnly?: boolean;
@@ -333,7 +335,15 @@ export class Engine {
     const risk = p.ignoreVolumeFloor
       ? { ...config.risk, minDailyVolume: 0, maxSpreadBps: Number.MAX_SAFE_INTEGER }
       : config.risk;
-    const cap = checkCapacity({ side: p.side, desiredSize, refPrice, book, quote, risk });
+    const cap = checkCapacity({
+      side: p.side,
+      desiredSize,
+      refPrice,
+      book,
+      quote,
+      risk,
+      minimumNotional: p.minimumNotional,
+    });
     if (!cap.ok) {
       await this.alert({
         kind: "skipped-order",

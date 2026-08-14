@@ -1,5 +1,5 @@
 # packages/runtime-cf/Dockerfile
-FROM --platform=linux/amd64 node:22-bookworm-slim AS build
+FROM --platform=linux/amd64 node:24-bookworm-slim AS build
 
 RUN npm install --global pnpm@10.15.0
 WORKDIR /src
@@ -13,10 +13,10 @@ RUN pnpm install --frozen-lockfile
 COPY packages/core packages/core
 COPY packages/runtime-container packages/runtime-container
 COPY strategies/flip-flat strategies/flip-flat
-RUN pnpm --filter @quotient/cassie-runtime-container... build
-RUN pnpm --filter @quotient/cassie-runtime-container deploy --prod --legacy /release
+RUN pnpm --filter @quotient-forecasting/cassie-runtime-container... build
+RUN pnpm --filter @quotient-forecasting/cassie-runtime-container deploy --prod --legacy /release
 
-FROM --platform=linux/amd64 node:22-bookworm-slim AS runtime
+FROM --platform=linux/amd64 node:24-bookworm-slim AS runtime
 ENV NODE_ENV=production
 WORKDIR /app
 COPY --from=build --chown=node:node /release ./

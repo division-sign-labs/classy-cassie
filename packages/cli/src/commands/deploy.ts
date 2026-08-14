@@ -5,39 +5,55 @@
 import { spawnSync } from "node:child_process";
 import { randomBytes } from "node:crypto";
 import { existsSync } from "node:fs";
+import { createRequire } from "node:module";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import pc from "picocolors";
-import { KeyRoles, serializeBotConfig } from "@quotient/cassie-core";
+import { KeyRoles, serializeBotConfig } from "@quotient-forecasting/cassie-core";
 import { buildRuntimeCreds, confirm, getKeystoreSecret, keystore, getPassphrase } from "../context.js";
 import { ensureCloudflareReady, registerWorkersDevSubdomain } from "../cloudflare.js";
 import { forgetControlToken, loadBotConfig, readControlToken, saveBotConfig, saveControlToken } from "../paths.js";
 import { resolveQuotientToken } from "../quotient-token.js";
 import { discoverAresBuilderCode, resolveAresApiKey, verifyAresApiKey } from "../ares-config.js";
+import { runWrangler, type WranglerProject } from "../wrangler.js";
 
-function runtimeCfDir(): string {
-  const candidates = [
-    process.env.CASSIE_RUNTIME_CF,
-    // monorepo layout: packages/cli/dist/commands → packages/runtime-cf
-    join(dirname(fileURLToPath(import.meta.url)), "../../../runtime-cf"),
-    join(process.cwd(), "packages/runtime-cf"),
-  ].filter((p): p is string => Boolean(p));
-  for (const c of candidates) {
-    if (existsSync(join(c, "wrangler.jsonc"))) return c;
-  }
-  throw new Error("cannot locate packages/runtime-cf (set CASSIE_RUNTIME_CF to its path)");
+const require = createRequire(import.meta.url);
+
+function workspaceRuntime(dir: string): boolean {
+  return existsSync(join(dir, "../../pnpm-workspace.yaml"));
 }
 
-function wrangler(args: string[], cwd: string, input?: string): { out: string; ok: boolean } {
-  const res = spawnSync("pnpm", ["exec", "wrangler", ...args], {
-    cwd,
-    input,
-    encoding: "utf8",
-    stdio: ["pipe", "pipe", "pipe"],
-    env: process.env,
-  });
-  const out = (res.stdout ?? "") + (res.stderr ?? "");
-  return { out, ok: res.status === 0 };
+function runtimeProject(dir: string, packaged: boolean): WranglerProject | null {
+  const config = join(dir, packaged ? "wrangler.package.jsonc" : "wrangler.jsonc");
+  return existsSync(config) ? { cwd: dir, config } : null;
+}
+
+function runtimeCfProject(): WranglerProject {
+  const explicit = process.env.CASSIE_RUNTIME_CF;
+  if (explicit) {
+    const project = runtimeProject(explicit, false) ?? runtimeProject(explicit, true);
+    if (project) return project;
+  }
+
+  // Source checkout: packages/cli/dist/commands -> packages/runtime-cf.
+  const adjacent = join(dirname(fileURLToPath(import.meta.url)), "../../../runtime-cf");
+  const source = runtimeProject(adjacent, false);
+  if (source && workspaceRuntime(adjacent)) return source;
+
+  // Published install: resolve the runtime package rather than assuming npm's
+  // dependency layout. Its Dockerfile installs the pinned Container runtime.
+  try {
+    const installed = dirname(require.resolve("@quotient-forecasting/cassie-runtime-cf/package.json"));
+    const project = runtimeProject(installed, !workspaceRuntime(installed));
+    if (project) return project;
+  } catch {
+    // Fall through to the cwd candidate for contributor workflows.
+  }
+
+  const fromCwd = join(process.cwd(), "packages/runtime-cf");
+  const project = runtimeProject(fromCwd, false);
+  if (project) return project;
+  throw new Error("cannot locate the Cassie Cloudflare runtime (set CASSIE_RUNTIME_CF to its path)");
 }
 
 function ensureDockerRunning(): void {
@@ -168,8 +184,8 @@ export async function runDeploy(botId: string, opts: { rotateToken?: boolean } =
 
   // Cloudflare setup runs first so the account questions land before the
   // passphrase prompt — nobody should unlock a keystore only to hit a login wall.
-  const dir = runtimeCfDir();
-  const { accountId } = await ensureCloudflareReady(dir);
+  const project = runtimeCfProject();
+  const { accountId } = await ensureCloudflareReady(project.cwd);
   ensureDockerRunning();
 
   const creds = await buildRuntimeCreds(cfg);
@@ -219,13 +235,13 @@ export async function runDeploy(botId: string, opts: { rotateToken?: boolean } =
 
   await quiesceExistingDeployment(cfg, oldControlToken);
 
-  let dep = wrangler(["deploy", "--name", workerName, "--containers-rollout=immediate"], dir);
+  let dep = runWrangler(["deploy", "--name", workerName, "--containers-rollout=immediate"], project);
   if (!dep.ok && isMissingSubdomainError(dep.out)) {
-    if (!(await registerWorkersDevSubdomain(dir, workerName, accountId))) {
+    if (!(await registerWorkersDevSubdomain(project.cwd, workerName, accountId, project.config))) {
       throw new Error("deploy stopped: no workers.dev subdomain on this Cloudflare account yet.");
     }
     // The interactive run already published; repeat it piped to capture the URL.
-    dep = wrangler(["deploy", "--name", workerName, "--containers-rollout=immediate"], dir);
+    dep = runWrangler(["deploy", "--name", workerName, "--containers-rollout=immediate"], project);
   }
   process.stdout.write(dep.out);
   if (!dep.ok) throw new Error(`wrangler deploy failed:\n${dep.out.slice(-800)}`);
@@ -259,7 +275,7 @@ export async function runDeploy(botId: string, opts: { rotateToken?: boolean } =
       continue;
     }
     process.stdout.write(pc.dim(`secret put ${name}… `));
-    const res = wrangler(["secret", "put", name, "--name", workerName], dir, value);
+    const res = runWrangler(["secret", "put", name, "--name", workerName], project, value);
     if (!res.ok) throw new Error(`wrangler secret put ${name} failed:\n${res.out.slice(-500)}`);
     console.log(pc.green("ok"));
   }

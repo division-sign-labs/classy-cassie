@@ -14,13 +14,14 @@ import { alertsTest, showLogs, showOrders, showPortfolio, venueStatus } from "./
 import { runTrade } from "./commands/trade.js";
 import { runDeploy } from "./commands/deploy.js";
 import { configureReporting } from "./commands/reporting.js";
+import { installSkill } from "./commands/skill.js";
 
 const program = new Command();
 
 program
   .name("cassie")
   .description("open-source, self-hosted, non-custodial trading bot for prediction markets and perps venues")
-  .version("0.1.0");
+  .version("0.1.1");
 
 program.command("init").description("wizard: create a bot (wallet, venue, strategy, alerts, funding)").action(wrap(runInit));
 
@@ -113,11 +114,16 @@ alerts.command("test <botId>").description("send a Telegram test ping").action(w
 
 program
   .command("strategy <botId>")
-  .description("view/tune the bot's strategy settings")
+  .description("view/tune the bot's strategy settings and signal guardrails")
+  .option("--min-entry-notional <usd>", "entry-only floor after sizing and capacity caps")
+  .option("--signal-max-age-hours <hours>", "maximum age of a live signal")
   .action(wrap(runStrategy));
 
 const venue = program.command("venue").description("venue adapters");
 venue.command("status").description("adapters and when they were last verified against venue docs").action(wrap(venueStatus));
+
+const skill = program.command("skill").description("agent operator skill");
+skill.command("install").description("install or refresh the Cassie skill for Codex and Claude Code").action(wrap(installSkill));
 
 program.parseAsync().catch(fail);
 

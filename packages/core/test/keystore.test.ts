@@ -3,7 +3,7 @@ import { mkdtempSync, statSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { Keystore, WrongPassphraseError, decryptSecret, encryptSecret } from "@quotient/cassie-core";
+import { Keystore, WrongPassphraseError, decryptSecret, encryptSecret } from "@quotient-forecasting/cassie-core";
 
 describe("encryptSecret/decryptSecret", () => {
   it("round-trips a secret", () => {

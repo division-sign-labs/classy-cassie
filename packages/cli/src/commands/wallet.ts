@@ -2,7 +2,7 @@
 // Wallet commands (§4): create / import (stdin only) / export (guarded) / list.
 
 import pc from "picocolors";
-import { addressFromPk, generateEoa, KeyRoles } from "@quotient/cassie-core";
+import { addressFromPk, generateEoa, KeyRoles } from "@quotient-forecasting/cassie-core";
 import { ask, confirm, getPassphrase, keystore } from "../context.js";
 
 export async function walletCreate(botId: string): Promise<void> {

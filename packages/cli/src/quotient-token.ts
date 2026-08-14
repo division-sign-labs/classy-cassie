@@ -7,7 +7,7 @@
 import { existsSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
-import { KeyRoles } from "@quotient/cassie-core";
+import { KeyRoles } from "@quotient-forecasting/cassie-core";
 import { getKeystoreSecret } from "./context.js";
 import { environmentValue, localEnvPath, localEnvValue } from "./local-env.js";
 

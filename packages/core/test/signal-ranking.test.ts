@@ -5,7 +5,7 @@
 // for a 10pp one that happened to come back first.
 
 import { describe, expect, it } from "vitest";
-import { MemoryStateStore, silentLogger, type Signal, type SignalSource } from "@quotient/cassie-core";
+import { MemoryStateStore, silentLogger, type Signal, type SignalSource } from "@quotient-forecasting/cassie-core";
 import { FlipFlatStrategy } from "../../../strategies/flip-flat/dist/index.js";
 
 function sig(marketRef: string, spreadPp: number): Signal {
@@ -82,5 +82,29 @@ describe("signal ranking by edge", () => {
     const entered = actions.filter((a) => a.kind === "enter");
     expect(entered).toHaveLength(1);
     expect(entered[0]!.marketRef).toBe("m-wide");
+  });
+
+  it("skips an entry whose sized notional is below the configured floor", async () => {
+    const actions = await new FlipFlatStrategy().tick(
+      ctxWith([sig("m-small", 20)], {
+        entrySpreadPp: 10,
+        sizing: "fixed",
+        maxPositionNotional: 5,
+        minEntryNotional: 10,
+      }),
+    );
+    expect(actions.filter((a) => a.kind === "enter")).toHaveLength(0);
+  });
+
+  it("carries the entry floor to the engine for post-cap enforcement", async () => {
+    const actions = await new FlipFlatStrategy().tick(
+      ctxWith([sig("m-large", 20)], {
+        entrySpreadPp: 10,
+        sizing: "fixed",
+        maxPositionNotional: 50,
+        minEntryNotional: 10,
+      }),
+    );
+    expect(actions.find((a) => a.kind === "enter")).toMatchObject({ minNotional: 10 });
   });
 });

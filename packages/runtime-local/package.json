@@ -1,8 +1,20 @@
 {
-  "name": "@quotient/cassie-runtime-local",
+  "name": "@quotient-forecasting/cassie-runtime-local",
   "version": "0.1.0",
   "type": "module",
   "license": "Apache-2.0",
+  "description": "Local Node.js runtime for Cassie trading bots",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Quotient-Solutions-Inc/classy-cassie.git",
+    "directory": "packages/runtime-local"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
   "exports": {
     ".": {
       "types": "./dist/index.d.ts",
@@ -12,11 +24,12 @@
   "files": ["dist"],
   "scripts": {
     "build": "tsc -p tsconfig.json",
+    "prepack": "pnpm build",
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {
-    "@quotient/cassie-core": "workspace:*",
-    "@quotient/strategy-flip-flat": "workspace:*",
+    "@quotient-forecasting/cassie-core": "workspace:*",
+    "@quotient-forecasting/strategy-flip-flat": "workspace:*",
     "better-sqlite3": "13.0.3"
   },
   "devDependencies": {

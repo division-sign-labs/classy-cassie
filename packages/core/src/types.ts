@@ -256,6 +256,8 @@ export type Action =
       side: PositionSide;
       /** Desired position notional in USD. The engine sizes and risk-checks it. */
       notional: number;
+      /** Skip the entry if risk/capacity would reduce it below this USD notional. */
+      minNotional?: number;
       /** Optional price bound; defaults to a crossing limit within the slippage band. */
       limitPrice?: number;
       reason?: string;

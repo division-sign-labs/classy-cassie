@@ -2,7 +2,7 @@
 // Resolve the two independent Ares settings: a public builder attribution code
 // stored in bot config, and a secret authoring key supplied only to runtimes.
 
-import { AresClient, KeyRoles } from "@quotient/cassie-core";
+import { AresClient, KeyRoles } from "@quotient-forecasting/cassie-core";
 import { getKeystoreSecret } from "./context.js";
 import { resolveLocalValue, type ResolvedLocalValue } from "./local-env.js";
 

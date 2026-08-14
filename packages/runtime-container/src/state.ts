@@ -3,7 +3,7 @@
 // are intercepted beside the container and resolved against its Durable Object's
 // persistent SQLite; no public endpoint or database credential is involved.
 
-import type { ErrorRecord, LogQuery, StateStore } from "@quotient/cassie-core";
+import type { ErrorRecord, LogQuery, StateStore } from "@quotient-forecasting/cassie-core";
 
 type StateOperation =
   | { op: "get"; key: string }

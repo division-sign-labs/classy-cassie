@@ -1,8 +1,20 @@
 {
-  "name": "@quotient/strategy-flip-flat",
+  "name": "@quotient-forecasting/strategy-flip-flat",
   "version": "0.1.0",
   "type": "module",
   "license": "Apache-2.0",
+  "description": "Flip-flat Quotient signal strategy for Cassie",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Quotient-Solutions-Inc/classy-cassie.git",
+    "directory": "strategies/flip-flat"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
   "exports": {
     ".": {
       "types": "./dist/index.d.ts",
@@ -12,10 +24,11 @@
   "files": ["dist"],
   "scripts": {
     "build": "tsc -p tsconfig.json",
+    "prepack": "pnpm build",
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {
-    "@quotient/cassie-core": "workspace:*",
+    "@quotient-forecasting/cassie-core": "workspace:*",
     "zod": "4.4.3"
   },
   "devDependencies": {

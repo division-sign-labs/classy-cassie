@@ -3,7 +3,7 @@
 // tickId and the engine must no-op instead of double-executing entries (§10).
 
 import { describe, expect, it } from "vitest";
-import { StateKeys } from "@quotient/cassie-core";
+import { StateKeys } from "@quotient-forecasting/cassie-core";
 import { buildFixtureEngine } from "./helpers.js";
 
 describe("engine tick idempotency", () => {

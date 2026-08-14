@@ -15,7 +15,7 @@ import {
   type SetupContext,
   type VenueAccount,
   type VenueAdapter,
-} from "@quotient/cassie-core";
+} from "@quotient-forecasting/cassie-core";
 import { dirs, readControlToken } from "./paths.js";
 import { getOperatorDefault, setOperatorDefault } from "./defaults.js";
 

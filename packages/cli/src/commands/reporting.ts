@@ -3,7 +3,7 @@
 // is public config; the authoring API key remains in .local.env or the keystore.
 
 import pc from "picocolors";
-import { KeyRoles, parseBotConfig } from "@quotient/cassie-core";
+import { KeyRoles, parseBotConfig } from "@quotient-forecasting/cassie-core";
 import { ask, getPassphrase, keystore } from "../context.js";
 import { discoverAresBuilderCode, resolveAresApiKey, verifyAresApiKey } from "../ares-config.js";
 import { loadBotConfig, saveBotConfig } from "../paths.js";

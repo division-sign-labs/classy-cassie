@@ -18,7 +18,7 @@ import {
   type AlertEvent,
   type Alerter,
   type OrderIntent,
-} from "@quotient/cassie-core";
+} from "@quotient-forecasting/cassie-core";
 
 const BUILDER_CODE = "0xaca2b0761a55c278c8f145a3ec9ec8ccdea292610a4b4be5f2a6618139091c12";
 const YES_TOKEN = "7132104519000000000000000000000000000000000000000000000000000001";

@@ -1,6 +1,6 @@
 // packages/core/test/mirror.test.ts
 import { describe, expect, it } from "vitest";
-import { mirrorBookForNo, mirrorQuoteForNo, type OrderBook, type Quote } from "@quotient/cassie-core";
+import { mirrorBookForNo, mirrorQuoteForNo, type OrderBook, type Quote } from "@quotient-forecasting/cassie-core";
 
 const yesBook: OrderBook = {
   marketRef: "fx-yes-1",

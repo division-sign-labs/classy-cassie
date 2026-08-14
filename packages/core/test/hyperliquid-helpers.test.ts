@@ -1,6 +1,6 @@
 // packages/core/test/hyperliquid-helpers.test.ts
 import { describe, expect, it } from "vitest";
-import { formatHlPrice, formatSize, toCloid } from "@quotient/cassie-core";
+import { formatHlPrice, formatSize, toCloid } from "@quotient-forecasting/cassie-core";
 
 describe("formatHlPrice", () => {
   it("passes integers through untouched", () => {

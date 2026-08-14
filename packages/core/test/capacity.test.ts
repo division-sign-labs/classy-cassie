@@ -1,6 +1,6 @@
 // packages/core/test/capacity.test.ts
 import { describe, expect, it } from "vitest";
-import { RiskConfigSchema, checkCapacity, type OrderBook, type Quote } from "@quotient/cassie-core";
+import { RiskConfigSchema, checkCapacity, type OrderBook, type Quote } from "@quotient-forecasting/cassie-core";
 
 // Fixture book (fixtures/books.json), best-first.
 const book: OrderBook = {
@@ -67,7 +67,38 @@ describe("checkCapacity (§9)", () => {
     const risk = RiskConfigSchema.parse({ maxSlippageBps: 300, minViableNotional: 5 });
     const res = checkCapacity({ side: "BUY", desiredSize: 1, refPrice: 0.55, book, quote: quote(), risk });
     expect(res.ok).toBe(false);
-    expect(res.skipReasons.join(" ")).toMatch(/minViableNotional/);
+    expect(res.skipReasons.join(" ")).toMatch(/minimum notional/);
+  });
+
+  it("honours a stricter per-entry floor after depth capping", () => {
+    const risk = RiskConfigSchema.parse({ maxSlippageBps: 300 });
+    const res = checkCapacity({
+      side: "BUY",
+      desiredSize: 90.9,
+      refPrice: 0.55,
+      book,
+      quote: quote(),
+      risk,
+      minimumNotional: 10,
+    });
+    // Capacity caps this to 10 shares = $5.50, so the $10 entry must not dribble through.
+    expect(res.ok).toBe(false);
+    expect(res.skipReasons.join(" ")).toMatch(/\$5\.50 < minimum notional \$10/);
+  });
+
+  it("does not let a per-order floor weaken the bot risk floor", () => {
+    const risk = RiskConfigSchema.parse({ maxSlippageBps: 300, minViableNotional: 5 });
+    const res = checkCapacity({
+      side: "BUY",
+      desiredSize: 1,
+      refPrice: 0.55,
+      book,
+      quote: quote(),
+      risk,
+      minimumNotional: 0,
+    });
+    expect(res.ok).toBe(false);
+    expect(res.skipReasons.join(" ")).toMatch(/minimum notional \$5/);
   });
 
   it("skips when no depth sits within the slippage band", () => {

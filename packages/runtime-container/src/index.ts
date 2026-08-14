@@ -4,7 +4,7 @@
 // Durable Object binding.
 
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
-import type { LogLevel, ManualOrderParams } from "@quotient/cassie-core";
+import type { LogLevel, ManualOrderParams } from "@quotient-forecasting/cassie-core";
 import { BotService } from "./service.js";
 
 const service = new BotService();

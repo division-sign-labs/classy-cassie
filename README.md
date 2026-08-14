@@ -23,6 +23,17 @@ or funds.
 ## Quickstart
 
 ```sh
+npm install --global @quotient-forecasting/cassie
+cassie init
+```
+
+The npm package installs the Cassie operator skill for Codex and Claude Code,
+the local runtime, and the Cloudflare Worker + Container deployment assets. If
+npm lifecycle scripts are disabled, run `cassie skill install` once.
+
+For contributors working from this checkout:
+
+```sh
 pnpm install && pnpm build
 
 # create a bot: wallet, venue account, strategy, Telegram, funding — all in the terminal

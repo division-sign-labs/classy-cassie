@@ -1,8 +1,20 @@
 {
-  "name": "@quotient/cassie-core",
+  "name": "@quotient-forecasting/cassie-core",
   "version": "0.1.0",
   "type": "module",
   "license": "Apache-2.0",
+  "description": "Venue adapters, risk engine, signals, wallet, and sizing primitives for Cassie",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Quotient-Solutions-Inc/classy-cassie.git",
+    "directory": "packages/core"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
   "exports": {
     ".": {
       "types": "./dist/index.d.ts",
@@ -12,6 +24,7 @@
   "files": ["dist"],
   "scripts": {
     "build": "tsc -p tsconfig.json",
+    "prepack": "pnpm build",
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {

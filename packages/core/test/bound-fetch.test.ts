@@ -8,7 +8,7 @@
 // convention directly rather than trusting the platform to surface it.
 
 import { describe, expect, it } from "vitest";
-import { AresClient, LiveSignalSource, TelegramAlerter, boundFetch } from "@quotient/cassie-core";
+import { AresClient, LiveSignalSource, TelegramAlerter, boundFetch } from "@quotient-forecasting/cassie-core";
 
 /**
  * A fetch stand-in that records the `this` it was invoked with. Declared as a

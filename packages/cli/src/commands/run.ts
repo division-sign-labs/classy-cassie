@@ -2,8 +2,8 @@
 // `cassie run <botId>` (§11 local runtime).
 
 import pc from "picocolors";
-import { KeyRoles, consoleLogger } from "@quotient/cassie-core";
-import { runLocal } from "@quotient/cassie-runtime-local";
+import { KeyRoles, consoleLogger } from "@quotient-forecasting/cassie-core";
+import { runLocal } from "@quotient-forecasting/cassie-runtime-local";
 import { buildRuntimeCreds, getKeystoreSecret, requireAccount } from "../context.js";
 import { loadBotConfig, statePath } from "../paths.js";
 import { resolveQuotientToken } from "../quotient-token.js";

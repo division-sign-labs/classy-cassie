@@ -18,8 +18,8 @@ import {
   type ManualOrderParams,
   type ManualOrderResult,
   type ThesisTicket,
-} from "@quotient/cassie-core";
-import { SqliteStateStore } from "@quotient/cassie-runtime-local";
+} from "@quotient-forecasting/cassie-core";
+import { SqliteStateStore } from "@quotient-forecasting/cassie-runtime-local";
 import { adapterFor, confirm, controlFetch, getKeystoreSecret, isDeployed, requireAccount } from "../context.js";
 import { loadBotConfig, statePath } from "../paths.js";
 import { resolveQuotientToken } from "../quotient-token.js";
@@ -34,7 +34,7 @@ async function liveSignalProb(botId: string, cfg: BotConfig, thesis: ThesisTicke
   try {
     const token = (await resolveQuotientToken(botId))?.token;
     if (!token) return undefined;
-    const source = new LiveSignalSource({ baseUrl: cfg.signals.baseUrl, path: cfg.signals.path }, token);
+    const source = new LiveSignalSource(cfg.signals, token);
     const sigs = await source.latest({ venue: "polymarket", marketRef: thesis.instrument });
     const fresh = sigs.filter((s) => isSignalFresh(s, Date.now())).sort((a, b) => Date.parse(b.ts) - Date.parse(a.ts));
     const sig = fresh[0];

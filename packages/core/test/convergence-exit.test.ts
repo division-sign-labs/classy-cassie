@@ -5,7 +5,7 @@
 // closes the edge) is not mistaken for the thesis paying out.
 
 import { describe, expect, it } from "vitest";
-import { MemoryStateStore, silentLogger, type Position, type Signal, type SignalSource } from "@quotient/cassie-core";
+import { MemoryStateStore, silentLogger, type Position, type Signal, type SignalSource } from "@quotient-forecasting/cassie-core";
 import { FlipFlatStrategy } from "../../../strategies/flip-flat/dist/index.js";
 
 const MARKET = "m-1";
@@ -109,7 +109,11 @@ describe("convergence exit", () => {
 
   it("still exits on a flip regardless of profit", async () => {
     // Flip takes precedence: the forecast itself changed side.
-    const got = await exits(ctxWith([sig({ side: "NO" })], [position({ side: "YES" })], 0.69));
+    const got = await exits(
+      ctxWith([sig({ side: "NO" })], [position({ side: "YES", size: 2 })], 0.69, {
+        minEntryNotional: 10,
+      }),
+    );
     expect(got).toHaveLength(1);
     expect(got[0]!.reason).toMatch(/flip/);
   });

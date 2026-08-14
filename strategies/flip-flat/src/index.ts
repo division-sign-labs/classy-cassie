@@ -10,7 +10,7 @@ import {
   type Signal,
   type Strategy,
   type StrategyContext,
-} from "@quotient/cassie-core";
+} from "@quotient-forecasting/cassie-core";
 
 export const FlipFlatConfigSchema = z.object({
   /** Enter when |prob − price| in percentage points is at least this. */
@@ -26,6 +26,8 @@ export const FlipFlatConfigSchema = z.object({
   sizing: z.enum(["quarter-kelly", "fixed"]).default("fixed"),
   /** Per-position notional cap, USD. The engine may cap it further (§9). */
   maxPositionNotional: z.number().positive().default(50),
+  /** Entry-only floor after sizing and capacity caps. Exits are never subject to it. */
+  minEntryNotional: z.number().nonnegative().default(1),
   maxOpenPositions: z.number().int().positive().default(5),
   /** Explicit marketRefs, or "from-signals" to trade whatever is signaled. */
   universe: z.union([z.literal("from-signals"), z.array(z.string())]).default("from-signals"),
@@ -127,6 +129,7 @@ export class FlipFlatStrategy implements Strategy {
             marketRef,
             side: sig.side,
             notional,
+            minNotional: cfg.minEntryNotional,
             reason: `signal ${sig.id}${spreadPp !== undefined ? ` spread ${spreadPp.toFixed(1)}pp` : ""}`,
           });
           openCount += 1;
@@ -146,6 +149,7 @@ export class FlipFlatStrategy implements Strategy {
               marketRef,
               side: sig.side,
               notional,
+              minNotional: cfg.minEntryNotional,
               reason: `flip re-entry (signal ${sig.id})`,
             });
             openCount += 1;
@@ -210,25 +214,34 @@ export class FlipFlatStrategy implements Strategy {
 
   /** USD notional for a new entry, per the configured sizing mode. */
   private async entryNotional(ctx: StrategyContext, cfg: FlipFlatConfig, sig: Signal): Promise<number> {
+    let notional: number;
     if (cfg.sizing !== "quarter-kelly" || sig.prob === undefined || !(sig.refPrice > 0 && sig.refPrice < 1)) {
-      return cfg.maxPositionNotional;
+      notional = cfg.maxPositionNotional;
+    } else {
+      // Quarter Kelly on the signaled side: p = side probability, price = side cost,
+      // b = (1−price)/price, f* = p − (1−p)/b, fraction = max(0, f*/4) of equity.
+      const p = sig.prob;
+      const price = sig.refPrice;
+      const b = (1 - price) / price;
+      const fStar = p - (1 - p) / b;
+      const frac = Math.max(0, fStar / 4);
+      if (frac <= 0) return 0;
+      let available = ctx.equity;
+      try {
+        const balances = await ctx.venue.balances();
+        available = balances.reduce((s, x) => s + x.available, 0);
+      } catch {
+        /* fall back to equity */
+      }
+      notional = Math.min(frac * ctx.equity, cfg.maxPositionNotional, available * 0.95);
     }
-    // Quarter Kelly on the signaled side: p = side probability, price = side cost,
-    // b = (1−price)/price, f* = p − (1−p)/b, fraction = max(0, f*/4) of equity.
-    const p = sig.prob;
-    const price = sig.refPrice;
-    const b = (1 - price) / price;
-    const fStar = p - (1 - p) / b;
-    const frac = Math.max(0, fStar / 4);
-    if (frac <= 0) return 0;
-    let available = ctx.equity;
-    try {
-      const balances = await ctx.venue.balances();
-      available = balances.reduce((s, x) => s + x.available, 0);
-    } catch {
-      /* fall back to equity */
+    if (notional < cfg.minEntryNotional) {
+      ctx.log.info(
+        `entry notional $${notional.toFixed(2)} < minEntryNotional $${cfg.minEntryNotional.toFixed(2)}; skipping ${sig.marketRef}`,
+      );
+      return 0;
     }
-    return Math.min(frac * ctx.equity, cfg.maxPositionNotional, available * 0.95);
+    return notional;
   }
 
   private async entryOk(

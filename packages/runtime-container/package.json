@@ -1,8 +1,20 @@
 {
-  "name": "@quotient/cassie-runtime-container",
+  "name": "@quotient-forecasting/cassie-runtime-container",
   "version": "0.1.0",
   "type": "module",
   "license": "Apache-2.0",
+  "description": "Long-running Cloudflare Container runtime for Cassie trading bots",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Quotient-Solutions-Inc/classy-cassie.git",
+    "directory": "packages/runtime-container"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
   "exports": {
     ".": {
       "types": "./dist/index.d.ts",
@@ -12,12 +24,13 @@
   "files": ["dist"],
   "scripts": {
     "build": "tsc -p tsconfig.json",
+    "prepack": "pnpm build",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "start": "node dist/index.js"
   },
   "dependencies": {
-    "@quotient/cassie-core": "workspace:*",
-    "@quotient/strategy-flip-flat": "workspace:*"
+    "@quotient-forecasting/cassie-core": "workspace:*",
+    "@quotient-forecasting/strategy-flip-flat": "workspace:*"
   },
   "devDependencies": {
     "@types/node": "24.2.1",

@@ -27,8 +27,8 @@ import {
   type StateStore,
   type Strategy,
   type VenueAccount,
-} from "@quotient/cassie-core";
-import { FlipFlatStrategy } from "@quotient/strategy-flip-flat";
+} from "@quotient-forecasting/cassie-core";
+import { FlipFlatStrategy } from "@quotient-forecasting/strategy-flip-flat";
 
 export class SqliteStateStore implements StateStore {
   private db: Database.Database;
@@ -120,7 +120,7 @@ export function buildSignalSource(opts: LocalRunOpts): SignalSource {
   if (!opts.quotientToken) {
     throw new Error("live signals need QUOTIENT_API_TOKEN (env or keystore) — or pass --signals <fixture>");
   }
-  return new LiveSignalSource({ baseUrl: cfg.baseUrl, path: cfg.path }, opts.quotientToken);
+  return new LiveSignalSource(cfg, opts.quotientToken);
 }
 
 export function buildAlerter(opts: LocalRunOpts, log: Logger): Alerter {

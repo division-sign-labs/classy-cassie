@@ -4,6 +4,7 @@
 // reaches an order — the numbers below come from buildTicket/buildPredictionSize.
 
 import { readFileSync, writeFileSync, existsSync } from "node:fs";
+import { createRequire } from "node:module";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import pc from "picocolors";
@@ -21,8 +22,19 @@ import {
   type ThesisTicket,
   type TicketOverrides,
   type VenueAdapter,
-} from "@quotient/cassie-core";
+} from "@quotient-forecasting/cassie-core";
 import { ask, confirm } from "../context.js";
+
+const require = createRequire(import.meta.url);
+
+function installedMappingsPath(): string | null {
+  try {
+    const skillDir = dirname(require.resolve("@quotient-forecasting/cassie-skill/package.json"));
+    return join(skillDir, "thesis/mappings.json");
+  } catch {
+    return null;
+  }
+}
 
 export function loadMappings(explicitPath?: string): Mappings {
   const candidates = explicitPath
@@ -31,7 +43,8 @@ export function loadMappings(explicitPath?: string): Mappings {
         // canonical policy file, versioned in the repo (§13)
         join(process.cwd(), "skills/cassie/thesis/mappings.json"),
         join(dirname(fileURLToPath(import.meta.url)), "../../../../skills/cassie/thesis/mappings.json"),
-      ];
+        installedMappingsPath(),
+      ].filter((p): p is string => p !== null);
   for (const p of candidates) {
     if (existsSync(p)) return parseMappings(JSON.parse(readFileSync(p, "utf8")));
   }

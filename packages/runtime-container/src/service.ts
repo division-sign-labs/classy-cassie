@@ -25,8 +25,8 @@ import {
   type TickResult,
   type VenueAccount,
   type VenueAdapter,
-} from "@quotient/cassie-core";
-import { FlipFlatStrategy } from "@quotient/strategy-flip-flat";
+} from "@quotient-forecasting/cassie-core";
+import { FlipFlatStrategy } from "@quotient-forecasting/strategy-flip-flat";
 import { DurableObjectStateStore } from "./state.js";
 
 const HEARTBEAT_MS = 5_000;

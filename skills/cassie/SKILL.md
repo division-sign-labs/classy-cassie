@@ -40,10 +40,11 @@ Prerequisites: Node 20+ (better-sqlite3 native build needs a working toolchain) 
 account, Docker running, and `pnpm exec wrangler login`.
 
 - From source (current path): `pnpm install && pnpm build`, then run
-  `node packages/cli/dist/index.js …` or link it: `pnpm --filter @quotient/cassie link --global`.
-- Published (when released): `npx @quotient/cassie init` or `npm i -g @quotient/cassie`.
+  `node packages/cli/dist/index.js …` or link it with pnpm 10:
+  `pnpm --dir packages/cli link`.
+- Published (when released): `npx @quotient-forecasting/cassie init` or `npm i -g @quotient-forecasting/cassie`.
   Note the bare `cassie` npm name is taken by an unrelated package — the published names
-  are the scoped `@quotient/*` packages; the installed binary is still `cassie`.
+  are the scoped `@quotient-forecasting/*` packages; the installed binary is still `cassie`.
 
 Environment: `CASSIE_HOME` overrides `~/.cassie`; `CASSIE_PASSPHRASE` supplies the
 keystore passphrase non-interactively (testing convenience — prefer the prompt);
@@ -196,7 +197,8 @@ The quotient-api skill is a separate product surface (research, forecasts, brief
 consumes exactly one read endpoint — the published-signals feed — and maps each row onto
 its internal contract: Polymarket `condition_id` resolves to the YES-token marketRef,
 `latest_q` becomes the side-adjusted model probability, `current_cost_cents` the reference
-price, and rows stale for more than a day fail the freshness check and cause no action.
+price. Live forecasts older than three hours fail the freshness check by default and
+cause no action; `signals.maxAgeSec` can override that per bot.
 
 Financial fields never flow toward the signal API — the client sends only the API key
 header, no query params, and its type surface has no method that accepts account state.

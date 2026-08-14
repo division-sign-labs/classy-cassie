@@ -5,9 +5,10 @@ import {
   LiveSignalSource,
   checkLiveSignalAccess,
   isSignalFresh,
+  parseBotConfig,
   type Signal,
   type SignalSource,
-} from "@quotient/cassie-core";
+} from "@quotient-forecasting/cassie-core";
 import { signalsFixture } from "./helpers.js";
 
 describe("FixtureSignalSource", () => {
@@ -57,6 +58,13 @@ describe("isSignalFresh", () => {
   });
   it("is false for an unparseable timestamp", () => {
     expect(isSignalFresh({ ...base, ts: "not-a-date" }, Date.now())).toBe(false);
+  });
+});
+
+describe("signal configuration", () => {
+  it("defaults live signal freshness to three hours", () => {
+    const cfg = parseBotConfig({ id: "default-freshness", venue: "fixture" });
+    expect(cfg.signals.maxAgeSec).toBe(3 * 60 * 60);
   });
 });
 
@@ -120,8 +128,19 @@ describe("LiveSignalSource (gateway contract, verified 2026-08-13)", () => {
       side: "YES",
       prob: 0.86,
       refPrice: 0.78,
+      ttlSec: 10_800,
     });
     expect(sig!.spreadPp).toBeCloseTo(8, 5); // |86 − 78|
+  });
+
+  it("allows a per-bot freshness override", async () => {
+    const src = new LiveSignalSource(
+      { baseUrl: "https://gw.example", path: "/s", maxAgeSec: 900 },
+      "t",
+      routedFetch(),
+    );
+    const [sig] = await src.latest({});
+    expect(sig!.ttlSec).toBe(900);
   });
 
   it("mirrors prob for NO-side signals", async () => {

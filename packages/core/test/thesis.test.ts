@@ -9,7 +9,7 @@ import {
   buildTicket,
   type Candle,
   type ThesisTicket,
-} from "@quotient/cassie-core";
+} from "@quotient-forecasting/cassie-core";
 
 const baseTicket: ThesisTicket = {
   venue: "hyperliquid",

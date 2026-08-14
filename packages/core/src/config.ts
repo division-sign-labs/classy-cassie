@@ -4,6 +4,9 @@
 
 import { z } from "zod";
 
+/** Live signals older than three hours are stale unless a bot overrides this. */
+export const DEFAULT_SIGNAL_MAX_AGE_SEC = 3 * 60 * 60;
+
 export const RiskConfigSchema = z.object({
   /** Max slippage from mid when computing the executable band, in bps. */
   maxSlippageBps: z.number().positive().default(100),
@@ -29,6 +32,8 @@ export const SignalsConfigSchema = z.object({
   /** Quotient gateway. dev.quotient.social is gateway-only and rejects direct calls. */
   baseUrl: z.string().default("https://quotient-api-gateway.onrender.com"),
   path: z.string().default("/api/v1/signals"),
+  /** Maximum age of a live forecast before it is ignored. */
+  maxAgeSec: z.number().positive().default(DEFAULT_SIGNAL_MAX_AGE_SEC),
 });
 export type SignalsConfig = z.output<typeof SignalsConfigSchema>;
 

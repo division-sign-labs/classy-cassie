@@ -10,7 +10,7 @@ import {
   type OutboundHandlerContext,
   type StopParams,
 } from "@cloudflare/containers";
-import type { ErrorRecord, LogLevel, LogQuery } from "@quotient/cassie-core";
+import type { ErrorRecord, LogLevel, LogQuery } from "@quotient-forecasting/cassie-core";
 
 export { ContainerProxy } from "@cloudflare/containers";
 

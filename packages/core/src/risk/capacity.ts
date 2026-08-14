@@ -14,6 +14,8 @@ export interface CapacityInput {
   book: OrderBook;
   quote: Quote;
   risk: RiskConfig;
+  /** Per-order floor. May tighten, but never weaken, risk.minViableNotional. */
+  minimumNotional?: number;
 }
 
 export interface CapacityResult {
@@ -36,6 +38,7 @@ export interface CapacityResult {
  */
 export function checkCapacity(input: CapacityInput): CapacityResult {
   const { side, desiredSize, refPrice, book, quote, risk } = input;
+  const minimumNotional = Math.max(risk.minViableNotional, input.minimumNotional ?? 0);
   const skipReasons: string[] = [];
   const notes: string[] = [];
 
@@ -73,9 +76,9 @@ export function checkCapacity(input: CapacityInput): CapacityResult {
     notes.push(`size capped by maxOrderNotional $${risk.maxOrderNotional}`);
   }
 
-  if (size * refPrice < risk.minViableNotional) {
+  if (size * refPrice < minimumNotional) {
     skipReasons.push(
-      `capped notional $${(size * refPrice).toFixed(2)} < minViableNotional $${risk.minViableNotional} — skip rather than dribble`,
+      `capped notional $${(size * refPrice).toFixed(2)} < minimum notional $${minimumNotional} — skip rather than dribble`,
     );
   }
 

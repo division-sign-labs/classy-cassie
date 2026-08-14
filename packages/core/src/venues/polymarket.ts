@@ -146,8 +146,8 @@ export class PolymarketAdapter implements VenueAdapter {
     const pk = await ctx.getSecret("master");
     if (!pk) throw new Error("no master key in keystore — run `cassie wallet create <botId>` first");
 
-    ctx.print("Paths: create = new Deposit Wallet (needs a Builder or Relayer key)");
-    ctx.print("       connect = existing account (wallet address + Relayer key)");
+    ctx.print("Paths: create = new Polymarket trading wallet (needs a Builder or Relayer key)");
+    ctx.print("       connect = existing Polymarket account (profile wallet + Relayer key)");
     const path = (await ctx.ask("Path (create/connect)", { default: "create" })).trim().toLowerCase();
 
     let apiKey: ApiKeyAuthorization | undefined;
@@ -174,7 +174,7 @@ export class PolymarketAdapter implements VenueAdapter {
       await ctx.putSecret(GASLESS_AUTH_ROLE, JSON.stringify(gaslessAuth), { runtimeEligible: false });
     }
 
-    ctx.print("Creating/deriving Deposit Wallet and CLOB credentials (gasless)…");
+    ctx.print("Creating/deriving Polymarket trading wallet and CLOB credentials (gasless)…");
     const client = await createSecureClient({
       signer: privateKey(pk),
       ...(wallet ? { wallet } : {}),
@@ -183,8 +183,9 @@ export class PolymarketAdapter implements VenueAdapter {
     this.secureClient = client;
 
     const account = client.account;
-    ctx.print(`signer (EOA):    ${account.signer}`);
-    ctx.print(`funder (wallet): ${account.wallet} [${String(account.walletType)}]`);
+    ctx.print(`signer (EOA):     ${account.signer}`);
+    ctx.print(`trading address:  ${account.wallet} [${String(account.walletType)}]`);
+    ctx.print("Polygon pUSD only.");
 
     // L2 creds (HMAC key/secret/passphrase) — runtime-eligible.
     const l2 = client.credentials;
@@ -240,7 +241,7 @@ export class PolymarketAdapter implements VenueAdapter {
         note: chain === "evm" ? "any supported EVM chain; auto-converted to pUSD" : undefined,
       })),
       summary:
-        `Send USDC to the bridge deposit address (evm) for Deposit Wallet ${a.funder}. ` +
+        `Send USDC to the bridge deposit address shown below. ` +
         `Auto-wrapped to pUSD. Deposits over $50k: use a third-party bridge (DeBridge/Across/Portal) ` +
         `direct to the Polygon USDC address instead to limit slippage.`,
     };
@@ -388,7 +389,7 @@ export class PolymarketAdapter implements VenueAdapter {
   private async elicitBuilderAuth(ctx: SetupContext): Promise<GaslessAuthDesc | undefined> {
     const saved = (await ctx.getOperatorDefault?.("polymarket-builder")) ?? null;
     ctx.print("");
-    ctx.print("Polymarket needs a Builder or Relayer API key to deploy your Deposit Wallet.");
+    ctx.print("Polymarket needs a Builder or Relayer API key to deploy your trading wallet.");
     ctx.print("Free, from your own Polymarket account.");
 
     for (;;) {
@@ -435,7 +436,7 @@ export class PolymarketAdapter implements VenueAdapter {
       { value: "builder", title: saved ? "Paste a different Builder key" : "Paste a Builder key" },
       { value: "open", title: "Open polymarket.com to create one" },
       { value: "relayer", title: "Use a Relayer key instead" },
-      { value: "skip", title: "Skip (cannot deploy a Deposit Wallet without one)" },
+      { value: "skip", title: "Skip (cannot deploy a trading wallet without one)" },
     ];
     if (ctx.select) return ctx.select("Authenticate with", choices);
     const menu = choices.map((c, i) => `  ${i + 1}) ${c.title}`).join("\n");
