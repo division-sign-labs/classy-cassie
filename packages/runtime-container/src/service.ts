@@ -86,7 +86,6 @@ export class BotService {
     const creds = JSON.parse(required("CASSIE_BOT_CREDS")) as RuntimeCreds;
     if (this.config.id !== botId) throw new Error(`container bot id mismatch: ${this.config.id} != ${botId}`);
     if (!this.config.account) throw new Error(`bot ${botId} has no venue account configured`);
-    if (this.config.signals.source !== "live") throw new Error("Cloudflare Container runtime requires live signals");
 
     const requiredRegion = required("CASSIE_REQUIRED_REGION");
     const region = required("CLOUDFLARE_REGION");

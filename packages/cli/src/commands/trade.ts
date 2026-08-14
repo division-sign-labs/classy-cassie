@@ -61,18 +61,14 @@ export interface TradeOpts {
   fromThesis?: string;
   mappings?: string;
   yes?: boolean;
-  books?: string;
   /** Human rationale; the feed caption when the bot publishes (§Ares). */
   note?: string;
 }
 
-async function localEngine(botId: string, books?: string): Promise<{ engine: Engine; close: () => void }> {
+async function localEngine(botId: string): Promise<{ engine: Engine; close: () => void }> {
   const cfg = loadBotConfig(botId);
   const account = requireAccount(cfg);
-  const adapter = await adapterFor(cfg, {
-    needCreds: cfg.venue !== "fixture",
-    fixtureBooks: books ? readFileSync(books, "utf8") : cfg.venue === "fixture" ? readFileSync("fixtures/books.json", "utf8") : undefined,
-  });
+  const adapter = await adapterFor(cfg, { needCreds: true });
   const state = new SqliteStateStore(statePath(botId));
   const log = consoleLogger(botId);
   const engine = new Engine({
@@ -105,7 +101,7 @@ async function placeManual(botId: string, params: ManualOrderParams): Promise<Ma
 export async function runTrade(botId: string, sideArg: string | undefined, marketRef: string | undefined, opts: TradeOpts): Promise<void> {
   if (opts.thesis) {
     const cfg = loadBotConfig(botId);
-    const thesis = await elicitTicket({ venue: cfg.venue === "fixture" ? "hyperliquid" : (cfg.venue as ThesisTicket["venue"]) });
+    const thesis = await elicitTicket({ venue: cfg.venue });
     if (opts.save) saveThesis(thesis, opts.save, opts.mappings);
     await tradeFromThesis(botId, thesis, opts);
     return;
@@ -165,14 +161,10 @@ function printResult(result: ManualOrderResult): void {
 async function tradeFromThesis(botId: string, raw: ThesisTicket, opts: TradeOpts): Promise<void> {
   const cfg = loadBotConfig(botId);
   const mappings = loadMappings(opts.mappings ?? raw.mappings);
-  const adapter = await adapterFor(cfg, {
-    fixtureBooks:
-      cfg.venue === "fixture" ? readFileSync(opts.books ?? "fixtures/books.json", "utf8") : undefined,
-  });
+  const adapter = await adapterFor(cfg);
   const account = requireAccount(cfg);
 
-  // Paper bots accept any thesis venue so the whole flow is demoable offline.
-  if (cfg.venue !== "fixture" && raw.venue !== cfg.venue) {
+  if (raw.venue !== cfg.venue) {
     throw new Error(`thesis venue "${raw.venue}" does not match bot venue "${cfg.venue}"`);
   }
 

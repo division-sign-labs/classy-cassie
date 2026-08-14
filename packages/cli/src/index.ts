@@ -55,9 +55,6 @@ program
 program
   .command("run <botId>")
   .description("run the bot locally (Ctrl-C cancels resting orders)")
-  .option("--signals <path>", "signal fixture file (offline mode)")
-  .option("--books <path>", "books fixture file (fixture venue)")
-  .option("--ticks <n>", "stop after N ticks (testing)")
   .option("--debug", "debug logging")
   .action(wrap(runBot));
 
@@ -98,7 +95,6 @@ program
   .option("--save <file>", "with --thesis: also save the thesis JSON for reuse")
   .option("--from-thesis <file>", "place from a saved thesis JSON")
   .option("--mappings <file>", "alternative thesis mappings file")
-  .option("--books <path>", "books fixture (fixture venue)")
   .option("-y, --yes", "skip confirmation")
   .action(wrap(runTrade));
 

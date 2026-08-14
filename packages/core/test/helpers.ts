@@ -34,10 +34,9 @@ export class RecordingAlerter implements Alerter {
 export function buildFixtureEngine() {
   const config = parseBotConfig({
     id: "fxbot",
-    venue: "fixture",
+    venue: "polymarket",
     risk: { maxSlippageBps: 300 },
     strategy: { id: "flip-flat", config: { entrySpreadPp: 10, maxPositionNotional: 50 } },
-    signals: { source: "fixture" },
     tickIntervalMin: 5,
   });
   const venue = new FixtureVenue(booksFixture);

@@ -32,7 +32,7 @@ export async function showPortfolio(botId?: string): Promise<void> {
       if (isDeployed(cfg)) {
         p = (await controlFetch(cfg, "/portfolio")) as BotPortfolio;
       } else {
-        const adapter = await adapterFor(cfg, { fixtureBooks: cfg.venue === "fixture" ? "{\"markets\":{}}" : undefined });
+        const adapter = await adapterFor(cfg);
         p = await computePortfolio(id, adapter, requireAccount(cfg));
       }
       portfolios.push(p);
@@ -162,7 +162,7 @@ export async function alertsTest(botId: string): Promise<void> {
 }
 
 export function venueStatus(): void {
-  const defaults = parseBotConfig({ id: "probe", venue: "fixture" }).venueUrls;
+  const defaults = parseBotConfig({ id: "probe", venue: "polymarket" }).venueUrls;
   const rows: [string, string, string][] = [];
   for (const venue of ["polymarket", "hyperliquid", "lighter"] as const) {
     try {

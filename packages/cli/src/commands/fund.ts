@@ -3,7 +3,7 @@
 // the Splits path prints exact splits-cli invocations, then keeps polling.
 
 import pc from "picocolors";
-import { splitsDisburseCommands, splitsRegisterSignerCommands } from "@quotient-forecasting/cassie-core";
+import { parseBotConfig, splitsDisburseCommands, splitsRegisterSignerCommands } from "@quotient-forecasting/cassie-core";
 import { adapterFor, ask, makeSetupContext, requireAccount } from "../context.js";
 import { loadBotConfig, saveBotConfig } from "../paths.js";
 
@@ -39,7 +39,7 @@ export async function runFund(botId: string, opts: { from?: string }): Promise<v
 
   if (adapter.runFundingFlow) {
     const updated = await adapter.runFundingFlow(ctx, account);
-    saveBotConfig({ ...cfg, account: updated });
+    saveBotConfig(parseBotConfig({ ...cfg, account: updated }));
   } else {
     const instructions = await adapter.fundingInstructions(account);
     console.log(instructions.summary);

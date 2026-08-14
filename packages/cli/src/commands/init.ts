@@ -72,10 +72,10 @@ export async function runInit(): Promise<void> {
   }
   if (existing && !(await confirm(`bot "${botId}" exists — reconfigure it?`, false))) return;
 
-  const venue = (await ask("Venue (polymarket / hyperliquid / lighter / fixture)", { default: "polymarket" }))
+  const venue = (await ask("Venue (polymarket / hyperliquid / lighter)", { default: "polymarket" }))
     .trim()
     .toLowerCase();
-  if (!["polymarket", "hyperliquid", "lighter", "fixture"].includes(venue)) {
+  if (!["polymarket", "hyperliquid", "lighter"].includes(venue)) {
     throw new Error(`unknown venue "${venue}"`);
   }
 
@@ -95,9 +95,6 @@ export async function runInit(): Promise<void> {
   const setupCtx = makeSetupContext(botId);
   const adapter = createAdapter(venue as BotConfig["venue"], {
     urls: parseBotConfig({ id: botId, venue }).venueUrls,
-    // The paper venue needs a books fixture to construct; setup() itself never
-    // reads it, so an empty book is fine here.
-    fixtureBooks: venue === "fixture" ? '{"markets":{}}' : undefined,
   });
   // An account already provisioned for this bot is reused by default: re-running
   // the wizard to change a strategy setting should never re-prompt for a Deposit
@@ -112,23 +109,14 @@ export async function runInit(): Promise<void> {
     : await elicitStrategyConfig();
   const tickIntervalMin = Number(strategyConfig.tickIntervalMin ?? 5);
 
-  // Signals (§7). A real venue always means live forecasts — canned fixture
-  // signals only exist for the offline paper venue, and `deploy` rejects them
-  // outright. So this follows from the venue rather than being asked.
-  const sigSource = venue === "fixture" ? "fixture" : "live";
-  const fixturePath = sigSource === "fixture" ? "fixtures/signals.json" : undefined;
-  if (sigSource === "live") {
-    // A key may already be exported, in .local.env, or owned by the Quotient
-    // CLI. Say exactly which source won without displaying any key material.
-    const discovered = discoverQuotientToken();
-    if (discovered) console.log(pc.dim(`found a Quotient API key from ${discovered.origin}`));
-    const token = discovered && (await confirm("Use that key for live signals?", true))
-      ? discovered.token
-      : (await ask("Quotient API key", { secret: true })).trim();
-    if (token) ks.putEntry(botId, KeyRoles.quotientToken, token, pass, { runtimeEligible: true });
-  } else {
-    console.log(pc.dim(`paper venue — replaying signals from ${fixturePath}`));
-  }
+  // A key may already be exported, in .local.env, or owned by the Quotient
+  // CLI. Say exactly which source won without displaying any key material.
+  const discovered = discoverQuotientToken();
+  if (discovered) console.log(pc.dim(`found a Quotient API key from ${discovered.origin}`));
+  const token = discovered && (await confirm("Use that key for live signals?", true))
+    ? discovered.token
+    : (await ask("Quotient API key", { secret: true })).trim();
+  if (token) ks.putEntry(botId, KeyRoles.quotientToken, token, pass, { runtimeEligible: true });
 
   // Alerts: Telegram only in MVP.
   let telegram: { chatId: string } | undefined;
@@ -188,7 +176,7 @@ export async function runInit(): Promise<void> {
       id: "signals",
       config: strategyConfig,
     },
-    signals: { source: sigSource, fixturePath },
+    signals: {},
     alerts: { telegram },
     reporting,
     tickIntervalMin,
@@ -210,7 +198,7 @@ export async function runInit(): Promise<void> {
     } else {
       console.log(pc.dim(`fund later with: cassie fund ${botId}`));
     }
-  } else if (venue !== "fixture" && (await confirm("Run the funding flow now?", true))) {
+  } else if (await confirm("Run the funding flow now?", true)) {
     await runFund(botId, {});
   } else {
     console.log(pc.dim(`fund later with: cassie fund ${botId}`));

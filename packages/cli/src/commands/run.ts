@@ -10,9 +10,6 @@ import { resolveQuotientToken } from "../quotient-token.js";
 import { resolveAresApiKey } from "../ares-config.js";
 
 export interface RunOpts {
-  signals?: string;
-  books?: string;
-  ticks?: string;
   debug?: boolean;
 }
 
@@ -33,12 +30,9 @@ export async function runBot(botId: string, opts: RunOpts): Promise<void> {
     account,
     creds,
     statePath: statePath(botId),
-    signalsFixturePath: opts.signals,
-    fixtureBooksPath: opts.books ?? (cfg.venue === "fixture" ? "fixtures/books.json" : undefined),
     quotientToken,
     telegramToken,
     reportingApiKey,
     log: consoleLogger(botId, opts.debug ? "debug" : "info"),
-    maxTicks: opts.ticks !== undefined ? Number(opts.ticks) : undefined,
   });
 }

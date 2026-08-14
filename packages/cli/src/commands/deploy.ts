@@ -176,9 +176,6 @@ export async function runDeploy(botId: string, opts: { rotateToken?: boolean } =
   if (cfg.venue === "lighter") {
     throw new Error("lighter is not yet wired and verified in the deployed Container runtime — use `cassie run`");
   }
-  if (cfg.venue !== "fixture" && cfg.signals.source !== "live") {
-    console.log(pc.yellow("deployed bots need live signals; fixture mode is local-only. Setting signals.source=live for the deployed config."));
-  }
   const account = cfg.account;
   if (!account) throw new Error("bot has no venue account — finish `cassie init` first");
 
@@ -259,7 +256,7 @@ export async function runDeploy(botId: string, opts: { rotateToken?: boolean } =
   }
 
   const idKey = botId.toUpperCase().replaceAll("-", "_");
-  const deployedCfg = { ...cfg, signals: { ...cfg.signals, source: "live" as const, fixturePath: undefined }, controlUrl };
+  const deployedCfg = { ...cfg, controlUrl };
   const secrets: [string, string | null][] = [
     ["CONTROL_TOKEN", controlToken],
     [`BOT_${idKey}_CONFIG`, serializeBotConfig(deployedCfg)],

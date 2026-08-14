@@ -93,7 +93,7 @@ export interface LocalRunOpts {
   account: VenueAccount;
   creds?: RuntimeCreds;
   statePath: string;
-  /** Overrides config.signals — e.g. `--signals fixtures/signals.json`. */
+  /** Contributor-test hook for a deterministic signal file. */
   signalsFixturePath?: string;
   quotientToken?: string;
   telegramToken?: string;
@@ -113,12 +113,11 @@ export function buildStrategy(id: string): Strategy {
 
 export function buildSignalSource(opts: LocalRunOpts): SignalSource {
   const cfg = opts.config.signals;
-  const fixturePath = opts.signalsFixturePath ?? (cfg.source === "fixture" ? cfg.fixturePath : undefined);
-  if (fixturePath) {
-    return new FixtureSignalSource(readFileSync(fixturePath, "utf8"));
+  if (opts.signalsFixturePath) {
+    return new FixtureSignalSource(readFileSync(opts.signalsFixturePath, "utf8"));
   }
   if (!opts.quotientToken) {
-    throw new Error("live signals need QUOTIENT_API_TOKEN (env or keystore) — or pass --signals <fixture>");
+    throw new Error("live signals need a Quotient API key (environment, .local.env, Quotient CLI, or bot keystore)");
   }
   return new LiveSignalSource(cfg, opts.quotientToken);
 }

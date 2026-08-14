@@ -59,7 +59,7 @@ prints stack traces; `CASSIE_RUNTIME_CF` points `deploy` at a non-standard runti
 Every step happens in the terminal; you only leave it to copy-paste dashboard values.
 
 1. **Bot id** — lowercase, dashes, max 32 chars. Names the config, keystore, and state files.
-2. **Venue** — `polymarket`, `hyperliquid`, `lighter`, or `fixture` (offline paper venue).
+2. **Venue** — `polymarket`, `hyperliquid`, or `lighter`.
 3. **Passphrase** — encrypts the keystore. There is no recovery; losing it means
    re-importing or re-generating keys.
 4. **Wallet** — a fresh EOA is generated for the bot (or reused if one exists). The
@@ -91,10 +91,10 @@ Every step happens in the terminal; you only leave it to copy-paste dashboard va
    flips). One confirm accepts the recommended settings: quarter-Kelly sizing, 10pp entry
    edge, positions until the budget is used. Declining runs the short manual questions;
    `cassie strategy <botId>` re-tunes any time.
-7. **Signals** — follows from the venue, so the wizard no longer asks: a real venue means
-   live Quotient signals (it reuses a key found from the quotient CLI, or asks for one);
-   the offline `fixture` venue replays `fixtures/signals.json`. `QUOTIENT_API_KEY` and
-   `QUOTIENT_API_TOKEN` are both honoured from the environment.
+7. **Signals** — live Quotient signals. The wizard reuses a key found from the quotient
+   CLI or asks for one. `QUOTIENT_API_KEY` and `QUOTIENT_API_TOKEN` are both honoured
+   from the environment. Deterministic fixture sources exist only inside the contributor
+   test harness; they are not an operator choice.
 8. **Telegram alerts** — create a bot with **@BotFather** on Telegram and paste its token;
    get your chat id from **@userinfobot**. The wizard offers a test ping.
 9. **Funding** — optionally continues straight into `cassie fund <botId>`.
@@ -146,7 +146,7 @@ cassie wallet list                           # bots, key roles, runtime-eligibil
 cassie wallet register-splits <botId>        # print splits-cli signer-attach commands
 cassie fund <botId> [--from splits]          # run/re-run the venue funding flow
 cassie withdraw <botId> <amount|all> --to <address>   # send collateral out (signs locally)
-cassie run <botId> [--signals <path>] [--books <path>] [--ticks <n>] [--debug]
+cassie run <botId> [--debug]
 cassie strategy <botId>                      # view/tune strategy settings
 cassie deploy <botId>                        # EEUR Container + Worker control plane on YOUR CF account
 cassie reporting <botId> [--no-post|--off]   # configure Ares for this bot only
@@ -190,8 +190,7 @@ Live signals come from the Quotient gateway
 calls). Get a key at quotient.social; if the **quotient-api** skill/CLI is installed and
 logged in, the same key lives in `~/.config/quotient/config.json`. Give it to cassie via
 `QUOTIENT_API_TOKEN` / `QUOTIENT_API_KEY` in the environment or nearest `.local.env`,
-or let the wizard store it in the keystore (re-run `cassie init`
-and choose `live`, or set `signals.source: "live"` in `~/.cassie/bots/<botId>.json`).
+or let the wizard store it in the keystore by re-running `cassie init`.
 
 The quotient-api skill is a separate product surface (research, forecasts, briefs); cassie
 consumes exactly one read endpoint — the published-signals feed — and maps each row onto
@@ -203,14 +202,15 @@ cause no action; `signals.maxAgeSec` can override that per bot.
 Financial fields never flow toward the signal API — the client sends only the API key
 header, no query params, and its type surface has no method that accepts account state.
 
-Fixture mode for dry runs (the full flip case, offline, no keys or funds):
+Contributors can run the deterministic offline engine case without creating a bot,
+keys, or funds:
 
 ```
-cassie run <botId> --signals fixtures/signals.json --books fixtures/books.json --ticks 4
+pnpm exec vitest run packages/core/test/engine-e2e.test.ts
 ```
 
-Tick 1 enters YES with the size visibly capped by the thin fixture book; tick 3 flips,
-exits, and re-enters NO. Alerts fire at each step.
+The test enters YES with size capped by the thin test book, then flips, exits, and
+re-enters NO. The fixture venue and signal source are test doubles, not product options.
 
 ## 5b. Trade reporting (opt-in, Polymarket only)
 

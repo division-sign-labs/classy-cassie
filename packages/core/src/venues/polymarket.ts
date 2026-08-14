@@ -146,7 +146,7 @@ export class PolymarketAdapter implements VenueAdapter {
     const pk = await ctx.getSecret("master");
     if (!pk) throw new Error("no master key in keystore — run `cassie wallet create <botId>` first");
 
-    ctx.print("Paths: create = new Polymarket trading wallet (needs a Builder or Relayer key)");
+    ctx.print("Paths: create = new Polymarket account (needs a Builder or Relayer key)");
     ctx.print("       connect = existing Polymarket account (profile wallet + Relayer key)");
     const path = (await ctx.ask("Path (create/connect)", { default: "create" })).trim().toLowerCase();
 
@@ -174,7 +174,7 @@ export class PolymarketAdapter implements VenueAdapter {
       await ctx.putSecret(GASLESS_AUTH_ROLE, JSON.stringify(gaslessAuth), { runtimeEligible: false });
     }
 
-    ctx.print("Creating/deriving Polymarket trading wallet and CLOB credentials (gasless)…");
+    ctx.print("Creating/deriving Polymarket account and CLOB credentials (gasless)…");
     const client = await createSecureClient({
       signer: privateKey(pk),
       ...(wallet ? { wallet } : {}),
@@ -387,13 +387,13 @@ export class PolymarketAdapter implements VenueAdapter {
    * masked box, where the operator could not see what they had typed.
    */
   private async elicitBuilderAuth(ctx: SetupContext): Promise<GaslessAuthDesc | undefined> {
-    const saved = (await ctx.getOperatorDefault?.("polymarket-builder")) ?? null;
+    const defaultAuth = (await ctx.getOperatorDefault?.("polymarket-builder")) ?? null;
     ctx.print("");
-    ctx.print("Polymarket needs a Builder or Relayer API key to deploy your trading wallet.");
+    ctx.print("Polymarket needs a Builder or Relayer API key to create your account.");
     ctx.print("Free, from your own Polymarket account.");
 
     for (;;) {
-      const choice = await this.askAuthChoice(ctx, saved);
+      const choice = await this.askAuthChoice(ctx, defaultAuth);
       if (choice === "open") {
         const url = "https://polymarket.com/settings";
         if (ctx.openUrl) ctx.openUrl(url);
@@ -401,7 +401,7 @@ export class PolymarketAdapter implements VenueAdapter {
         ctx.print("Create a Builder key there, then pick 'Paste a Builder key'.");
         continue;
       }
-      if (choice === "saved" && saved) return JSON.parse(saved) as GaslessAuthDesc;
+      if (choice === "default" && defaultAuth) return JSON.parse(defaultAuth) as GaslessAuthDesc;
       if (choice === "builder") {
         const key = (await ctx.ask("Builder key", { secret: true })).trim();
         if (!key) {
@@ -411,7 +411,7 @@ export class PolymarketAdapter implements VenueAdapter {
         const secret = (await ctx.ask("Builder secret", { secret: true })).trim();
         const passphrase = (await ctx.ask("Builder passphrase", { secret: true })).trim();
         const desc: GaslessAuthDesc = { kind: "builder", key, secret, passphrase };
-        if (ctx.setOperatorDefault && (await ctx.confirm("Save this key for future bots?", true))) {
+        if (ctx.setOperatorDefault && (await ctx.confirm("Make this the default Builder key for future bots?", true))) {
           await ctx.setOperatorDefault("polymarket-builder", JSON.stringify(desc));
         }
         return desc;
@@ -430,13 +430,13 @@ export class PolymarketAdapter implements VenueAdapter {
   }
 
   /** The menu, with a text fallback for hosts that implement no `select`. */
-  private async askAuthChoice(ctx: SetupContext, saved: string | null): Promise<string> {
+  private async askAuthChoice(ctx: SetupContext, defaultAuth: string | null): Promise<string> {
     const choices = [
-      ...(saved ? [{ value: "saved", title: `Use your saved Builder key (${maskSecret(saved)})` }] : []),
-      { value: "builder", title: saved ? "Paste a different Builder key" : "Paste a Builder key" },
+      ...(defaultAuth ? [{ value: "default", title: `Use default Builder key (${maskSecret(defaultAuth)})` }] : []),
+      { value: "builder", title: defaultAuth ? "Paste a different Builder key" : "Paste a Builder key" },
       { value: "open", title: "Open polymarket.com to create one" },
       { value: "relayer", title: "Use a Relayer key instead" },
-      { value: "skip", title: "Skip (cannot deploy a trading wallet without one)" },
+      { value: "skip", title: "Skip (cannot create a Polymarket account without one)" },
     ];
     if (ctx.select) return ctx.select("Authenticate with", choices);
     const menu = choices.map((c, i) => `  ${i + 1}) ${c.title}`).join("\n");

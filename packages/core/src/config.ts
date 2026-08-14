@@ -25,16 +25,19 @@ export const RiskConfigSchema = z.object({
 });
 export type RiskConfig = z.output<typeof RiskConfigSchema>;
 
-export const SignalsConfigSchema = z.object({
-  source: z.enum(["live", "fixture"]).default("fixture"),
-  /** Fixture file path (local runtime) or inline fixture JSON (deployed). */
-  fixturePath: z.string().optional(),
-  /** Quotient gateway. dev.quotient.social is gateway-only and rejects direct calls. */
-  baseUrl: z.string().default("https://quotient-api-gateway.onrender.com"),
-  path: z.string().default("/api/v1/signals"),
-  /** Maximum age of a live forecast before it is ignored. */
-  maxAgeSec: z.number().positive().default(DEFAULT_SIGNAL_MAX_AGE_SEC),
-});
+export const SignalsConfigSchema = z
+  .object({
+    /** Backward compatibility for existing real-bot configs; omitted on serialization. */
+    source: z.literal("live").optional(),
+    /** Reject the removed test-fixture field instead of silently ignoring it. */
+    fixturePath: z.never().optional(),
+    /** Quotient gateway. dev.quotient.social is gateway-only and rejects direct calls. */
+    baseUrl: z.string().default("https://quotient-api-gateway.onrender.com"),
+    path: z.string().default("/api/v1/signals"),
+    /** Maximum age of a live forecast before it is ignored. */
+    maxAgeSec: z.number().positive().default(DEFAULT_SIGNAL_MAX_AGE_SEC),
+  })
+  .transform(({ source: _legacySource, fixturePath: _removedFixturePath, ...config }) => config);
 export type SignalsConfig = z.output<typeof SignalsConfigSchema>;
 
 export const TelegramConfigSchema = z.object({
@@ -128,15 +131,11 @@ export const VenueAccountSchema = z.discriminatedUnion("venue", [
     apiKeyIndex: z.number().optional(),
     intentAddresses: z.record(z.string(), z.string()).optional(),
   }),
-  z.object({
-    venue: z.literal("fixture"),
-    address: z.string(),
-  }),
 ]);
 
 export const BotConfigSchema = z.object({
   id: z.string().regex(/^[a-z0-9][a-z0-9-]{0,31}$/, "bot id: lowercase alphanumerics and dashes, max 32 chars"),
-  venue: z.enum(["polymarket", "hyperliquid", "lighter", "fixture"]),
+  venue: z.enum(["polymarket", "hyperliquid", "lighter"]),
   account: VenueAccountSchema.optional(),
   strategy: z
     .object({

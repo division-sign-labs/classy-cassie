@@ -63,8 +63,23 @@ describe("isSignalFresh", () => {
 
 describe("signal configuration", () => {
   it("defaults live signal freshness to three hours", () => {
-    const cfg = parseBotConfig({ id: "default-freshness", venue: "fixture" });
+    const cfg = parseBotConfig({ id: "default-freshness", venue: "polymarket" });
     expect(cfg.signals.maxAgeSec).toBe(3 * 60 * 60);
+  });
+
+  it("has no configurable source and rejects the old fixture pseudo-source", () => {
+    const cfg = parseBotConfig({ id: "live-signals", venue: "polymarket", signals: { source: "live" } });
+    expect(cfg.signals).not.toHaveProperty("source");
+    expect(() =>
+      parseBotConfig({ id: "fixture-signals", venue: "polymarket", signals: { source: "fixture" } }),
+    ).toThrow();
+    expect(() =>
+      parseBotConfig({ id: "fixture-path", venue: "polymarket", signals: { fixturePath: "signals.json" } }),
+    ).toThrow();
+  });
+
+  it("rejects the fixture test double as a bot venue", () => {
+    expect(() => parseBotConfig({ id: "fixture-venue", venue: "fixture" })).toThrow();
   });
 });
 

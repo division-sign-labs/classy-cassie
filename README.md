@@ -39,9 +39,8 @@ pnpm install && pnpm build
 # create a bot: wallet, venue account, strategy, Telegram, funding — all in the terminal
 node packages/cli/dist/index.js init
 
-# offline dry run (no keys, no funds): entry → capacity cap → flip → exit → re-entry
-node packages/cli/dist/index.js run <botId> \
-  --signals fixtures/signals.json --books fixtures/books.json --ticks 4
+# deterministic offline engine test: entry → capacity cap → flip → exit → re-entry
+pnpm exec vitest run packages/core/test/engine-e2e.test.ts
 
 # live, locally
 node packages/cli/dist/index.js run <botId>
@@ -81,7 +80,8 @@ caption, while thesis trades use their public reasoning summary.
 
 ## Signals
 
-Bots consume this contract (live from Quotient, or fixtures for offline runs):
+Bots consume this contract live from Quotient. Contributor tests use internal test
+doubles rather than a configurable venue or signal source:
 
 ```ts
 interface Signal {

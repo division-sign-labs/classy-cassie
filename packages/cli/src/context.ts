@@ -13,7 +13,6 @@ import {
   type BotConfig,
   type RuntimeCreds,
   type SetupContext,
-  type VenueAccount,
   type VenueAdapter,
 } from "@quotient-forecasting/cassie-core";
 import { dirs, readControlToken } from "./paths.js";
@@ -155,12 +154,12 @@ export async function buildRuntimeCreds(cfg: BotConfig): Promise<RuntimeCreds> {
       }
       return { venue: "lighter", apiPrivateKey: apiPk, accountIndex: acct.accountIndex, apiKeyIndex: acct.apiKeyIndex ?? 2 };
     }
-    case "fixture":
-      return { venue: "fixture" };
+    default:
+      throw new Error("unsupported venue account");
   }
 }
 
-export function requireAccount(cfg: BotConfig): VenueAccount {
+export function requireAccount(cfg: BotConfig): NonNullable<BotConfig["account"]> {
   if (!cfg.account) throw new Error(`bot "${cfg.id}" has no venue account yet — finish \`cassie init\``);
   return cfg.account;
 }
