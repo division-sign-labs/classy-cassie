@@ -66,6 +66,17 @@ interface AssetMeta {
   maxLeverage: number;
 }
 
+export function classifyHyperliquidAgent(
+  agents: Array<{ address: string; name: string }>,
+  address: string,
+  name: string,
+): "approved" | "available" | "name-conflict" {
+  const normalized = address.toLowerCase();
+  if (agents.some((agent) => agent.address.toLowerCase() === normalized)) return "approved";
+  if (agents.some((agent) => agent.name === name)) return "name-conflict";
+  return "available";
+}
+
 export class HyperliquidAdapter implements VenueAdapter {
   readonly id = "hyperliquid" as const;
   readonly verifiedAgainst = "2026-08-13";
@@ -210,6 +221,18 @@ export class HyperliquidAdapter implements VenueAdapter {
       return this.provisionAgent(ctx, a);
     }
 
+    // Init can crash after the bridge credits but before the agent/account
+    // checkpoint. Resume from venue state instead of asking for a duplicate
+    // Arbitrum deposit. Explicit top-ups retain agentAddress and still follow
+    // the ordinary deposit path below.
+    if (!a.agentAddress) {
+      const existing = await this.info.clearinghouseState({ user: master }).catch(() => null);
+      if (existing && Number(existing.marginSummary.accountValue) > 0) {
+        ctx.print("Existing Hyperliquid collateral detected; resuming agent provisioning without another deposit.");
+        return this.provisionAgent(ctx, a);
+      }
+    }
+
     const pub = createPublicClient({ chain: arbitrum, transport: http(urls.arbitrumRpc) });
     const instructions = await this.fundingInstructions(acct);
     ctx.print(instructions.summary);
@@ -264,14 +287,29 @@ export class HyperliquidAdapter implements VenueAdapter {
     const masterPk = await ctx.getSecret(KeyRoles.master);
     if (!masterPk) throw new Error("master key missing from keystore");
     const masterAccount = privateKeyToAccount(masterPk as `0x${string}`);
-    const agentPk = generatePrivateKey();
+    // Persist the candidate before the external approval. If the process dies
+    // after Hyperliquid commits, init resumes with the exact same key instead
+    // of burning another one of the limited named-agent slots.
+    const storedAgentPk = await ctx.getSecret(KeyRoles.agent);
+    const agentPk = (storedAgentPk ?? generatePrivateKey()) as `0x${string}`;
     const agent = privateKeyToAccount(agentPk);
     // Agent names are capped at 16 chars; HL allows 1 unnamed + up to 3 named agents.
     const agentName = `cassie-${ctx.botId}`.slice(0, 16);
 
-    const masterExchange = new ExchangeClient({ transport: this.transport, wallet: masterAccount });
-    await masterExchange.approveAgent({ agentAddress: agent.address, agentName });
-    await ctx.putSecret(KeyRoles.agent, agentPk, { address: agent.address, runtimeEligible: true });
+    if (!storedAgentPk) {
+      await ctx.putSecret(KeyRoles.agent, agentPk, { address: agent.address, runtimeEligible: true });
+    }
+    const registered = await this.info.extraAgents({ user: masterAccount.address });
+    const status = classifyHyperliquidAgent(registered, agent.address, agentName);
+    if (status === "name-conflict") {
+      throw new Error(
+        `Hyperliquid already has a different agent named "${agentName}". Remove or rename it in Hyperliquid, then retry; Cassie kept its pending key locally.`,
+      );
+    }
+    if (status === "available") {
+      const masterExchange = new ExchangeClient({ transport: this.transport, wallet: masterAccount });
+      await masterExchange.approveAgent({ agentAddress: agent.address, agentName });
+    }
     ctx.print(`Approved named agent "${agentName}" (${agent.address}). Agent key is runtime-eligible; master key stays local.`);
     return { ...acct, agentAddress: agent.address, agentName };
   }

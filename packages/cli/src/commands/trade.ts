@@ -23,6 +23,7 @@ import { SqliteStateStore } from "@quotient-forecasting/cassie-runtime-local";
 import { adapterFor, confirm, controlFetch, getKeystoreSecret, isDeployed, requireAccount } from "../context.js";
 import { loadBotConfig, statePath } from "../paths.js";
 import { resolveQuotientToken } from "../quotient-token.js";
+import { latestForecastThesis } from "../forecast-note.js";
 import { approvalLoop, elicitTicket, loadMappings, predictionSizeFor, saveThesis, snapshotFor } from "./ticket.js";
 
 /**
@@ -140,6 +141,24 @@ export async function runTrade(botId: string, sideArg: string | undefined, marke
     }
   }
   if (!opts.yes && !(await confirm("place this order?", false))) return;
+
+  // A widget-only manual post makes Ares invent generic copy such as
+  // "manually adding YES". Prefer Q's actual latest forecast thesis. This is
+  // deliberately best-effort and happens only after order confirmation; a
+  // read failure never blocks the trade.
+  if (params.note === undefined && cfg.venue === "polymarket" && cfg.reporting?.post) {
+    try {
+      const token = (await resolveQuotientToken(botId))?.token;
+      if (token) params.note = await latestForecastThesis(cfg, marketRef, token);
+    } catch (error) {
+      console.log(pc.dim(`latest forecast thesis unavailable: ${(error as Error).message}`));
+    }
+    console.log(
+      params.note
+        ? pc.dim("Ares caption: latest Quotient forecast thesis")
+        : pc.dim("no latest forecast thesis found; skipping the manual Ares post"),
+    );
+  }
 
   const result = await placeManual(botId, params);
   printResult(result);

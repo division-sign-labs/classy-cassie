@@ -4,6 +4,7 @@
 import pc from "picocolors";
 import { addressFromPk, generateEoa, KeyRoles } from "@quotient-forecasting/cassie-core";
 import { ask, confirm, getPassphrase, keystore } from "../context.js";
+export { abortContainerWalletBootstrap as walletAbortBootstrap } from "../container-bootstrap.js";
 
 export async function walletCreate(botId: string): Promise<void> {
   const ks = keystore();
@@ -12,6 +13,7 @@ export async function walletCreate(botId: string): Promise<void> {
     process.exit(1);
   }
   const pass = await getPassphrase(true);
+  if (ks.exists(botId)) ks.verifyPassphrase(botId, pass);
   const eoa = generateEoa();
   ks.putEntry(botId, KeyRoles.master, eoa.privateKey, pass, { address: eoa.address, runtimeEligible: false });
   console.log(`created master key for ${pc.bold(botId)}`);
@@ -38,6 +40,7 @@ export async function walletImport(botId: string): Promise<void> {
   }
   const address = addressFromPk(pk);
   const pass = await getPassphrase(true);
+  if (ks.exists(botId)) ks.verifyPassphrase(botId, pass);
   ks.putEntry(botId, KeyRoles.master, pk, pass, { address, runtimeEligible: false });
   console.log(`imported master key for ${pc.bold(botId)} — address ${pc.green(address)}`);
 }

@@ -4,7 +4,19 @@
 // and node:fs); never imported by the Workers runtime path at runtime.
 
 import { randomBytes, scryptSync, createCipheriv, createDecipheriv } from "node:crypto";
-import { mkdirSync, readFileSync, writeFileSync, existsSync, readdirSync, chmodSync } from "node:fs";
+import {
+  chmodSync,
+  closeSync,
+  existsSync,
+  fsyncSync,
+  mkdirSync,
+  openSync,
+  readFileSync,
+  readdirSync,
+  renameSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { join } from "node:path";
 
 export interface EncryptedBlob {
@@ -36,6 +48,7 @@ export interface KeystoreFile {
 const SCRYPT_N = 1 << 15;
 const SCRYPT_R = 8;
 const SCRYPT_P = 1;
+const BOT_ID_RE = /^[a-z0-9][a-z0-9-]{0,31}$/;
 
 export class WrongPassphraseError extends Error {
   constructor() {
@@ -84,6 +97,9 @@ export class Keystore {
   constructor(private readonly keysDir: string) {}
 
   private pathFor(botId: string): string {
+    if (!BOT_ID_RE.test(botId)) {
+      throw new Error("bot id must be lowercase alphanumerics/dashes, start with an alphanumeric, and be at most 32 characters");
+    }
     return join(this.keysDir, `${botId}.json`);
   }
 
@@ -100,8 +116,32 @@ export class Keystore {
   private save(file: KeystoreFile): void {
     mkdirSync(this.keysDir, { recursive: true, mode: 0o700 });
     const p = this.pathFor(file.botId);
-    writeFileSync(p, JSON.stringify(file, null, 2) + "\n", { mode: 0o600 });
-    chmodSync(p, 0o600);
+    const temporary = join(this.keysDir, `.${file.botId}.${process.pid}.${randomBytes(8).toString("hex")}.tmp`);
+    let descriptor: number | undefined;
+    try {
+      descriptor = openSync(temporary, "wx", 0o600);
+      writeFileSync(descriptor, JSON.stringify(file, null, 2) + "\n", "utf8");
+      fsyncSync(descriptor);
+      closeSync(descriptor);
+      descriptor = undefined;
+      renameSync(temporary, p);
+      chmodSync(p, 0o600);
+      // The container-wallet acknowledgement is irreversible, so make the
+      // rename itself durable before callers can consume the remote envelope.
+      // Node cannot open directory handles on Windows; NTFS rename semantics
+      // are the platform fallback there.
+      if (process.platform !== "win32") {
+        const directoryDescriptor = openSync(this.keysDir, "r");
+        try {
+          fsyncSync(directoryDescriptor);
+        } finally {
+          closeSync(directoryDescriptor);
+        }
+      }
+    } finally {
+      if (descriptor !== undefined) closeSync(descriptor);
+      if (existsSync(temporary)) rmSync(temporary);
+    }
   }
 
   list(): { botId: string; entries: { name: string; address?: string; runtimeEligible: boolean }[] }[] {
@@ -152,9 +192,30 @@ export class Keystore {
   entryMeta(botId: string, name: string): KeystoreEntry | null {
     return this.load(botId)?.entries[name] ?? null;
   }
+
+  /** Fail before adding entries under a passphrase different from the file. */
+  verifyPassphrase(botId: string, passphrase: string): boolean {
+    const file = this.load(botId);
+    if (!file) return false;
+    for (const entry of Object.values(file.entries)) decryptSecret(entry.enc, passphrase);
+    return true;
+  }
+
+  /** Remove one entry without disturbing the bot's other encrypted secrets. */
+  removeEntry(botId: string, name: string): boolean {
+    const file = this.load(botId);
+    if (!file?.entries[name]) return false;
+    delete file.entries[name];
+    this.save(file);
+    return true;
+  }
 }
 
-/** Conventional entry names. Master/L1 keys are never runtime-eligible. */
+/**
+ * Conventional entry names. Master/L1 entries are marked local-only; the
+ * current Polymarket adapter is a documented exception that explicitly reads
+ * its signer into RuntimeCreds, so it must not be reused for Splits authority.
+ */
 export const KeyRoles = {
   master: "master", // Polymarket signer EOA / HL master / Lighter L1
   agent: "agent", // HL agent key (runtime-eligible)
@@ -164,4 +225,6 @@ export const KeyRoles = {
   quotientToken: "quotient-token", // signal API token (runtime-eligible)
   aresApiKey: "ares-api-key", // Ares feed key, ares_sk_live_… (runtime-eligible)
   controlToken: "control-token", // deployed control API token
+  bootstrapWrap: "bootstrap-wrap", // one-use recipient key for container wallet export (local-only)
+  bootstrapToken: "bootstrap-token", // one-use bootstrap Worker bearer token (local-only)
 } as const;

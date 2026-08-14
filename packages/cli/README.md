@@ -12,6 +12,11 @@ npm install --global @quotient-forecasting/cassie
 cassie init
 ```
 
+The wizard supports an optional organization-owned Splits Teams subaccount. Hyperliquid
+also supports one-use Container-first wallet generation with encrypted export back to the
+local keystore; Polymarket and Lighter remain local-generation only for custody/runtime
+reasons. See the bundled Cassie operator skill for the exact boundaries and recovery flow.
+
 The package includes the local runtime, the Cloudflare Worker control plane,
 the Cloudflare Container deployment assets, and the Cassie operator skill. Its
 installer copies the skill to both `~/.agents/skills/cassie` (Codex) and

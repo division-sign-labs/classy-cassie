@@ -6,7 +6,7 @@ import { spawnSync } from "node:child_process";
 import { randomBytes } from "node:crypto";
 import { existsSync } from "node:fs";
 import { createRequire } from "node:module";
-import { dirname, join } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import pc from "picocolors";
 import { KeyRoles, serializeBotConfig } from "@quotient-forecasting/cassie-core";
@@ -15,7 +15,8 @@ import { ensureCloudflareReady, registerWorkersDevSubdomain } from "../cloudflar
 import { forgetControlToken, loadBotConfig, readControlToken, saveBotConfig, saveControlToken } from "../paths.js";
 import { resolveQuotientToken } from "../quotient-token.js";
 import { discoverAresBuilderCode, resolveAresApiKey, verifyAresApiKey } from "../ares-config.js";
-import { runWrangler, type WranglerProject } from "../wrangler.js";
+import { materializeWorkerWranglerProject, runWrangler, type WranglerProject } from "../wrangler.js";
+import { restrictedChildEnv } from "../child-env.js";
 
 const require = createRequire(import.meta.url);
 
@@ -24,11 +25,12 @@ function workspaceRuntime(dir: string): boolean {
 }
 
 function runtimeProject(dir: string, packaged: boolean): WranglerProject | null {
-  const config = join(dir, packaged ? "wrangler.package.jsonc" : "wrangler.jsonc");
-  return existsSync(config) ? { cwd: dir, config } : null;
+  const cwd = resolve(dir);
+  const config = join(cwd, packaged ? "wrangler.package.jsonc" : "wrangler.jsonc");
+  return existsSync(config) ? { cwd, config } : null;
 }
 
-function runtimeCfProject(): WranglerProject {
+export function runtimeCfProject(): WranglerProject {
   const explicit = process.env.CASSIE_RUNTIME_CF;
   if (explicit) {
     const project = runtimeProject(explicit, false) ?? runtimeProject(explicit, true);
@@ -56,8 +58,12 @@ function runtimeCfProject(): WranglerProject {
   throw new Error("cannot locate the Cassie Cloudflare runtime (set CASSIE_RUNTIME_CF to its path)");
 }
 
-function ensureDockerRunning(): void {
-  const result = spawnSync("docker", ["info"], { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] });
+export function ensureDockerRunning(): void {
+  const result = spawnSync("docker", ["info"], {
+    encoding: "utf8",
+    stdio: ["ignore", "pipe", "pipe"],
+    env: restrictedChildEnv(["DOCKER_"]),
+  });
   if (result.status !== 0) {
     throw new Error(
       "Cloudflare Container deploys require Docker. Start Docker Desktop (or another Docker-compatible engine), then retry.",
@@ -72,7 +78,7 @@ function ensureDockerRunning(): void {
  * here (secrets go in on stdin later). Detected so we can hand the terminal
  * over and let wrangler run its own registration flow.
  */
-function isMissingSubdomainError(out: string): boolean {
+export function isMissingSubdomainError(out: string): boolean {
   return /workers\.dev subdomain/i.test(out) && /register/i.test(out);
 }
 
@@ -228,54 +234,76 @@ export async function runDeploy(botId: string, opts: { rotateToken?: boolean } =
 
   const workerName = `cassie-bot-${botId}`;
   console.log(pc.bold(`deploying ${workerName} as a Cloudflare Container constrained to EEUR`));
+  if (cfg.venue === "polymarket") {
+    console.log(
+      pc.yellow(
+        "Polymarket custody notice: the current pinned client requires this bot's raw venue signer in the Container. " +
+          "Do not give that EOA Splits treasury authority.",
+      ),
+    );
+  }
   if (!(await confirm("continue?", true))) return;
 
-  await quiesceExistingDeployment(cfg, oldControlToken);
+  const deployment = materializeWorkerWranglerProject(project, workerName);
+  let controlUrl = "";
+  try {
+    await quiesceExistingDeployment(cfg, oldControlToken);
 
-  let dep = runWrangler(["deploy", "--name", workerName, "--containers-rollout=immediate"], project);
-  if (!dep.ok && isMissingSubdomainError(dep.out)) {
-    if (!(await registerWorkersDevSubdomain(project.cwd, workerName, accountId, project.config))) {
-      throw new Error("deploy stopped: no workers.dev subdomain on this Cloudflare account yet.");
+    let dep = runWrangler(["deploy", "--name", workerName, "--containers-rollout=immediate"], deployment.project);
+    if (!dep.ok && isMissingSubdomainError(dep.out)) {
+      if (
+        !(await registerWorkersDevSubdomain(
+          deployment.project.cwd,
+          workerName,
+          accountId,
+          deployment.project.config,
+        ))
+      ) {
+        throw new Error("deploy stopped: no workers.dev subdomain on this Cloudflare account yet.");
+      }
+      // The interactive run already published; repeat it piped to capture the URL.
+      dep = runWrangler(["deploy", "--name", workerName, "--containers-rollout=immediate"], deployment.project);
     }
-    // The interactive run already published; repeat it piped to capture the URL.
-    dep = runWrangler(["deploy", "--name", workerName, "--containers-rollout=immediate"], project);
-  }
-  process.stdout.write(dep.out);
-  if (!dep.ok) throw new Error(`wrangler deploy failed:\n${dep.out.slice(-800)}`);
-  const urlMatch = dep.out.match(/https:\/\/[^\s]+\.workers\.dev/);
-  if (!urlMatch) throw new Error("could not find workers.dev URL in wrangler output");
-  const controlUrl = urlMatch[0];
+    process.stdout.write(dep.out);
+    if (!dep.ok) throw new Error(`wrangler deploy failed:\n${dep.out.slice(-800)}`);
+    const urlMatch = dep.out.match(/https:\/\/[^\s]+\.workers\.dev/);
+    if (!urlMatch) throw new Error("could not find workers.dev URL in wrangler output");
+    controlUrl = urlMatch[0];
 
-  // Control token (§11), stored locally + as a Worker secret. Reused across
-  // redeploys: rotating it on every deploy invalidated any other terminal
-  // holding the old one, and left a window where warm state still compared
-  // against the previous value. Rotate deliberately with `--rotate-token`.
-  if (controlToken !== existingToken) {
-    keystore().putEntry(botId, KeyRoles.controlToken, controlToken, await getPassphrase(), { runtimeEligible: false });
-    if (rotateToken) console.log(pc.dim("control token rotated"));
+    // Control token (§11), stored locally + as a Worker secret. Reused across
+    // redeploys: rotating it on every deploy invalidated any other terminal
+    // holding the old one, and left a window where warm state still compared
+    // against the previous value. Rotate deliberately with `--rotate-token`.
+    if (controlToken !== existingToken) {
+      keystore().putEntry(botId, KeyRoles.controlToken, controlToken, await getPassphrase(), { runtimeEligible: false });
+      if (rotateToken) console.log(pc.dim("control token rotated"));
+    }
+
+    const idKey = botId.toUpperCase().replaceAll("-", "_");
+    const secrets: [string, string | null][] = [
+      ["CONTROL_TOKEN", controlToken],
+      [`BOT_${idKey}_CONFIG`, serializeBotConfig({ ...cfg, controlUrl })],
+      [`BOT_${idKey}_CREDS`, JSON.stringify(creds)],
+      ["TELEGRAM_BOT_TOKEN", telegramToken],
+      ["ARES_API_KEY", reportingApiKey],
+      ["QUOTIENT_API_TOKEN", quotientToken],
+    ];
+    for (const [name, value] of secrets) {
+      if (!value) {
+        // Silence here reads as "set" — say which capability is off instead.
+        console.log(pc.dim(`secret ${name}: not set locally, skipping`));
+        continue;
+      }
+      process.stdout.write(pc.dim(`secret put ${name}… `));
+      const res = runWrangler(["secret", "put", name, "--name", workerName], deployment.project, value);
+      if (!res.ok) throw new Error(`wrangler secret put ${name} failed:\n${res.out.slice(-500)}`);
+      console.log(pc.green("ok"));
+    }
+  } finally {
+    deployment.dispose();
   }
 
-  const idKey = botId.toUpperCase().replaceAll("-", "_");
   const deployedCfg = { ...cfg, controlUrl };
-  const secrets: [string, string | null][] = [
-    ["CONTROL_TOKEN", controlToken],
-    [`BOT_${idKey}_CONFIG`, serializeBotConfig(deployedCfg)],
-    [`BOT_${idKey}_CREDS`, JSON.stringify(creds)],
-    ["TELEGRAM_BOT_TOKEN", telegramToken],
-    ["ARES_API_KEY", reportingApiKey],
-    ["QUOTIENT_API_TOKEN", quotientToken],
-  ];
-  for (const [name, value] of secrets) {
-    if (!value) {
-      // Silence here reads as "set" — say which capability is off instead.
-      console.log(pc.dim(`secret ${name}: not set locally, skipping`));
-      continue;
-    }
-    process.stdout.write(pc.dim(`secret put ${name}… `));
-    const res = runWrangler(["secret", "put", name, "--name", workerName], project, value);
-    if (!res.ok) throw new Error(`wrangler secret put ${name} failed:\n${res.out.slice(-500)}`);
-    console.log(pc.green("ok"));
-  }
 
   // The worker and its secrets are live from here on. Record that before
   // starting the schedule, so a failure below leaves a deployment cassie still

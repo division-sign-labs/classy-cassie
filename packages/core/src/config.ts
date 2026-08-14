@@ -110,6 +110,73 @@ export const VenueUrlsSchema = z.object({
 });
 export type VenueUrls = z.output<typeof VenueUrlsSchema>;
 
+const EvmAddressSchema = z
+  .string()
+  .regex(/^0x[0-9a-fA-F]{40}$/, "expected a 20-byte EVM address");
+
+/**
+ * Where the bot's master EOA was generated. Regardless of origin, the
+ * finalized key is kept in Cassie's local encrypted keystore.
+ *
+ * `address` remains optional for backward compatibility with configs written
+ * before wallet provenance was recorded. New init flows always set it, and a
+ * container-origin wallet is rejected without it.
+ */
+export const WalletConfigSchema = z
+  .object({
+    origin: z.enum(["local", "container"]).default("local"),
+    address: EvmAddressSchema.optional(),
+  })
+  .strict();
+export type WalletConfig = z.output<typeof WalletConfigSchema>;
+
+/**
+ * An organization-owned Splits subaccount used as this bot's treasury source.
+ * Splits authentication stays operator-local and is deliberately absent from
+ * this schema. Signers listed here are scoped to this one account.
+ */
+export const SplitsTreasurySchema = z
+  .object({
+    provider: z.literal("splits"),
+    organizationId: z.string().min(1),
+    organizationName: z.string().min(1).nullable().optional(),
+    accountId: z.string().min(1),
+    accountAddress: EvmAddressSchema,
+    accountName: z.string().min(1),
+    signers: z
+      .object({
+        passkeyIds: z.array(z.string().min(1)).min(1),
+        eoa: z
+          .object({
+            id: z.string().min(1),
+            address: EvmAddressSchema,
+          })
+          .strict()
+          .optional(),
+      })
+      .strict(),
+    threshold: z.number().int().positive(),
+  })
+  .strict()
+  .superRefine((treasury, ctx) => {
+    if (new Set(treasury.signers.passkeyIds).size !== treasury.signers.passkeyIds.length) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["signers", "passkeyIds"],
+        message: "passkey signer ids must be unique",
+      });
+    }
+    const signerCount = treasury.signers.passkeyIds.length + (treasury.signers.eoa ? 1 : 0);
+    if (treasury.threshold > signerCount) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["threshold"],
+        message: `threshold ${treasury.threshold} exceeds ${signerCount} configured signer${signerCount === 1 ? "" : "s"}`,
+      });
+    }
+  });
+export type SplitsTreasury = z.output<typeof SplitsTreasurySchema>;
+
 export const VenueAccountSchema = z.discriminatedUnion("venue", [
   z.object({
     venue: z.literal("polymarket"),
@@ -133,27 +200,94 @@ export const VenueAccountSchema = z.discriminatedUnion("venue", [
   }),
 ]);
 
-export const BotConfigSchema = z.object({
-  id: z.string().regex(/^[a-z0-9][a-z0-9-]{0,31}$/, "bot id: lowercase alphanumerics and dashes, max 32 chars"),
-  venue: z.enum(["polymarket", "hyperliquid", "lighter"]),
-  account: VenueAccountSchema.optional(),
-  strategy: z
-    .object({
-      id: z.string().default("flip-flat"),
-      config: z.record(z.string(), z.unknown()).default({}),
-    })
-    .prefault({}),
-  risk: RiskConfigSchema.prefault({}),
-  signals: SignalsConfigSchema.prefault({}),
-  alerts: AlertsConfigSchema.prefault({}),
-  /** Opt-in per bot. Polymarket only — other venues carry no builder code. */
-  reporting: ReportingConfigSchema.optional(),
-  venueUrls: VenueUrlsSchema.prefault({}),
-  tickIntervalMin: z.number().positive().default(5),
-  /** Set by `cassie deploy`: the Workers control API base URL for this bot. */
-  controlUrl: z.string().optional(),
-  createdAt: z.string().optional(),
-});
+export const BotConfigSchema = z
+  .object({
+    id: z.string().regex(/^[a-z0-9][a-z0-9-]{0,31}$/, "bot id: lowercase alphanumerics and dashes, max 32 chars"),
+    venue: z.enum(["polymarket", "hyperliquid", "lighter"]),
+    account: VenueAccountSchema.optional(),
+    wallet: WalletConfigSchema.prefault({}),
+    treasury: SplitsTreasurySchema.optional(),
+    strategy: z
+      .object({
+        id: z.string().default("flip-flat"),
+        config: z.record(z.string(), z.unknown()).default({}),
+      })
+      .prefault({}),
+    risk: RiskConfigSchema.prefault({}),
+    signals: SignalsConfigSchema.prefault({}),
+    alerts: AlertsConfigSchema.prefault({}),
+    /** Opt-in per bot. Polymarket only — other venues carry no builder code. */
+    reporting: ReportingConfigSchema.optional(),
+    venueUrls: VenueUrlsSchema.prefault({}),
+    tickIntervalMin: z.number().positive().default(5),
+    /** Set by `cassie deploy`: the Workers control API base URL for this bot. */
+    controlUrl: z.string().optional(),
+    createdAt: z.string().optional(),
+  })
+  .superRefine((config, ctx) => {
+    if (config.wallet.origin === "container" && !config.wallet.address) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["wallet", "address"],
+        message: "container-origin wallet requires its verified address",
+      });
+    }
+    if (config.wallet.origin === "container" && config.venue !== "hyperliquid") {
+      ctx.addIssue({
+        code: "custom",
+        path: ["wallet", "origin"],
+        message:
+          config.venue === "polymarket"
+            ? "container-origin wallets are disabled for Polymarket while its raw signer is deployed to the runtime"
+            : "container-origin wallets are unavailable for Lighter while it remains local-runtime only",
+      });
+    }
+    const treasurySigner = config.treasury?.signers.eoa;
+    if (
+      treasurySigner &&
+      config.wallet.address &&
+      treasurySigner.address.toLowerCase() !== config.wallet.address.toLowerCase()
+    ) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["treasury", "signers", "eoa", "address"],
+        message: "Splits EOA signer must match this bot's wallet address",
+      });
+    }
+    if (config.venue === "polymarket" && treasurySigner) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["treasury", "signers", "eoa"],
+        message: "Polymarket's deployed signer cannot also control the Splits treasury; use operator passkeys only",
+      });
+    }
+    if (config.account && config.account.venue !== config.venue) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["account", "venue"],
+        message: `account venue ${config.account.venue} does not match bot venue ${config.venue}`,
+      });
+    }
+    const accountWalletAddress =
+      config.account?.venue === "polymarket"
+        ? config.account.signerAddress
+        : config.account?.venue === "hyperliquid"
+          ? config.account.masterAddress
+          : config.account?.venue === "lighter"
+            ? config.account.l1Address
+            : undefined;
+    if (
+      config.wallet.address &&
+      accountWalletAddress &&
+      config.wallet.address.toLowerCase() !== accountWalletAddress.toLowerCase()
+    ) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["account"],
+        message: "venue account does not match this bot's wallet address",
+      });
+    }
+  });
 export type BotConfig = z.output<typeof BotConfigSchema>;
 
 export function parseBotConfig(raw: unknown): BotConfig {

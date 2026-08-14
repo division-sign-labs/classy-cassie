@@ -73,7 +73,6 @@ export class BotService {
   private readonly state = new DurableObjectStateStore();
   private readonly log: ReturnType<typeof consoleLogger>;
   private operation: Promise<void> = Promise.resolve();
-  private tickTimer?: NodeJS.Timeout;
   private heartbeatTimer?: NodeJS.Timeout;
   private triggerTimer?: NodeJS.Timeout;
   private active = false;
@@ -138,24 +137,21 @@ export class BotService {
 
   async start(): Promise<void> {
     if (this.active || this.terminating) return;
-    this.active = true;
-    await this.exclusive(async () => this.syncFastLoops());
-    this.scheduleTick();
-    this.log.info(`container loop started: every ${this.config.tickIntervalMin}m`);
+    try {
+      await this.exclusive(async () => this.syncFastLoops());
+      this.active = true;
+      this.log.info(`container auxiliary loops started; durable tick interval ${this.config.tickIntervalMin}m`);
+    } catch (error) {
+      this.stopFastLoops();
+      throw error;
+    }
   }
 
-  private scheduleTick(): void {
-    if (!this.active || this.terminating) return;
-    clearTimeout(this.tickTimer);
-    this.tickTimer = setTimeout(() => {
-      void this.exclusive(async () => {
-        if (!this.active || this.terminating) return;
-        await this.engine.tick();
-        await this.syncFastLoops();
-      })
-        .catch((error) => this.log.error(`tick crashed: ${(error as Error).message}`))
-        .finally(() => this.scheduleTick());
-    }, this.config.tickIntervalMin * 60_000);
+  private stopFastLoops(): void {
+    if (this.heartbeatTimer) clearInterval(this.heartbeatTimer);
+    if (this.triggerTimer) clearInterval(this.triggerTimer);
+    this.heartbeatTimer = undefined;
+    this.triggerTimer = undefined;
   }
 
   private async syncFastLoops(): Promise<void> {
@@ -178,7 +174,10 @@ export class BotService {
       this.heartbeatTimer = undefined;
     }
 
-    const armed = await this.engine.hasArmedTriggers();
+    const armed = await this.engine.hasArmedTriggers().catch((error) => {
+      this.log.warn(`trigger probe failed: ${(error as Error).message}`);
+      return false;
+    });
     if (armed && !this.triggerTimer) {
       this.triggerTimer = setInterval(() => {
         void this.exclusive(async () => {
@@ -199,12 +198,7 @@ export class BotService {
     if (this.terminating) return this.operation;
     this.terminating = true;
     this.active = false;
-    clearTimeout(this.tickTimer);
-    if (this.heartbeatTimer) clearInterval(this.heartbeatTimer);
-    if (this.triggerTimer) clearInterval(this.triggerTimer);
-    this.tickTimer = undefined;
-    this.heartbeatTimer = undefined;
-    this.triggerTimer = undefined;
+    this.stopFastLoops();
     await this.exclusive(async () => {
       if (cancelResting) {
         this.log.info("container shutdown: canceling resting orders");
@@ -213,9 +207,9 @@ export class BotService {
     });
   }
 
-  tick(): Promise<TickResult> {
+  tick(tickId?: number): Promise<TickResult> {
     return this.exclusive(async () => {
-      const result = await this.engine.tick();
+      const result = await this.engine.tick(tickId === undefined ? {} : { tickId });
       await this.syncFastLoops();
       return result;
     });

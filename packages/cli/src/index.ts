@@ -5,7 +5,7 @@
 import { Command } from "commander";
 import pc from "picocolors";
 import { runInit } from "./commands/init.js";
-import { walletCreate, walletExport, walletImport, walletList } from "./commands/wallet.js";
+import { walletAbortBootstrap, walletCreate, walletExport, walletImport, walletList } from "./commands/wallet.js";
 import { registerSplitsSigner, runFund } from "./commands/fund.js";
 import { runWithdraw } from "./commands/withdraw.js";
 import { runStrategy } from "./commands/strategy.js";
@@ -21,7 +21,7 @@ const program = new Command();
 program
   .name("cassie")
   .description("open-source, self-hosted, non-custodial trading bot for prediction markets and perps venues")
-  .version("0.1.2");
+  .version("0.1.3");
 
 program.command("init").description("wizard: create a bot (wallet, venue, strategy, alerts, funding)").action(wrap(runInit));
 
@@ -35,8 +35,12 @@ wallet
   .action(wrap(walletExport));
 wallet.command("list").description("list bots and key roles").action(wrap(walletList));
 wallet
+  .command("abort-bootstrap <botId>")
+  .description("delete an unused one-use Container wallet ceremony and reset init")
+  .action(wrap(walletAbortBootstrap));
+wallet
   .command("register-splits <botId>")
-  .description("print splits-cli commands to attach the bot EOA to a Splits subaccount")
+  .description("print the safe Splits EOA registration command (does not attach account authority)")
   .action(wrap(registerSplitsSigner));
 
 program

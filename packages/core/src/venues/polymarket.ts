@@ -316,6 +316,9 @@ export class PolymarketAdapter implements VenueAdapter {
   async runFundingFlow(ctx: SetupContext, acct: VenueAccount): Promise<VenueAccount> {
     let a = asPmAccount(acct);
     await this.ensureCredsFromKeystore(ctx, a);
+    // Capture before showing the deposit address so a top-up cannot be
+    // mistaken for the bot's already-existing collateral.
+    const before = await this.collateralBalance().catch(() => 0);
 
     const bridged = await this.requestBridgeAddresses(a.funder);
     a = { ...a, bridgeAddresses: bridged };
@@ -327,7 +330,6 @@ export class PolymarketAdapter implements VenueAdapter {
     ctx.print(`Deposits over $50k: use a third-party bridge direct to Polygon USDC instead.`);
 
     await ctx.poll("waiting for bridge credit", async () => {
-      const before = 0;
       const bal = await this.collateralBalance().catch(() => 0);
       return bal > before + 0.01 ? bal : null;
     });

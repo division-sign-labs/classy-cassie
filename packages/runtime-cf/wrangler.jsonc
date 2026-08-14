@@ -30,6 +30,10 @@
       {
         "name": "BotAgent",
         "class_name": "BotAgent"
+      },
+      {
+        "name": "TickScheduler",
+        "class_name": "TickScheduler"
       }
     ]
   },
@@ -37,6 +41,10 @@
     {
       "tag": "v1",
       "new_sqlite_classes": ["BotAgent"]
+    },
+    {
+      "tag": "v2",
+      "new_sqlite_classes": ["TickScheduler"]
     }
   ]
 }

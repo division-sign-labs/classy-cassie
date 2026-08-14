@@ -1,6 +1,6 @@
 // packages/core/test/hyperliquid-helpers.test.ts
 import { describe, expect, it } from "vitest";
-import { formatHlPrice, formatSize, toCloid } from "@quotient-forecasting/cassie-core";
+import { classifyHyperliquidAgent, formatHlPrice, formatSize, toCloid } from "@quotient-forecasting/cassie-core";
 
 describe("formatHlPrice", () => {
   it("passes integers through untouched", () => {
@@ -48,5 +48,26 @@ describe("toCloid", () => {
   it("distinct inputs give distinct cloids", () => {
     expect(toCloid("abc")).not.toBe(toCloid("abd"));
     expect(toCloid("")).not.toBe(toCloid("a"));
+  });
+});
+
+describe("classifyHyperliquidAgent", () => {
+  const address = "0x1111111111111111111111111111111111111111";
+
+  it("makes retries idempotent for the same persisted agent key", () => {
+    expect(classifyHyperliquidAgent([{ address: address.toUpperCase(), name: "cassie-bot" }], address, "cassie-bot")).toBe(
+      "approved",
+    );
+  });
+
+  it("blocks a same-name slot collision and permits a fresh slot", () => {
+    expect(
+      classifyHyperliquidAgent(
+        [{ address: "0x2222222222222222222222222222222222222222", name: "cassie-bot" }],
+        address,
+        "cassie-bot",
+      ),
+    ).toBe("name-conflict");
+    expect(classifyHyperliquidAgent([], address, "cassie-bot")).toBe("available");
   });
 });

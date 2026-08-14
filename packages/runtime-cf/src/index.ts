@@ -3,3 +3,4 @@
 // Worker-to-Container migration could first deploy a legacy shutdown bridge.
 
 export { BotAgent, ContainerProxy, default } from "./container.js";
+export { TickScheduler } from "./tick-scheduler.js";

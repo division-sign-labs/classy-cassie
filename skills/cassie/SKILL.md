@@ -18,14 +18,20 @@ orders through Quotient infrastructure, and Quotient never holds keys or funds.
 
 Custody model:
 
-- Per-bot EOA, independently generated (no shared seed). Keys live in
+- Per-bot EOA, independently generated (no shared seed). The EOA can be generated locally,
+  or—Hyperliquid only—inside a one-use Cloudflare Container and encrypted back to this
+  machine. Final keys live in
   `~/.cassie/keys/<botId>.json`, AES-256-GCM encrypted with a scrypt-derived key from the
   operator passphrase, file mode 0600.
-- Keys are split by role. Master/L1 keys stay in the local keystore only. Trade-scoped
-  keys (Hyperliquid agent key, Lighter API key, Polymarket signer + L2 HMAC creds) are
-  what a deployed runtime receives — a compromised runtime can trade but cannot withdraw
-  (Hyperliquid/Lighter; on Polymarket the signer key is trade-scoped by the venue's
-  signer/funder split).
+- Keys are split by role. Hyperliquid's master and Lighter's L1 key stay local; deployed
+  runtimes receive the Hyperliquid agent or Lighter API key. **Polymarket is an explicit
+  exception:** the pinned client requires the raw venue signer plus L2 HMAC credentials in
+  the runtime. Builder/Relayer credentials remain local, but do not describe the deployed
+  Polymarket signer as local-only or reuse it for Splits authority.
+- An optional Splits Teams subaccount is an organization-owned treasury association, not a
+  replacement for the venue's EOA signing requirement. It is created under the active
+  organization and appears alongside its other subaccounts. Cassie stores only its public
+  org/account/signer metadata; Splits authentication remains in the official Splits CLI.
 
 **Risk statement.** This software places real orders with real money on venues that can
 and do change their APIs, halt, or lose liquidity without notice. Strategies can lose the
@@ -60,11 +66,30 @@ Every step happens in the terminal; you only leave it to copy-paste dashboard va
 
 1. **Bot id** — lowercase, dashes, max 32 chars. Names the config, keystore, and state files.
 2. **Venue** — `polymarket`, `hyperliquid`, or `lighter`.
-3. **Passphrase** — encrypts the keystore. There is no recovery; losing it means
+3. **Wallet origin** — Hyperliquid offers two paths:
+   - *local* (recommended): generate directly into the encrypted local keystore;
+   - *one-use Container*: deploy an EEUR bootstrap-only Worker/Container, generate in
+     process memory, RSA-OAEP-encrypt the key to an ephemeral local recipient, verify and
+     durably store it locally, prove receipt with an encrypted one-use token, purge the live
+     Durable Object value, and delete the bootstrap deployment. Cloudflare and the image are
+     trusted during generation; this is logical export-and-delete, not enclave attestation
+     or a claim of cryptographic erasure from provider backups/PITR.
+     The Container is replaceable compute, not a permanent machine identity.
+   Polymarket does not offer this option because its final trading deployment still receives
+   the signer; Lighter does not offer it because Lighter is local-runtime-only.
+4. **Passphrase** — encrypts the keystore. There is no recovery; losing it means
    re-importing or re-generating keys.
-4. **Wallet** — a fresh EOA is generated for the bot (or reused if one exists). The
-   private key never leaves the keystore.
-5. **Venue account provisioning** (adapter-driven):
+5. **Optional Splits Teams subaccount** — requires the official
+   `@splits/splits-cli@0.2.11`. Its API key is bound to one organization; Cassie runs
+   `splits auth whoami`, shows the exact org name/id, and asks for confirmation. You choose
+   your member and active passkey, then Cassie creates `cassie-<botId>` directly under that
+   org's treasury owner. Passkey-only is the safe default. For Hyperliquid/Lighter an
+   advanced option can also register the local bot EOA and attach it to this new account
+   only at threshold 1: either the passkey or EOA can move that subaccount's funds alone.
+   Cassie does not yet sign Splits proposals. Polymarket's deployed signer is never offered.
+   Creation is journaled and reconciled by name plus exact signer set before retry, so a
+   timeout cannot silently duplicate the account. No existing account is mutated.
+6. **Venue account provisioning** (adapter-driven):
    - **Polymarket** — two paths. Polymarket account creation and every gasless op
      (approvals, redemption) require a **Relayer or Builder API key** in the client —
      verified live 2026-08-13; solo derivation without either is rejected by the relayer.
@@ -87,7 +112,7 @@ Every step happens in the terminal; you only leave it to copy-paste dashboard va
      in the funding flow, after the account exists on the L1.
    - **Lighter** — derives the L1 address. Account registration and API-key provisioning
      happen in the funding flow.
-6. **Strategy** — one strategy: `signals` (follow Quotient signals, hold until the side
+7. **Strategy** — one strategy: `signals` (follow Quotient signals, hold until the side
    flips). The recommended allocation holds up to 2 positions, prioritizes the widest
    eligible edges for new entries, and requests 50% of the daily entry budget per position;
    the wizard always asks for the
@@ -96,13 +121,17 @@ Every step happens in the terminal; you only leave it to copy-paste dashboard va
    Declining the recommendation asks for top N, daily budget, allocation percentage, entry
    edge, minimum viable entry, tick interval, and universe. `cassie strategy <botId>`
    displays or changes the same settings at any time.
-7. **Signals** — live Quotient signals. The wizard reuses a key found from the quotient
+8. **Signals** — live Quotient signals. The wizard reuses a key found from the quotient
    CLI or asks for one. `QUOTIENT_API_KEY` and `QUOTIENT_API_TOKEN` are both honoured
    from the environment. Deterministic fixture sources exist only inside the contributor
    test harness; they are not an operator choice.
-8. **Telegram alerts** — create a bot with **@BotFather** on Telegram and paste its token;
+9. **Telegram alerts** — create a bot with **@BotFather** on Telegram and paste its token;
    get your chat id from **@userinfobot**. The wizard offers a test ping.
-9. **Funding** — optionally continues straight into `cassie fund <botId>`.
+10. **Funding** — optionally continues straight into `cassie fund <botId>`.
+
+Non-secret progress is checkpointed at `~/.cassie/setup/<botId>.json` (0600). Rerunning
+`cassie init` resumes wallet/Splits/venue steps without repeating completed external writes.
+Bootstrap wrapping keys and bearer tokens are encrypted keystore entries, never journal data.
 
 ### Funding flows (per venue)
 
@@ -127,9 +156,15 @@ All flows print exactly what to send where, then poll until the venue credits.
   ChangePubKey (signed by the L1 key, which stays local), and marks the API key
   runtime-eligible. **Lighter is local-runtime-only in MVP** (§8 below).
 
-`cassie fund <botId>` re-enters the flow for top-ups. `--from splits` first prints exact
-`splits` CLI invocations (pre-filled address/chain/asset/amount) for the operator to run
-and sign through their own Splits signer set — cassie never touches Splits auth.
+`cassie fund <botId>` re-enters the flow for top-ups. With a configured treasury,
+`--from splits` is automated only for Hyperliquid mainnet: it fixes the source to Arbitrum
+One native USDC, asks the amount, and then prints the exact
+`splits transactions create transfer --account … --chain-id … --recipient … --token …`
+proposal. Approve the returned `signUrl` with the selected passkey. Cassie never reads or
+deploys the Splits API key. Hyperliquid still needs ETH at the master for bridge gas.
+Polymarket is blocked until its live bridge route can be validated. For Lighter, run the
+normal funding wizard and enter the Splits account address as the sender before proposing
+the same-chain transfer to its sender-bound intent address.
 
 ### Withdrawals
 
@@ -149,7 +184,8 @@ cassie wallet create <botId>                 # generate a fresh EOA
 cassie wallet import <botId>                 # import a private key via stdin
 cassie wallet export <botId> --yes-print-my-key   # print raw key (double confirmation)
 cassie wallet list                           # bots, key roles, runtime-eligibility
-cassie wallet register-splits <botId>        # print splits-cli signer-attach commands
+cassie wallet register-splits <botId>        # register EOA only; grants no account authority
+cassie wallet abort-bootstrap <botId>        # delete/reset an unused Container ceremony
 cassie fund <botId> [--from splits]          # run/re-run the venue funding flow
 cassie withdraw <botId> <amount|all> --to <address>   # send collateral out (signs locally)
 cassie run <botId> [--debug]
@@ -265,6 +301,7 @@ operator's own words. It comes from one place: the `note` on the order.
 | --- | --- |
 | `--thesis` / `--from-thesis` | the thesis `reasoningSummary`, then the trade's terms |
 | `cassie trade … --note "…"` | that text verbatim |
+| direct `cassie trade …` without `--note` | the latest Quotient forecast thesis for that Polymarket market |
 | strategy tick (signals) | none today — the card posts alone |
 
 `reasoningSummary` is asked for during thesis intake, separately from `notes`, so private
@@ -273,11 +310,13 @@ side, conviction, timeframe, expected move, and the invalidation level — the t
 copy-trader needs. Size and price are deliberately left out of the prose: the card
 carries those from the real fill, and repeating them invites the two to disagree.
 
-**With no note, the post is the card alone.** The engine's internal `reason`
-(`signal sig_8f21 spread 12.3pp`) is never published — it's an internal id and telemetry,
-meaningless to a reader. A trade nobody wrote about says nothing rather than leaking a
-log line. If a signals-strategy bot should caption every entry, that needs a note
-producer on the strategy; there is none yet.
+For a direct manual Polymarket trade without `--note`, the CLI maps the traded token to
+its condition and fetches the latest reviewable Quotient forecast thesis after the user
+confirms the order. The lookup is best-effort and never blocks the fill. If no thesis is
+available, Cassie skips the manual Ares post rather than allowing Ares to invent generic
+copy. Strategy trades without a note still post the card alone. The engine's internal
+`reason` (`signal sig_8f21 spread 12.3pp`) is never published — it's an internal id and
+telemetry, meaningless to a reader.
 
 Notes:
 
@@ -335,8 +374,9 @@ otherwise it asks the operator. Exit is flip or resolution, owned by flip-flat.
 
 ## 7. Rules for the agent operating cassie
 
-1. **Never** print or persist private keys outside the keystore commands
-   (`wallet create/import/export`). Not in logs, not in messages, not in scratch files.
+1. **Never** print or persist private keys outside Cassie's encrypted keystore. The
+   Container-first ceremony may hold a generated key in process memory only long enough to
+   encrypt-export it; Workers/DO state, logs, messages, and scratch files must never contain it.
 2. **Always** show the operator the exact order — market, side, size, limit — and get
    their confirmation before any live `trade`. (The CLI also asks; `-y` is for the
    operator to decide, not the agent.)
@@ -355,6 +395,10 @@ otherwise it asks the operator. Exit is flip or resolution, owned by flip-flat.
 
 Lighter remains local-only in this release because its filesystem-backed WASM signer has
 not yet been wired and verified in the deployed Container runtime.
+
+Container-first wallet generation is available only for Hyperliquid. Normal Polymarket
+Cloudflare deploy remains available, but it prints a custody warning because its raw venue
+signer is a Worker secret. Never attach that EOA to a Splits account.
 
 ## 9. Troubleshooting
 
@@ -387,3 +431,10 @@ not yet been wired and verified in the deployed Container runtime.
 - **`cassie deploy` fails immediately** — verify the account is on Workers Paid, Docker
   is running, and `pnpm exec wrangler login` succeeds. Deploys run against your own
   Cloudflare account. Lighter bots refuse to deploy by design.
+- **Splits shows the wrong organization** — `SPLITS_API_KEY` overrides the CLI's saved auth
+  and every key belongs to one org. Stop at the org confirmation, unset/change the key,
+  and verify with `splits auth whoami`; Cassie has no team-switch command.
+- **Container wallet setup was interrupted** — rerun `cassie init`; it retrieves the same
+  encrypted envelope and resumes. Only when no master was imported, use
+  `cassie wallet abort-bootstrap <botId>` to authenticate a remote abort/purge, delete the
+  unused one-use Worker, and reset.

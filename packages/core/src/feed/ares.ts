@@ -135,6 +135,15 @@ export class AresAlerter implements Alerter {
     const content = captionFor(event);
     if (content) body.content = content;
 
+    // Ares supplies generic prose for a widget-only manual post (for example,
+    // "manually adding YES"). Cassie's manual CLI resolves Q's latest thesis
+    // into `note`; if that lookup failed, silence is more honest than copy we
+    // did not write. Strategy cards may still intentionally post alone.
+    if (!content && event.data?.source === "manual") {
+      this.opts.log?.warn(`ares: skipped ${event.kind} manual post — no forecast thesis or explicit note`);
+      return;
+    }
+
     const widget = widgetFor(event);
     if (widget) {
       body.widget = widget;

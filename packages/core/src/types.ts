@@ -200,7 +200,10 @@ export type VenueAccount =
 /**
  * Runtime-eligible credentials: the JSON blob that gets pushed to a deployed
  * runtime (Workers secret) or decrypted into memory by the local runtime.
- * Master/L1 private keys and Relayer/Builder API keys are NEVER part of this.
+ * Hyperliquid master keys, Lighter L1 keys, and Polymarket Relayer/Builder keys
+ * are never part of this. Polymarket is the explicit exception: its pinned SDK
+ * requires the raw venue signer in the runtime. Treat that signer as deployed
+ * authority and never reuse it as a Splits treasury signer.
  */
 export type RuntimeCreds =
   | {

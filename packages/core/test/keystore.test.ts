@@ -1,5 +1,5 @@
 // packages/core/test/keystore.test.ts
-import { mkdtempSync, statSync } from "node:fs";
+import { mkdtempSync, readdirSync, statSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
@@ -70,5 +70,35 @@ describe("Keystore", () => {
     new Keystore(dir).putEntry("bot-5", "master", "exported-key", "pp");
     // Fresh instance simulates a fresh install pointed at the same file.
     expect(new Keystore(dir).getEntry("bot-5", "master", "pp")).toBe("exported-key");
+  });
+
+  it("atomically replaces files and can remove a one-use entry", () => {
+    const dir = mkdtempSync(join(tmpdir(), "cassie-ks-"));
+    const ks = new Keystore(dir);
+    ks.putEntry("bot-6", "master", "master-value", "pp");
+    ks.putEntry("bot-6", "bootstrap-wrap", "temporary-value", "pp");
+
+    expect(ks.removeEntry("bot-6", "bootstrap-wrap")).toBe(true);
+    expect(ks.removeEntry("bot-6", "bootstrap-wrap")).toBe(false);
+    expect(ks.getEntry("bot-6", "bootstrap-wrap", "pp")).toBeNull();
+    expect(ks.getEntry("bot-6", "master", "pp")).toBe("master-value");
+    expect(readdirSync(dir).filter((name) => name.endsWith(".tmp"))).toEqual([]);
+    expect(statSync(join(dir, "bot-6.json")).mode & 0o777).toBe(0o600);
+  });
+
+  it("rejects bot ids that could escape the keystore directory", () => {
+    const dir = mkdtempSync(join(tmpdir(), "cassie-ks-"));
+    const ks = new Keystore(dir);
+    expect(() => ks.putEntry("../outside", "master", "value", "pp")).toThrow(/bot id/);
+    expect(() => ks.load("also/invalid")).toThrow(/bot id/);
+  });
+
+  it("verifies every existing entry before a caller adds another", () => {
+    const dir = mkdtempSync(join(tmpdir(), "cassie-ks-"));
+    const ks = new Keystore(dir);
+    ks.putEntry("bot-7", "master", "value", "right");
+    expect(ks.verifyPassphrase("bot-7", "right")).toBe(true);
+    expect(() => ks.verifyPassphrase("bot-7", "wrong")).toThrow(WrongPassphraseError);
+    expect(ks.verifyPassphrase("missing", "anything")).toBe(false);
   });
 });

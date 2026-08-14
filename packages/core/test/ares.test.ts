@@ -243,6 +243,18 @@ describe("AresAlerter", () => {
     expect(body.widget.asset).toBe(NO_TOKEN);
   });
 
+  it("does not let Ares invent copy for a manual trade with no thesis", async () => {
+    const fetchImpl = vi.fn(async () => jsonResponse({ id: "p" }));
+    const warnings: string[] = [];
+    const log = { ...silentLogger, warn: (message: string) => void warnings.push(message) };
+    await new AresAlerter({ apiKey: "k", fetchImpl: fetchImpl as never, log }).send(
+      entryEvent({ source: "manual", note: undefined }),
+    );
+
+    expect(fetchImpl).not.toHaveBeenCalled();
+    expect(warnings.join(" ")).toMatch(/no forecast thesis or explicit note/);
+  });
+
   it("still posts a caption when the ack carried no trade reference", async () => {
     const fetchImpl = vi.fn(async () => jsonResponse({ id: "p" }));
     await new AresAlerter({ apiKey: "k", fetchImpl: fetchImpl as never }).send(

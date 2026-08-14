@@ -35,6 +35,12 @@ The npm package installs the Cassie operator skill for Codex and Claude Code,
 the local runtime, and the Cloudflare Worker + Container deployment assets. If
 npm lifecycle scripts are disabled, run `cassie skill install` once.
 
+`cassie init` can also create a dedicated Splits Teams subaccount under the organization
+authenticated by the official Splits CLI. It is passkey-operated by default, appears with
+the org's other subaccounts, and gives the bot no authority over them. Hyperliquid additionally
+offers one-use Cloudflare Container wallet generation: the key is encrypted back, verified
+in the local keystore, remotely consumed, and the bootstrap deployment is deleted.
+
 For contributors working from this checkout:
 
 ```sh
@@ -60,7 +66,7 @@ arithmetic, keystore round-trips).
 
 | venue       | status | TP/SL     | Cloudflare deploy | notes |
 |-------------|--------|-----------|-------------------|-------|
-| Polymarket  | ✓      | synthetic (engine-managed) | ✓ | Polymarket account, pUSD trading address, bridge-issued funding address, gasless approvals |
+| Polymarket  | ✓      | synthetic (engine-managed) | ✓ | raw venue signer is deployed; never reuse it for Splits authority |
 | Hyperliquid | ✓      | native    | ✓                 | master/agent key split; agent key is the only key a runtime sees |
 | Lighter     | ✓      | native    | ✗ local-only      | not yet wired or verified in the deployed Container runtime |
 
@@ -80,7 +86,8 @@ attribution and verified position-card posts. Put `ARES_BUILDER_CODE` and
 `ARES_API_KEY` in the nearest `.local.env`; the command verifies the key against Ares
 before saving the bot config. Use `--no-post` to retain attribution without posts, or
 `--off` to remove both from that bot. Captions are per trade: `--note` supplies a manual
-caption, while thesis trades use their public reasoning summary.
+caption; without it, a direct Polymarket trade uses the latest Quotient forecast thesis.
+Thesis trades use their public reasoning summary.
 
 ## Signals
 

@@ -16,7 +16,7 @@
       "image": "./Dockerfile.package",
       "image_build_context": ".",
       "image_vars": {
-        "CASSIE_RUNTIME_VERSION": "0.1.0"
+        "CASSIE_RUNTIME_VERSION": "0.1.2"
       },
       "max_instances": 1,
       "instance_type": "lite",
@@ -33,6 +33,10 @@
       {
         "name": "BotAgent",
         "class_name": "BotAgent"
+      },
+      {
+        "name": "TickScheduler",
+        "class_name": "TickScheduler"
       }
     ]
   },
@@ -40,6 +44,10 @@
     {
       "tag": "v1",
       "new_sqlite_classes": ["BotAgent"]
+    },
+    {
+      "tag": "v2",
+      "new_sqlite_classes": ["TickScheduler"]
     }
   ]
 }
