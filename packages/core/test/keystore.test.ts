@@ -72,16 +72,14 @@ describe("Keystore", () => {
     expect(new Keystore(dir).getEntry("bot-5", "master", "pp")).toBe("exported-key");
   });
 
-  it("atomically replaces files and can remove a one-use entry", () => {
+  it("atomically replaces files without leaving temporary files", () => {
     const dir = mkdtempSync(join(tmpdir(), "cassie-ks-"));
     const ks = new Keystore(dir);
     ks.putEntry("bot-6", "master", "master-value", "pp");
-    ks.putEntry("bot-6", "bootstrap-wrap", "temporary-value", "pp");
+    ks.putEntry("bot-6", "agent", "agent-value", "pp");
 
-    expect(ks.removeEntry("bot-6", "bootstrap-wrap")).toBe(true);
-    expect(ks.removeEntry("bot-6", "bootstrap-wrap")).toBe(false);
-    expect(ks.getEntry("bot-6", "bootstrap-wrap", "pp")).toBeNull();
     expect(ks.getEntry("bot-6", "master", "pp")).toBe("master-value");
+    expect(ks.getEntry("bot-6", "agent", "pp")).toBe("agent-value");
     expect(readdirSync(dir).filter((name) => name.endsWith(".tmp"))).toEqual([]);
     expect(statSync(join(dir, "bot-6.json")).mode & 0o777).toBe(0o600);
   });

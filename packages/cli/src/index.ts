@@ -5,7 +5,7 @@
 import { Command } from "commander";
 import pc from "picocolors";
 import { runInit } from "./commands/init.js";
-import { walletAbortBootstrap, walletCreate, walletExport, walletImport, walletList } from "./commands/wallet.js";
+import { walletCreate, walletExport, walletImport, walletList } from "./commands/wallet.js";
 import { registerSplitsSigner, runFund } from "./commands/fund.js";
 import { runWithdraw } from "./commands/withdraw.js";
 import { runStrategy } from "./commands/strategy.js";
@@ -34,10 +34,6 @@ wallet
   .option("--yes-print-my-key", "explicitly allow printing the key")
   .action(wrap(walletExport));
 wallet.command("list").description("list bots and key roles").action(wrap(walletList));
-wallet
-  .command("abort-bootstrap <botId>")
-  .description("delete an unused one-use Container wallet ceremony and reset init")
-  .action(wrap(walletAbortBootstrap));
 wallet
   .command("register-splits <botId>")
   .description("print the safe Splits EOA registration command (does not attach account authority)")

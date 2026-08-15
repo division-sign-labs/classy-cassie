@@ -114,17 +114,10 @@ const EvmAddressSchema = z
   .string()
   .regex(/^0x[0-9a-fA-F]{40}$/, "expected a 20-byte EVM address");
 
-/**
- * Where the bot's master EOA was generated. Regardless of origin, the
- * finalized key is kept in Cassie's local encrypted keystore.
- *
- * `address` remains optional for backward compatibility with configs written
- * before wallet provenance was recorded. New init flows always set it, and a
- * container-origin wallet is rejected without it.
- */
+/** The bot's master EOA, generated into Cassie's local encrypted keystore. */
 export const WalletConfigSchema = z
   .object({
-    origin: z.enum(["local", "container"]).default("local"),
+    origin: z.literal("local").default("local"),
     address: EvmAddressSchema.optional(),
   })
   .strict();
@@ -225,23 +218,6 @@ export const BotConfigSchema = z
     createdAt: z.string().optional(),
   })
   .superRefine((config, ctx) => {
-    if (config.wallet.origin === "container" && !config.wallet.address) {
-      ctx.addIssue({
-        code: "custom",
-        path: ["wallet", "address"],
-        message: "container-origin wallet requires its verified address",
-      });
-    }
-    if (config.wallet.origin === "container" && config.venue !== "hyperliquid") {
-      ctx.addIssue({
-        code: "custom",
-        path: ["wallet", "origin"],
-        message:
-          config.venue === "polymarket"
-            ? "container-origin wallets are disabled for Polymarket while its raw signer is deployed to the runtime"
-            : "container-origin wallets are unavailable for Lighter while it remains local-runtime only",
-      });
-    }
     const treasurySigner = config.treasury?.signers.eoa;
     if (
       treasurySigner &&

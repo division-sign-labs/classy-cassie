@@ -28,27 +28,24 @@ describe("wallet and Splits treasury config", () => {
     expect(config.wallet).toEqual({ origin: "local" });
   });
 
-  it("round-trips container provenance and account-scoped Splits metadata", () => {
+  it("round-trips local wallet and account-scoped Splits metadata", () => {
     const parsed = parseBotConfig({
       id: "bot-1",
       venue: "hyperliquid",
-      wallet: { origin: "container", address: BOT_ADDRESS },
+      wallet: { origin: "local", address: BOT_ADDRESS },
       treasury: treasury(),
     });
     expect(parseBotConfig(JSON.parse(serializeBotConfig(parsed)))).toEqual(parsed);
   });
 
-  it("requires a verified address for container-origin wallets", () => {
-    expect(() => parseBotConfig({ id: "bot-1", venue: "hyperliquid", wallet: { origin: "container" } })).toThrow(
-      /verified address/,
-    );
+  it("rejects removed Container wallet provenance", () => {
     expect(() =>
       parseBotConfig({
         id: "bot-1",
-        venue: "polymarket",
+        venue: "hyperliquid",
         wallet: { origin: "container", address: BOT_ADDRESS },
       }),
-    ).toThrow(/disabled for Polymarket/);
+    ).toThrow();
   });
 
   it("rejects secret-looking or otherwise unknown treasury fields", () => {

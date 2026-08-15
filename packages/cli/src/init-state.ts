@@ -6,7 +6,6 @@ import { existsSync, readFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { parseBotConfig, type BotConfig, type SplitsTreasury } from "@quotient-forecasting/cassie-core";
 import { atomicWritePrivateFile, cassieHome, safeBotId } from "./paths.js";
-import type { WalletBootstrapRequest } from "./bootstrap-crypto.js";
 
 export type InitVenue = BotConfig["venue"];
 
@@ -20,20 +19,12 @@ export interface PendingSplitsAccount {
   threshold: number;
 }
 
-export interface BootstrapCheckpoint {
-  workerName: string;
-  request: WalletBootstrapRequest;
-  controlUrl?: string;
-  phase: "planned" | "deployed" | "envelope-ready" | "master-stored" | "acknowledged" | "purged";
-}
-
 export interface InitState {
   version: 1;
   botId: string;
   venue: InitVenue;
   createdAt: string;
   wallet?: BotConfig["wallet"];
-  bootstrap?: BootstrapCheckpoint;
   pendingTreasury?: PendingSplitsAccount;
   treasury?: SplitsTreasury;
   account?: BotConfig["account"];
@@ -43,10 +34,7 @@ export function initStatePath(botId: string): string {
   return join(cassieHome(), "setup", `${safeBotId(botId)}.json`);
 }
 
-const TOKEN_RE = /^[A-Za-z0-9_-]{22}$/;
-const SHA256_RE = /^sha256:[A-Za-z0-9_-]{43}$/;
 const EVM_ADDRESS_RE = /^0x[0-9a-fA-F]{40}$/;
-const BOOTSTRAP_PHASES = ["planned", "deployed", "envelope-ready", "master-stored", "acknowledged", "purged"] as const;
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
@@ -64,77 +52,6 @@ function validOpaqueId(value: unknown): value is string {
     !value.includes(",") &&
     !/[\r\n\0]/.test(value)
   );
-}
-
-function validateBootstrapRequest(value: unknown, botId: string): WalletBootstrapRequest {
-  if (
-    !isRecord(value) ||
-    !hasOnlyKeys(value, ["version", "botId", "sessionId", "publicKeySpki", "publicKeyFingerprint", "challenge"]) ||
-    Object.keys(value).length !== 6 ||
-    value.version !== 1 ||
-    value.botId !== botId ||
-    typeof value.sessionId !== "string" ||
-    !TOKEN_RE.test(value.sessionId) ||
-    typeof value.challenge !== "string" ||
-    !TOKEN_RE.test(value.challenge) ||
-    typeof value.publicKeyFingerprint !== "string" ||
-    !SHA256_RE.test(value.publicKeyFingerprint) ||
-    typeof value.publicKeySpki !== "string" ||
-    value.publicKeySpki.length < 400 ||
-    value.publicKeySpki.length > 1_000 ||
-    !/^[A-Za-z0-9_-]+$/.test(value.publicKeySpki)
-  ) {
-    throw new Error("init journal bootstrap request is invalid");
-  }
-  return value as unknown as WalletBootstrapRequest;
-}
-
-function validateBootstrap(value: unknown, botId: string, venue: InitVenue): BootstrapCheckpoint | undefined {
-  if (value === undefined) return undefined;
-  if (venue !== "hyperliquid" || !isRecord(value)) throw new Error("init journal bootstrap checkpoint is invalid");
-  if (
-    !hasOnlyKeys(value, ["workerName", "request", "controlUrl", "phase"]) ||
-    typeof value.workerName !== "string" ||
-    !BOOTSTRAP_PHASES.includes(value.phase as (typeof BOOTSTRAP_PHASES)[number])
-  ) {
-    throw new Error("init journal bootstrap checkpoint is invalid");
-  }
-  const request = validateBootstrapRequest(value.request, botId);
-  const suffix = request.sessionId.replace(/[^A-Za-z0-9]/g, "").toLowerCase().slice(0, 8);
-  const expectedWorker = `cassie-bootstrap-${botId}-${suffix}`;
-  if (value.workerName !== expectedWorker) throw new Error("init journal bootstrap Worker does not match its session");
-
-  const needsUrl = value.phase !== "planned";
-  if (needsUrl !== (typeof value.controlUrl === "string")) {
-    throw new Error(`init journal bootstrap phase ${String(value.phase)} has an invalid control URL`);
-  }
-  if (typeof value.controlUrl === "string") {
-    let url: URL;
-    try {
-      url = new URL(value.controlUrl);
-    } catch {
-      throw new Error("init journal bootstrap control URL is invalid");
-    }
-    if (
-      url.protocol !== "https:" ||
-      url.username !== "" ||
-      url.password !== "" ||
-      url.port !== "" ||
-      url.pathname !== "/" ||
-      url.search !== "" ||
-      url.hash !== "" ||
-      !url.hostname.endsWith(".workers.dev") ||
-      url.hostname.split(".")[0] !== expectedWorker
-    ) {
-      throw new Error("init journal bootstrap control URL is not the expected workers.dev deployment");
-    }
-  }
-  return {
-    workerName: expectedWorker,
-    request,
-    phase: value.phase as BootstrapCheckpoint["phase"],
-    ...(typeof value.controlUrl === "string" ? { controlUrl: value.controlUrl } : {}),
-  };
 }
 
 function assertNoSecretFields(value: unknown, path = "setup"): void {
@@ -217,7 +134,7 @@ export function parseInitState(value: unknown, expectedBotId?: string): InitStat
   if (!value || typeof value !== "object") throw new Error("init journal must be an object");
   assertNoSecretFields(value);
   const raw = value as Record<string, unknown>;
-  if (!hasOnlyKeys(raw, ["version", "botId", "venue", "createdAt", "wallet", "bootstrap", "pendingTreasury", "treasury", "account"])) {
+  if (!hasOnlyKeys(raw, ["version", "botId", "venue", "createdAt", "wallet", "pendingTreasury", "treasury", "account"])) {
     throw new Error("init journal contains unknown fields");
   }
   if (raw.version !== 1) throw new Error("unsupported init journal version");
@@ -239,14 +156,6 @@ export function parseInitState(value: unknown, expectedBotId?: string): InitStat
     ...(raw.treasury === undefined ? {} : { treasury: raw.treasury }),
     ...(raw.account === undefined ? {} : { account: raw.account }),
   });
-  const bootstrap = validateBootstrap(raw.bootstrap, parsed.id, venue);
-  if (
-    bootstrap &&
-    (bootstrap.phase === "master-stored" || bootstrap.phase === "acknowledged" || bootstrap.phase === "purged") &&
-    (parsed.wallet.origin !== "container" || !parsed.wallet.address)
-  ) {
-    throw new Error(`init journal bootstrap phase ${bootstrap.phase} requires its verified container wallet`);
-  }
   const pendingTreasury = validatePending(
     raw.pendingTreasury,
     parsed.id,
@@ -259,7 +168,6 @@ export function parseInitState(value: unknown, expectedBotId?: string): InitStat
     venue,
     createdAt: raw.createdAt,
     ...(raw.wallet === undefined ? {} : { wallet: parsed.wallet }),
-    ...(bootstrap ? { bootstrap } : {}),
     ...(pendingTreasury ? { pendingTreasury } : {}),
     ...(raw.treasury === undefined ? {} : { treasury: parsed.treasury! }),
     ...(raw.account === undefined ? {} : { account: parsed.account! }),

@@ -14,7 +14,6 @@ import {
   type BotConfig,
 } from "@quotient-forecasting/cassie-core";
 import { ask, confirm, getPassphrase, keystore, makeSetupContext, select } from "../context.js";
-import { bootstrapContainerWallet } from "../container-bootstrap.js";
 import { clearInitState, loadInitState, saveInitState, type InitState } from "../init-state.js";
 import { botConfigPath, loadBotConfig, saveBotConfig } from "../paths.js";
 import { createSplitsTreasury } from "../splits-init.js";
@@ -160,13 +159,12 @@ export async function runInit(): Promise<void> {
     state = next;
   };
 
-  // Wallet: acquire one EOA, then converge both origins into the encrypted
-  // local keystore before any Splits or venue mutation occurs.
+  // Wallet: acquire one EOA in the encrypted local keystore before any Splits
+  // or venue mutation occurs.
   const ks = keystore();
   const savedIdentityAddress =
     existing?.wallet.address ?? (existing?.account ? accountWalletAddress(existing.account) : undefined);
   if (
-    !state.bootstrap &&
     !state.wallet?.address &&
     !ks.entryMeta(botId, KeyRoles.master) &&
     savedIdentityAddress
@@ -178,16 +176,14 @@ export async function runInit(): Promise<void> {
     );
   }
   let wallet: BotConfig["wallet"];
-  if (state.bootstrap) {
-    wallet = await bootstrapContainerWallet({ botId, venue, state, checkpoint });
-  } else if (state.wallet?.address) {
+  if (state.wallet?.address) {
     const passphrase = await getPassphrase();
     const stored = ks.getEntry(botId, KeyRoles.master, passphrase);
     if (!stored || addressFromPk(stored).toLowerCase() !== state.wallet.address.toLowerCase()) {
       throw new Error("the init checkpoint's wallet does not match the encrypted local master key");
     }
     wallet = state.wallet;
-    console.log(pc.dim(`reusing verified ${wallet.origin}-origin wallet ${wallet.address}`));
+    console.log(pc.dim(`reusing verified local wallet ${wallet.address}`));
   } else if (ks.entryMeta(botId, KeyRoles.master)) {
     const passphrase = await getPassphrase();
     const stored = ks.getEntry(botId, KeyRoles.master, passphrase);
@@ -199,48 +195,20 @@ export async function runInit(): Promise<void> {
           "Restore the matching keystore/config pair or use a new bot id; Cassie will not replace either identity.",
       );
     }
-    wallet = { origin: existing?.wallet.origin ?? "local", address: storedAddress };
+    wallet = { origin: "local", address: storedAddress };
     checkpoint({ ...state, wallet });
     console.log(pc.dim(`reusing existing master key for ${botId} (${wallet.address})`));
   } else {
-    const origin =
-      venue === "hyperliquid"
-        ? await select("Where should the wallet be generated?", [
-            {
-              value: "local",
-              title: "Local keystore (recommended)",
-              description: "Generate on this machine and keep the master key here.",
-            },
-            {
-              value: "container",
-              title: "One-use Container",
-              description: "Deploy a generator, encrypt-export locally, consume it, and delete the deployment.",
-            },
-          ])
-        : "local";
-    if (origin === "container") {
-      console.log(pc.dim("Container-first is a generation ceremony; Cloudflare is trusted briefly and the resulting master is stored locally."));
-      if (!(await confirm("Deploy the one-use wallet generator now?", true))) {
-        throw new Error("operator declined container wallet bootstrap");
-      }
-      wallet = await bootstrapContainerWallet({ botId, venue, state, checkpoint });
-    } else {
-      if (venue === "polymarket") {
-        console.log(pc.dim("container-first is disabled here: Polymarket's current runtime still receives its raw trading signer."));
-      } else if (venue === "lighter") {
-        console.log(pc.dim("container-first is unavailable because Lighter is currently local-runtime only."));
-      }
-      const passphrase = await getPassphrase(!ks.exists(botId));
-      if (ks.exists(botId)) ks.verifyPassphrase(botId, passphrase);
-      const eoa = generateEoa();
-      ks.putEntry(botId, KeyRoles.master, eoa.privateKey, passphrase, {
-        address: eoa.address,
-        runtimeEligible: false,
-      });
-      wallet = { origin: "local", address: eoa.address };
-      checkpoint({ ...state, wallet });
-      console.log(`generated local wallet: ${pc.green(eoa.address)}`);
-    }
+    const passphrase = await getPassphrase(!ks.exists(botId));
+    if (ks.exists(botId)) ks.verifyPassphrase(botId, passphrase);
+    const eoa = generateEoa();
+    ks.putEntry(botId, KeyRoles.master, eoa.privateKey, passphrase, {
+      address: eoa.address,
+      runtimeEligible: false,
+    });
+    wallet = { origin: "local", address: eoa.address };
+    checkpoint({ ...state, wallet });
+    console.log(`generated local wallet: ${pc.green(eoa.address)}`);
   }
   if (savedIdentityAddress && wallet.address!.toLowerCase() !== savedIdentityAddress.toLowerCase()) {
     throw new Error(

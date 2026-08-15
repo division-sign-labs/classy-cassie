@@ -5,33 +5,13 @@
 
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import type { LogLevel, ManualOrderParams } from "@quotient-forecasting/cassie-core";
-import {
-  createWalletBootstrapEnvelope,
-  parseWalletBootstrapRequest,
-  WALLET_BOOTSTRAP_NO_STORE_HEADERS,
-  type WalletBootstrapEnvelope,
-  type WalletBootstrapRequest,
-} from "./bootstrap-wallet.js";
 import { BotService } from "./service.js";
 
-const bootstrapMode = process.env.CASSIE_BOOTSTRAP_MODE === "wallet";
-const service = bootstrapMode ? undefined : new BotService();
-let cachedBootstrap:
-  | { request: WalletBootstrapRequest; envelope: WalletBootstrapEnvelope }
-  | undefined;
+const service = new BotService();
 
-function send(
-  response: ServerResponse,
-  data: unknown,
-  status = 200,
-  headers: Record<string, string> = {},
-): void {
+function send(response: ServerResponse, data: unknown, status = 200): void {
   const body = JSON.stringify(data, null, 2);
-  response.writeHead(status, {
-    "content-type": "application/json",
-    "content-length": Buffer.byteLength(body),
-    ...headers,
-  });
+  response.writeHead(status, { "content-type": "application/json", "content-length": Buffer.byteLength(body) });
   response.end(body);
 }
 
@@ -55,62 +35,7 @@ function actionOf(request: IncomingMessage): { action: string; url: URL } {
   return { action, url };
 }
 
-function sameBootstrapRequest(left: WalletBootstrapRequest, right: WalletBootstrapRequest): boolean {
-  return (
-    left.version === right.version &&
-    left.botId === right.botId &&
-    left.sessionId === right.sessionId &&
-    left.publicKeySpki === right.publicKeySpki &&
-    left.publicKeyFingerprint === right.publicKeyFingerprint &&
-    left.challenge === right.challenge
-  );
-}
-
-async function handleBootstrap(request: IncomingMessage, response: ServerResponse): Promise<void> {
-  const { action } = actionOf(request);
-  const method = request.method?.toUpperCase() ?? "GET";
-  const botId = process.env.CASSIE_BOT_ID;
-  const requiredRegion = process.env.CASSIE_REQUIRED_REGION;
-  const region = process.env.CLOUDFLARE_REGION;
-  if (!botId || !requiredRegion || !region) throw new Error("bootstrap container is missing its bound identity");
-  if (region !== requiredRegion) throw new Error(`refusing bootstrap outside required region ${requiredRegion}`);
-
-  if (method === "GET" && (action === "health" || action === "ping")) {
-    send(response, { ok: true, mode: "wallet-bootstrap" }, 200, WALLET_BOOTSTRAP_NO_STORE_HEADERS);
-    return;
-  }
-  if (method === "GET" && action === "runtime") {
-    send(
-      response,
-      {
-        runtime: "cloudflare-container-bootstrap",
-        protocol: 1,
-        botId,
-        requiredRegion,
-        region,
-        location: process.env.CLOUDFLARE_LOCATION,
-      },
-      200,
-      WALLET_BOOTSTRAP_NO_STORE_HEADERS,
-    );
-    return;
-  }
-  if (method === "POST" && action === "internal/bootstrap/wallet") {
-    const parsed = parseWalletBootstrapRequest(await bodyJson<unknown>(request));
-    if (parsed.botId !== botId) throw new Error("bootstrap request bot id does not match this container");
-    if (cachedBootstrap && !sameBootstrapRequest(cachedBootstrap.request, parsed)) {
-      send(response, { error: "container already generated a wallet for another bootstrap binding" }, 409, WALLET_BOOTSTRAP_NO_STORE_HEADERS);
-      return;
-    }
-    cachedBootstrap ??= { request: parsed, envelope: createWalletBootstrapEnvelope(parsed) };
-    send(response, cachedBootstrap.envelope, 200, WALLET_BOOTSTRAP_NO_STORE_HEADERS);
-    return;
-  }
-  send(response, { error: `unknown bootstrap route ${method} ${request.url ?? "/"}` }, 404, WALLET_BOOTSTRAP_NO_STORE_HEADERS);
-}
-
-async function handleTrading(request: IncomingMessage, response: ServerResponse): Promise<void> {
-  if (!service) throw new Error("trading service is unavailable in bootstrap mode");
+async function handle(request: IncomingMessage, response: ServerResponse): Promise<void> {
   const { action, url } = actionOf(request);
   const method = request.method?.toUpperCase() ?? "GET";
 
@@ -214,28 +139,19 @@ async function handleTrading(request: IncomingMessage, response: ServerResponse)
 }
 
 const server = createServer((request, response) => {
-  void (bootstrapMode ? handleBootstrap(request, response) : handleTrading(request, response)).catch((error) =>
-    send(
-      response,
-      { error: (error as Error).message },
-      500,
-      bootstrapMode ? WALLET_BOOTSTRAP_NO_STORE_HEADERS : {},
-    ),
-  );
+  void handle(request, response).catch((error) => send(response, { error: (error as Error).message }, 500));
 });
 
 server.listen(8080, "0.0.0.0", () => {
-  const botId = service?.config.id ?? process.env.CASSIE_BOT_ID ?? "bootstrap";
-  console.log(`[${new Date().toISOString()}] [${botId}] INFO listening on :8080 (${bootstrapMode ? "wallet-bootstrap" : "trading"})`);
+  console.log(`[${new Date().toISOString()}] [${service.config.id}] INFO listening on :8080`);
 });
 
 let signalHandled = false;
 async function terminate(signal: string): Promise<void> {
   if (signalHandled) return;
   signalHandled = true;
-  const botId = service?.config.id ?? process.env.CASSIE_BOT_ID ?? "bootstrap";
-  console.log(`[${new Date().toISOString()}] [${botId}] INFO ${signal} received`);
-  if (service) await service.shutdown(true).catch((error) => console.error(`shutdown failed: ${(error as Error).message}`));
+  console.log(`[${new Date().toISOString()}] [${service.config.id}] INFO ${signal} received`);
+  await service.shutdown(true).catch((error) => console.error(`shutdown failed: ${(error as Error).message}`));
   server.close(() => process.exit(0));
   setTimeout(() => process.exit(1), 30_000).unref();
 }
@@ -244,5 +160,4 @@ process.once("SIGTERM", () => void terminate("SIGTERM"));
 process.once("SIGINT", () => void terminate("SIGINT"));
 
 export { BotService } from "./service.js";
-export * from "./bootstrap-wallet.js";
 export { DurableObjectStateStore } from "./state.js";

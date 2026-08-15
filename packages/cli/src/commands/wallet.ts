@@ -4,7 +4,6 @@
 import pc from "picocolors";
 import { addressFromPk, generateEoa, KeyRoles } from "@quotient-forecasting/cassie-core";
 import { ask, confirm, getPassphrase, keystore } from "../context.js";
-export { abortContainerWalletBootstrap as walletAbortBootstrap } from "../container-bootstrap.js";
 
 export async function walletCreate(botId: string): Promise<void> {
   const ks = keystore();

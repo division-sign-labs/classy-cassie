@@ -37,9 +37,8 @@ npm lifecycle scripts are disabled, run `cassie skill install` once.
 
 `cassie init` can also create a dedicated Splits Teams subaccount under the organization
 authenticated by the official Splits CLI. It is passkey-operated by default, appears with
-the org's other subaccounts, and gives the bot no authority over them. Hyperliquid additionally
-offers one-use Cloudflare Container wallet generation: the key is encrypted back, verified
-in the local keystore, remotely consumed, and the bootstrap deployment is deleted.
+the org's other subaccounts, and gives the bot no authority over them. Bot wallets are
+generated directly into Cassie's encrypted local keystore.
 
 For contributors working from this checkout:
 

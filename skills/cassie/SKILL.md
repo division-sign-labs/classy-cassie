@@ -18,9 +18,8 @@ orders through Quotient infrastructure, and Quotient never holds keys or funds.
 
 Custody model:
 
-- Per-bot EOA, independently generated (no shared seed). The EOA can be generated locally,
-  or—Hyperliquid only—inside a one-use Cloudflare Container and encrypted back to this
-  machine. Final keys live in
+- Per-bot EOA, independently generated (no shared seed) directly into the local encrypted
+  keystore. Final keys live in
   `~/.cassie/keys/<botId>.json`, AES-256-GCM encrypted with a scrypt-derived key from the
   operator passphrase, file mode 0600.
 - Keys are split by role. Hyperliquid's master and Lighter's L1 key stay local; deployed
@@ -66,17 +65,7 @@ Every step happens in the terminal; you only leave it to copy-paste dashboard va
 
 1. **Bot id** — lowercase, dashes, max 32 chars. Names the config, keystore, and state files.
 2. **Venue** — `polymarket`, `hyperliquid`, or `lighter`.
-3. **Wallet origin** — Hyperliquid offers two paths:
-   - *local* (recommended): generate directly into the encrypted local keystore;
-   - *one-use Container*: deploy an EEUR bootstrap-only Worker/Container, generate in
-     process memory, RSA-OAEP-encrypt the key to an ephemeral local recipient, verify and
-     durably store it locally, prove receipt with an encrypted one-use token, purge the live
-     Durable Object value, and delete the bootstrap deployment. Cloudflare and the image are
-     trusted during generation; this is logical export-and-delete, not enclave attestation
-     or a claim of cryptographic erasure from provider backups/PITR.
-     The Container is replaceable compute, not a permanent machine identity.
-   Polymarket does not offer this option because its final trading deployment still receives
-   the signer; Lighter does not offer it because Lighter is local-runtime-only.
+3. **Wallet** — generate directly into the encrypted local keystore.
 4. **Passphrase** — encrypts the keystore. There is no recovery; losing it means
    re-importing or re-generating keys.
 5. **Optional Splits Teams subaccount** — requires the official
@@ -131,7 +120,6 @@ Every step happens in the terminal; you only leave it to copy-paste dashboard va
 
 Non-secret progress is checkpointed at `~/.cassie/setup/<botId>.json` (0600). Rerunning
 `cassie init` resumes wallet/Splits/venue steps without repeating completed external writes.
-Bootstrap wrapping keys and bearer tokens are encrypted keystore entries, never journal data.
 
 ### Funding flows (per venue)
 
@@ -185,7 +173,6 @@ cassie wallet import <botId>                 # import a private key via stdin
 cassie wallet export <botId> --yes-print-my-key   # print raw key (double confirmation)
 cassie wallet list                           # bots, key roles, runtime-eligibility
 cassie wallet register-splits <botId>        # register EOA only; grants no account authority
-cassie wallet abort-bootstrap <botId>        # delete/reset an unused Container ceremony
 cassie fund <botId> [--from splits]          # run/re-run the venue funding flow
 cassie withdraw <botId> <amount|all> --to <address>   # send collateral out (signs locally)
 cassie run <botId> [--debug]
@@ -396,9 +383,7 @@ otherwise it asks the operator. Exit is flip or resolution, owned by flip-flat.
 Lighter remains local-only in this release because its filesystem-backed WASM signer has
 not yet been wired and verified in the deployed Container runtime.
 
-Container-first wallet generation is available only for Hyperliquid. Normal Polymarket
-Cloudflare deploy remains available, but it prints a custody warning because its raw venue
-signer is a Worker secret. Never attach that EOA to a Splits account.
+Never attach a Polymarket bot EOA to a Splits account.
 
 ## 9. Troubleshooting
 
@@ -434,7 +419,3 @@ signer is a Worker secret. Never attach that EOA to a Splits account.
 - **Splits shows the wrong organization** — `SPLITS_API_KEY` overrides the CLI's saved auth
   and every key belongs to one org. Stop at the org confirmation, unset/change the key,
   and verify with `splits auth whoami`; Cassie has no team-switch command.
-- **Container wallet setup was interrupted** — rerun `cassie init`; it retrieves the same
-  encrypted envelope and resumes. Only when no master was imported, use
-  `cassie wallet abort-bootstrap <botId>` to authenticate a remote abort/purge, delete the
-  unused one-use Worker, and reset.

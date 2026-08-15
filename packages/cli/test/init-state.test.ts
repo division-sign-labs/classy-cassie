@@ -4,7 +4,6 @@ import { mkdtempSync, readFileSync, statSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { createWalletBootstrapSession } from "../src/bootstrap-crypto.js";
 import { clearInitState, initStatePath, loadInitState, parseInitState, saveInitState } from "../src/init-state.js";
 
 const originalHome = process.env.CASSIE_HOME;
@@ -44,38 +43,6 @@ describe("init state", () => {
     expect(() => parseInitState(base, "bot-2")).toThrow(/belongs to bot-1/);
     expect(() => parseInitState({ ...base, version: 2 })).toThrow(/version/);
     expect(() => initStatePath("../escape")).toThrow(/bot id/);
-  });
-
-  it("binds bootstrap recovery to its exact Worker and workers.dev origin", () => {
-    const request = createWalletBootstrapSession("bot-1").request;
-    const suffix = request.sessionId.replace(/[^A-Za-z0-9]/g, "").toLowerCase().slice(0, 8);
-    const workerName = `cassie-bootstrap-bot-1-${suffix}`;
-    const base = {
-      version: 1 as const,
-      botId: "bot-1",
-      venue: "hyperliquid" as const,
-      createdAt: "2026-08-14T00:00:00.000Z",
-      bootstrap: {
-        workerName,
-        request,
-        phase: "deployed" as const,
-        controlUrl: `https://${workerName}.example.workers.dev`,
-      },
-    };
-
-    expect(parseInitState(base).bootstrap?.workerName).toBe(workerName);
-    expect(() =>
-      parseInitState({
-        ...base,
-        bootstrap: { ...base.bootstrap, controlUrl: "https://attacker.example/collect" },
-      }),
-    ).toThrow(/expected workers\.dev/);
-    expect(() =>
-      parseInitState({
-        ...base,
-        bootstrap: { ...base.bootstrap, workerName: "cassie-bot-production" },
-      }),
-    ).toThrow(/does not match its session/);
   });
 
   it("strictly validates a pending Splits signer plan", () => {

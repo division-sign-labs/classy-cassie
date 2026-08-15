@@ -126,8 +126,7 @@ export class Keystore {
       descriptor = undefined;
       renameSync(temporary, p);
       chmodSync(p, 0o600);
-      // The container-wallet acknowledgement is irreversible, so make the
-      // rename itself durable before callers can consume the remote envelope.
+      // Make the rename durable before callers rely on the newly stored key.
       // Node cannot open directory handles on Windows; NTFS rename semantics
       // are the platform fallback there.
       if (process.platform !== "win32") {
@@ -201,14 +200,6 @@ export class Keystore {
     return true;
   }
 
-  /** Remove one entry without disturbing the bot's other encrypted secrets. */
-  removeEntry(botId: string, name: string): boolean {
-    const file = this.load(botId);
-    if (!file?.entries[name]) return false;
-    delete file.entries[name];
-    this.save(file);
-    return true;
-  }
 }
 
 /**
@@ -225,6 +216,4 @@ export const KeyRoles = {
   quotientToken: "quotient-token", // signal API token (runtime-eligible)
   aresApiKey: "ares-api-key", // Ares feed key, ares_sk_live_… (runtime-eligible)
   controlToken: "control-token", // deployed control API token
-  bootstrapWrap: "bootstrap-wrap", // one-use recipient key for container wallet export (local-only)
-  bootstrapToken: "bootstrap-token", // one-use bootstrap Worker bearer token (local-only)
 } as const;
