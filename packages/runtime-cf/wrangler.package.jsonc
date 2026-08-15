@@ -16,7 +16,7 @@
       "image": "./Dockerfile.package",
       "image_build_context": ".",
       "image_vars": {
-        "CASSIE_RUNTIME_VERSION": "0.1.2"
+        "CASSIE_RUNTIME_VERSION": "0.1.3"
       },
       "max_instances": 1,
       "instance_type": "lite",

@@ -21,7 +21,7 @@ const program = new Command();
 program
   .name("cassie")
   .description("open-source, self-hosted, non-custodial trading bot for prediction markets and perps venues")
-  .version("0.1.3");
+  .version("0.1.4");
 
 program.command("init").description("wizard: create a bot (wallet, venue, strategy, alerts, funding)").action(wrap(runInit));
 
