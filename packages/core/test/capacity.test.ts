@@ -48,6 +48,23 @@ describe("checkCapacity (§9)", () => {
     expect(res.notes.join(" ")).toMatch(/maxOrderNotional/);
   });
 
+  it("can measure an absolute book-walk band from the best executable price", () => {
+    const risk = RiskConfigSchema.parse({ maxBookWalkCents: 2, depthCapPct: 100 });
+    const res = checkCapacity({ side: "BUY", desiredSize: 1_000, refPrice: 0.55, book, quote: quote(), risk });
+    // Two cents from the 0.56 best ask includes 0.56 and 0.57, but not 0.60.
+    expect(res.ok).toBe(true);
+    expect(res.limitPrice).toBeCloseTo(0.58, 10);
+    expect(res.bandDepth).toBe(100);
+    expect(res.size).toBe(100);
+  });
+
+  it("uses the absolute book-walk band instead of the midpoint bps band when both are configured", () => {
+    const risk = RiskConfigSchema.parse({ maxSlippageBps: 10, maxBookWalkCents: 2, depthCapPct: 100 });
+    const res = checkCapacity({ side: "BUY", desiredSize: 100, refPrice: 0.55, book, quote: quote(), risk });
+    expect(res.ok).toBe(true);
+    expect(res.bandDepth).toBe(100);
+  });
+
   it("skips when 24h volume is below the floor", () => {
     const risk = RiskConfigSchema.parse({ maxSlippageBps: 300 });
     const res = checkCapacity({ side: "BUY", desiredSize: 10, refPrice: 0.55, book, quote: quote(5_000), risk });
@@ -115,5 +132,14 @@ describe("checkCapacity (§9)", () => {
     expect(res.ok).toBe(true);
     expect(res.bandDepth).toBe(50);
     expect(res.size).toBe(12.5);
+  });
+
+  it("measures an absolute SELL book walk down from the best bid", () => {
+    const risk = RiskConfigSchema.parse({ maxBookWalkCents: 1, depthCapPct: 100 });
+    const res = checkCapacity({ side: "SELL", desiredSize: 1_000, refPrice: 0.55, book, quote: quote(), risk });
+    expect(res.ok).toBe(true);
+    expect(res.limitPrice).toBeCloseTo(0.53, 10);
+    expect(res.bandDepth).toBe(150);
+    expect(res.size).toBe(150);
   });
 });

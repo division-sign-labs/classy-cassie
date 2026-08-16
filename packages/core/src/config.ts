@@ -10,6 +10,13 @@ export const DEFAULT_SIGNAL_MAX_AGE_SEC = 3 * 60 * 60;
 export const RiskConfigSchema = z.object({
   /** Max slippage from mid when computing the executable band, in bps. */
   maxSlippageBps: z.number().positive().default(100),
+  /**
+   * Optional absolute book-walk band, in cents, measured from the best
+   * executable price. Intended for binary markets where a one-cent tick can
+   * already exceed a midpoint-relative bps band. When set, this takes
+   * precedence over maxSlippageBps for capacity and crossing-limit checks.
+   */
+  maxBookWalkCents: z.number().positive().max(100).optional(),
   /** Cap order size at this % of executable depth within the band. */
   depthCapPct: z.number().positive().max(100).default(25),
   /** Market eligibility floor: 24h volume in USD. */

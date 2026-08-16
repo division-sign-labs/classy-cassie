@@ -121,6 +121,7 @@ function absoluteFrom(configDir: string, value: string): string {
 export function materializeWorkerWranglerProject(
   sourceProject: WranglerProject,
   workerName: string,
+  containerApplicationName = workerName,
 ): MaterializedWranglerProject {
   if (!/^[a-z0-9][a-z0-9-]{0,62}$/.test(workerName)) {
     throw new Error(`invalid Cloudflare Worker name ${JSON.stringify(workerName)}`);
@@ -161,7 +162,7 @@ export function materializeWorkerWranglerProject(
     containers: [
       {
         ...sourceContainer,
-        name: workerName,
+        name: containerApplicationName,
         image: absoluteFrom(configDir, sourceContainer.image),
         image_build_context:
           sourceContainer.image_build_context === undefined
@@ -189,6 +190,36 @@ export function materializeWorkerWranglerProject(
       rmSync(temporaryDir, { recursive: true, force: true });
     },
   };
+}
+
+/**
+ * Preserve a container application's existing account-global name on
+ * redeploy. Older Cassie releases used the shared `cassie-runtime` name;
+ * attempting to rename that application leaves the Durable Object attached to
+ * the old one and Cloudflare rejects the deploy.
+ */
+export function selectContainerApplicationName(
+  listOutput: string,
+  workerName: string,
+  legacyName = "cassie-runtime",
+): string {
+  try {
+    const start = listOutput.indexOf("[");
+    const end = listOutput.lastIndexOf("]");
+    if (start < 0 || end < start) return workerName;
+    const parsed = JSON.parse(listOutput.slice(start, end + 1)) as unknown;
+    if (!Array.isArray(parsed)) return workerName;
+    const names = new Set(
+      parsed
+        .map((item) => (isRecord(item) && typeof item.name === "string" ? item.name : undefined))
+        .filter((name): name is string => name !== undefined),
+    );
+    if (names.has(workerName)) return workerName;
+    if (names.has(legacyName)) return legacyName;
+  } catch {
+    // A failed inventory read must not invent a name; use the new safe default.
+  }
+  return workerName;
 }
 
 function projectArgs(args: string[], project: WranglerProject): string[] {

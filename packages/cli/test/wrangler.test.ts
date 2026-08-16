@@ -4,7 +4,7 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { materializeWorkerWranglerProject } from "../src/wrangler.js";
+import { materializeWorkerWranglerProject, selectContainerApplicationName } from "../src/wrangler.js";
 
 const roots: string[] = [];
 
@@ -99,6 +99,35 @@ describe("materializeWorkerWranglerProject", () => {
     }
   });
 
+  it("can preserve an existing legacy container application name", () => {
+    const root = tempRoot();
+    const sourceConfig = join(root, "wrangler.jsonc");
+    writeFileSync(
+      sourceConfig,
+      JSON.stringify({
+        name: "placeholder",
+        main: "src/index.ts",
+        containers: [{ name: "cassie-runtime", class_name: "BotAgent", image: "Dockerfile" }],
+      }),
+    );
+
+    const materialized = materializeWorkerWranglerProject(
+      { cwd: root, config: sourceConfig },
+      "cassie-bot-alpha",
+      "cassie-runtime",
+    );
+    try {
+      const config = JSON.parse(readFileSync(materialized.project.config!, "utf8")) as {
+        name: string;
+        containers: { name: string }[];
+      };
+      expect(config.name).toBe("cassie-bot-alpha");
+      expect(config.containers[0]?.name).toBe("cassie-runtime");
+    } finally {
+      materialized.dispose();
+    }
+  });
+
   it("rejects configs that could not map one container app to one Worker", () => {
     const root = tempRoot();
     const sourceConfig = join(root, "wrangler.jsonc");
@@ -116,5 +145,21 @@ describe("materializeWorkerWranglerProject", () => {
     expect(() =>
       materializeWorkerWranglerProject({ cwd: root, config: sourceConfig }, "cassie-bot-alpha"),
     ).toThrow(/exactly one container/);
+  });
+});
+
+describe("selectContainerApplicationName", () => {
+  it("prefers the worker-specific application when it already exists", () => {
+    const output = JSON.stringify([{ name: "cassie-runtime" }, { name: "cassie-bot-alpha" }]);
+    expect(selectContainerApplicationName(output, "cassie-bot-alpha")).toBe("cassie-bot-alpha");
+  });
+
+  it("preserves the legacy application when it is the existing attachment", () => {
+    const output = `wrangler notice\n${JSON.stringify([{ name: "cassie-runtime" }])}`;
+    expect(selectContainerApplicationName(output, "cassie-bot-alpha")).toBe("cassie-runtime");
+  });
+
+  it("falls back to the worker-specific name when inventory is unavailable", () => {
+    expect(selectContainerApplicationName("not json", "cassie-bot-alpha")).toBe("cassie-bot-alpha");
   });
 });

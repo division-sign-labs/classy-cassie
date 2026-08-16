@@ -32,7 +32,9 @@ export interface CapacityResult {
 }
 
 /**
- * Compute executable size within maxSlippageBps of mid, cap at
+ * Compute executable size within the configured band (an absolute book walk
+ * from the touch when maxBookWalkCents is set, otherwise maxSlippageBps from
+ * mid), cap at
  * min(desired, depthCapPct × bandDepth, maxOrderNotional), enforce market
  * eligibility (volume/spread floors) and minViableNotional.
  */
@@ -42,9 +44,13 @@ export function checkCapacity(input: CapacityInput): CapacityResult {
   const skipReasons: string[] = [];
   const notes: string[] = [];
 
-  const mid = quote.mid;
-  const band = (mid * risk.maxSlippageBps) / 10_000;
-  const limitPrice = side === "BUY" ? mid + band : mid - band;
+  const levels = side === "BUY" ? book.asks : book.bids;
+  const touch = levels[0]?.price;
+  const maxBookWalkCents = risk.maxBookWalkCents;
+  const usesBookWalk = maxBookWalkCents !== undefined;
+  const band = maxBookWalkCents !== undefined ? maxBookWalkCents / 100 : (quote.mid * risk.maxSlippageBps) / 10_000;
+  const anchor = usesBookWalk && touch !== undefined ? touch : quote.mid;
+  const limitPrice = side === "BUY" ? anchor + band : anchor - band;
 
   // Market eligibility floor (§9).
   if (quote.volume24h < risk.minDailyVolume) {
@@ -55,7 +61,6 @@ export function checkCapacity(input: CapacityInput): CapacityResult {
   }
 
   // Executable depth within the band.
-  const levels = side === "BUY" ? book.asks : book.bids;
   let bandDepth = 0;
   for (const lvl of levels) {
     const inBand = side === "BUY" ? lvl.price <= limitPrice : lvl.price >= limitPrice;
@@ -63,7 +68,11 @@ export function checkCapacity(input: CapacityInput): CapacityResult {
     bandDepth += lvl.size;
   }
   if (bandDepth <= 0) {
-    skipReasons.push(`no depth within ${risk.maxSlippageBps}bps of mid`);
+    skipReasons.push(
+      usesBookWalk
+        ? `no depth within ${maxBookWalkCents}¢ of best ${side === "BUY" ? "ask" : "bid"}`
+        : `no depth within ${risk.maxSlippageBps}bps of mid`,
+    );
   }
 
   const depthCap = bandDepth * (risk.depthCapPct / 100);

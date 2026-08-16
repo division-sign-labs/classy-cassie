@@ -116,6 +116,8 @@ program
   .option("--position-budget-pct <pct>", "percentage of the daily budget requested per entry")
   .option("--min-entry-notional <usd>", "entry-only floor after sizing and capacity caps")
   .option("--signal-max-age-hours <hours>", "maximum age of a live signal")
+  .option("--max-book-walk-cents <cents>", "measure executable capacity this many cents from the best price")
+  .option("--max-order-notional <usd>", "hard per-order notional cap in the risk module")
   .action(wrap(runStrategy));
 
 const venue = program.command("venue").description("venue adapters");

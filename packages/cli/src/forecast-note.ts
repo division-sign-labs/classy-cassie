@@ -5,7 +5,7 @@
 import { boundFetch, type BotConfig } from "@quotient-forecasting/cassie-core";
 
 const CONDITION_ID_RE = /^0x[0-9a-fA-F]{64}$/;
-const LOOKUP_TIMEOUT_MS = 5_000;
+const LOOKUP_TIMEOUT_MS = 15_000;
 
 function record(value: unknown): Record<string, unknown> | null {
   return typeof value === "object" && value !== null && !Array.isArray(value)

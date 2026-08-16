@@ -68,6 +68,8 @@ export interface StrategyOptions {
   positionBudgetPct?: string;
   minEntryNotional?: string;
   signalMaxAgeHours?: string;
+  maxBookWalkCents?: string;
+  maxOrderNotional?: string;
 }
 
 /** `cassie strategy <botId>`: view and tune the bot's strategy and signal guardrails. */
@@ -88,17 +90,27 @@ export async function runStrategy(botId: string, opts: StrategyOptions = {}): Pr
       opts.signalMaxAgeHours === undefined
         ? cfg.signals.maxAgeSec
         : positiveNumber("signal max age hours", opts.signalMaxAgeHours) * 60 * 60;
+    const risk = {
+      ...cfg.risk,
+      ...(opts.maxBookWalkCents === undefined
+        ? {}
+        : { maxBookWalkCents: positiveNumber("maximum book walk cents", opts.maxBookWalkCents) }),
+      ...(opts.maxOrderNotional === undefined
+        ? {}
+        : { maxOrderNotional: positiveNumber("maximum order notional", opts.maxOrderNotional) }),
+    };
     saveBotConfig({
       ...cfg,
       strategy: { ...cfg.strategy, config: strategyConfig },
       signals: { ...cfg.signals, maxAgeSec },
+      risk,
     });
     console.log(pc.green(`saved strategy settings for ${botId}`));
-    printStrategy(strategyConfig, maxAgeSec, cfg.risk.maxOrderNotional);
+    printStrategy(strategyConfig, maxAgeSec, risk);
     return;
   }
   console.log(pc.bold(`strategy: signals`));
-  printStrategy(cfg.strategy.config as Record<string, unknown>, cfg.signals.maxAgeSec, cfg.risk.maxOrderNotional);
+  printStrategy(cfg.strategy.config as Record<string, unknown>, cfg.signals.maxAgeSec, cfg.risk);
   if (await confirm(`Reset to recommended (${RECOMMENDED_SUMMARY})?`, false)) {
     saveStrategy(botId, await elicitRecommendedStrategyConfig(cfg.strategy.config as Record<string, unknown>));
     return;
@@ -136,7 +148,11 @@ function normalizeStrategyConfig(config: Record<string, unknown>): Record<string
   return current;
 }
 
-function printStrategy(config: Record<string, unknown>, maxAgeSec: number, maxOrderNotional: number): void {
+function printStrategy(
+  config: Record<string, unknown>,
+  maxAgeSec: number,
+  risk: { maxOrderNotional: number; maxSlippageBps: number; maxBookWalkCents?: number },
+): void {
   const current = { ...RECOMMENDED_STRATEGY, ...normalizeStrategyConfig(config) };
   const dailyBudgetUsd = Number(current.dailyBudgetUsd);
   const positionBudgetPct = Number(current.positionBudgetPct);
@@ -146,7 +162,12 @@ function printStrategy(config: Record<string, unknown>, maxAgeSec: number, maxOr
   console.log(`  budget per entry:     ${positionBudgetPct}% = $${perEntryUsd.toFixed(2)} before liquidity/risk caps`);
   console.log(`  minimum entry edge:   ${current.entrySpreadPp}pp`);
   console.log(`  minimum viable entry: $${Number(current.minEntryNotional).toFixed(2)}`);
-  console.log(`  hard per-order cap:   $${maxOrderNotional.toFixed(2)} (risk module)`);
+  console.log(`  executable band:      ${
+    risk.maxBookWalkCents === undefined
+      ? `${risk.maxSlippageBps}bps from midpoint`
+      : `${risk.maxBookWalkCents}¢ from best executable price`
+  }`);
+  console.log(`  hard per-order cap:   $${risk.maxOrderNotional.toFixed(2)} (risk module)`);
   console.log(`  signal max age:       ${(maxAgeSec / 3600).toFixed(2)}h`);
   console.log(`  tick interval:        ${current.tickIntervalMin} min`);
   console.log(`  universe:             ${Array.isArray(current.universe) ? current.universe.join(", ") : current.universe}`);
@@ -161,5 +182,5 @@ function saveStrategy(botId: string, config: Record<string, unknown>): void {
     tickIntervalMin: Number(normalized.tickIntervalMin ?? cfg.tickIntervalMin),
   });
   console.log(pc.green(`saved strategy settings for ${botId}`));
-  printStrategy(normalized, cfg.signals.maxAgeSec, cfg.risk.maxOrderNotional);
+  printStrategy(normalized, cfg.signals.maxAgeSec, cfg.risk);
 }

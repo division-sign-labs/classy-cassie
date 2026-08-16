@@ -15,7 +15,12 @@ import { ensureCloudflareReady, registerWorkersDevSubdomain } from "../cloudflar
 import { forgetControlToken, loadBotConfig, readControlToken, saveBotConfig, saveControlToken } from "../paths.js";
 import { resolveQuotientToken } from "../quotient-token.js";
 import { discoverAresBuilderCode, resolveAresApiKey, verifyAresApiKey } from "../ares-config.js";
-import { materializeWorkerWranglerProject, runWrangler, type WranglerProject } from "../wrangler.js";
+import {
+  materializeWorkerWranglerProject,
+  runWrangler,
+  selectContainerApplicationName,
+  type WranglerProject,
+} from "../wrangler.js";
 import { restrictedChildEnv } from "../child-env.js";
 
 const require = createRequire(import.meta.url);
@@ -244,7 +249,17 @@ export async function runDeploy(botId: string, opts: { rotateToken?: boolean } =
   }
   if (!(await confirm("continue?", true))) return;
 
-  const deployment = materializeWorkerWranglerProject(project, workerName);
+  let containerApplicationName = workerName;
+  if (cfg.controlUrl) {
+    const existingApplications = runWrangler(["containers", "list", "--json"], project);
+    if (existingApplications.ok) {
+      containerApplicationName = selectContainerApplicationName(existingApplications.out, workerName);
+      if (containerApplicationName !== workerName) {
+        console.log(pc.dim(`preserving existing container application name ${containerApplicationName}`));
+      }
+    }
+  }
+  const deployment = materializeWorkerWranglerProject(project, workerName, containerApplicationName);
   let controlUrl = "";
   try {
     await quiesceExistingDeployment(cfg, oldControlToken);
