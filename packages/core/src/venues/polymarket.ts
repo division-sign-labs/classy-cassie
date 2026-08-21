@@ -35,6 +35,40 @@ const CONDITIONAL = "CONDITIONAL" as AssetType;
 /** pUSD on Polygon — fallback when the client doesn't expose its environment. */
 const PUSD_ADDRESS = "0xC011a7E12a19f7B1f670d46F03B03f3342E82DFB";
 
+// Public Polygon RPCs for read-only approval verification. Ordered fallback:
+// a dead endpoint moves to the next, and a total outage degrades to "cannot
+// verify" (treated as unapproved so the flow errs on the side of retrying).
+const POLYGON_RPCS = ["https://polygon-rpc.com", "https://1rpc.io/matic", "https://polygon-bor-rpc.publicnode.com"];
+
+/** ERC-1155 isApprovedForAll(owner, operator), read from the chain itself. */
+async function isApprovedForAllOnChain(token: string, owner: string, operator: string): Promise<boolean> {
+  const pad = (addr: string) => addr.toLowerCase().replace(/^0x/, "").padStart(64, "0");
+  const data = "0xe985e9c5" + pad(owner) + pad(operator); // isApprovedForAll(address,address)
+  for (const rpc of POLYGON_RPCS) {
+    try {
+      const res = (await (
+        await fetch(rpc, {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "eth_call", params: [{ to: token, data }, "latest"] }),
+        })
+      ).json()) as { result?: string };
+      if (typeof res.result === "string") return BigInt(res.result) === 1n;
+    } catch {
+      // fall through to the next RPC
+    }
+  }
+  return false;
+}
+
+async function pollUntil(check: () => Promise<boolean>, opts: { attempts: number; delayMs: number }): Promise<boolean> {
+  for (let i = 0; i < opts.attempts; i++) {
+    if (await check()) return true;
+    await new Promise((resolve) => setTimeout(resolve, opts.delayMs));
+  }
+  return check();
+}
+
 /** Last 4 chars of a stored credential, so a menu can identify it without revealing it. */
 function maskSecret(savedJson: string): string {
   try {
@@ -329,10 +363,17 @@ export class PolymarketAdapter implements VenueAdapter {
     ctx.print(`(Small amounts can also go as USDC directly on Polygon to the same address.)`);
     ctx.print(`Deposits over $50k: use a third-party bridge direct to Polygon USDC instead.`);
 
-    await ctx.poll("waiting for bridge credit", async () => {
-      const bal = await this.collateralBalance().catch(() => 0);
-      return bal > before + 0.01 ? bal : null;
-    });
+    // An already-funded bot re-running this flow is usually here to repair or
+    // re-verify approvals (the documented fix for allowance errors), not to
+    // deposit — waiting on a credit that never comes would hang that repair.
+    const depositWanted =
+      before <= 0.01 || !(await ctx.confirm(`Balance is ${before.toFixed(2)} pUSD — skip the deposit and just re-verify trading approvals?`, true));
+    if (depositWanted) {
+      await ctx.poll("waiting for bridge credit", async () => {
+        const bal = await this.collateralBalance().catch(() => 0);
+        return bal > before + 0.01 ? bal : null;
+      });
+    }
     const bal = await this.collateralBalance();
     ctx.print(`Credited: ${bal.toFixed(2)} pUSD.`);
 
@@ -357,7 +398,9 @@ export class PolymarketAdapter implements VenueAdapter {
 
     // The SDK's public EnvironmentConfig type currently hides `contracts`,
     // although the production value carries the typed contract registry.
-    const { collateralToken, negRiskAdapter } = (production as unknown as { contracts: EnvironmentContracts }).contracts;
+    const { collateralToken, negRiskAdapter, conditionalTokens } = (
+      production as unknown as { contracts: EnvironmentContracts & { conditionalTokens: string } }
+    ).contracts;
     let allowance = await this.syncCollateralAllowance(client, negRiskAdapter);
     if (allowance === 0n) {
       ctx.print("Approving Polymarket Neg Risk Adapter (SDK 0.6.0 compatibility)…");
@@ -373,6 +416,36 @@ export class PolymarketAdapter implements VenueAdapter {
     if (allowance === 0n) {
       throw new Error(`polymarket: Neg Risk Adapter approval was not applied for wallet ${client.account.wallet}`);
     }
+
+    // SELLs hand position tokens to the exchange, which needs an ERC-1155
+    // setApprovalForAll on the CTF. setupTradingApprovals has been observed
+    // (2026-08-17) returning success without landing it on-chain, which lets
+    // a bot buy for days and then fail its first exit. Submit it explicitly
+    // and verify against the chain itself — not a venue-side cache — before
+    // declaring the flow complete.
+    const wallet = client.account.wallet;
+    if (!(await isApprovedForAllOnChain(conditionalTokens, wallet, negRiskAdapter))) {
+      ctx.print("Approving the exchange as CTF operator (required for sells)…");
+      const handle = await client.approveErc1155ForAll({
+        operatorAddress: negRiskAdapter,
+        tokenAddress: conditionalTokens,
+        approved: true,
+      });
+      await handle.wait();
+      // The relayer has been observed acking transactions that never mine;
+      // poll the chain until the approval is real.
+      const confirmed = await pollUntil(
+        () => isApprovedForAllOnChain(conditionalTokens, wallet, negRiskAdapter),
+        { attempts: 12, delayMs: 10_000 },
+      );
+      if (!confirmed) {
+        throw new Error(
+          `polymarket: CTF operator approval for ${negRiskAdapter} did not confirm on-chain for wallet ${wallet}. ` +
+            "Sells will be rejected with allowance errors until it lands — re-run `cassie fund <botId>` to retry.",
+        );
+      }
+    }
+    ctx.print("CTF operator approval verified on-chain — sells enabled.");
   }
 
   /** Refresh the CLOB cache and return one spender's collateral allowance. */
@@ -665,15 +738,30 @@ export class PolymarketAdapter implements VenueAdapter {
 
     const side = intent.side === "BUY" ? PmOrderSide.BUY : PmOrderSide.SELL;
     let res;
-    if (intent.tif === "FOK" || intent.tif === "IOC") {
-      const orderType = intent.tif === "FOK" ? PmOrderType.FOK : PmOrderType.FAK;
-      res =
-        intent.side === "BUY"
-          ? await client.placeMarketOrder({ tokenId, side: PmOrderSide.BUY, amount: round2(size * price), maxPrice: price, orderType, ...attribution })
-          : await client.placeMarketOrder({ tokenId, side: PmOrderSide.SELL, shares: size, minPrice: price, orderType, ...attribution });
-    } else {
-      // GTD without an expiry field degrades to GTC (documented).
-      res = await client.placeLimitOrder({ tokenId, price, size, side, ...attribution });
+    try {
+      if (intent.tif === "FOK" || intent.tif === "IOC") {
+        const orderType = intent.tif === "FOK" ? PmOrderType.FOK : PmOrderType.FAK;
+        res =
+          intent.side === "BUY"
+            ? await client.placeMarketOrder({ tokenId, side: PmOrderSide.BUY, amount: round2(size * price), maxPrice: price, orderType, ...attribution })
+            : await client.placeMarketOrder({ tokenId, side: PmOrderSide.SELL, shares: size, minPrice: price, orderType, ...attribution });
+      } else {
+        // GTD without an expiry field degrades to GTC (documented).
+        res = await client.placeLimitOrder({ tokenId, price, size, side, ...attribution });
+      }
+    } catch (err) {
+      // A SELL bouncing on allowance means the CTF operator approval is
+      // missing on-chain — a funding-flow defect, not a balance problem, and
+      // retrying the identical order cannot fix it. Say what actually repairs
+      // it instead of letting the raw venue error loop in the logs.
+      const message = err instanceof Error ? err.message : String(err);
+      if (intent.side === "SELL" && /allowance/i.test(message)) {
+        throw new Error(
+          `${message} — the venue is refusing to move this position's conditional tokens because the CTF operator ` +
+            "approval is missing on-chain. Run `cassie fund <botId>` to set and verify trading approvals, then retry.",
+        );
+      }
+      throw err;
     }
 
     const r = res as {

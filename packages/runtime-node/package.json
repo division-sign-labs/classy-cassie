@@ -1,19 +1,26 @@
 {
-  "name": "@quotient-forecasting/cassie-runtime-local",
-  "version": "0.1.1",
+  "name": "@quotient-forecasting/cassie-runtime-node",
+  "version": "0.1.5",
   "type": "module",
   "license": "Apache-2.0",
-  "description": "Local Node.js runtime for Cassie trading bots",
+  "description": "Node runtime for Cassie trading bots: engine loop, SQLite state, and a unix-socket control API",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/Quotient-Solutions-Inc/classy-cassie.git",
-    "directory": "packages/runtime-local"
+    "directory": "packages/runtime-node"
+  },
+  "homepage": "https://github.com/Quotient-Solutions-Inc/classy-cassie/tree/main/packages/runtime-node#readme",
+  "bugs": {
+    "url": "https://github.com/Quotient-Solutions-Inc/classy-cassie/issues"
   },
   "engines": {
-    "node": ">=20"
+    "node": ">=24"
   },
   "publishConfig": {
     "access": "public"
+  },
+  "bin": {
+    "cassie-runtime": "./dist/main.js"
   },
   "exports": {
     ".": {
@@ -21,11 +28,12 @@
       "import": "./dist/index.js"
     }
   },
-  "files": ["dist"],
+  "files": ["dist", "README.md"],
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "prepack": "pnpm build",
-    "typecheck": "tsc -p tsconfig.json --noEmit"
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "start": "node dist/main.js"
   },
   "dependencies": {
     "@quotient-forecasting/cassie-core": "workspace:*",

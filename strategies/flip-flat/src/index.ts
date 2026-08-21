@@ -1,5 +1,5 @@
 // strategies/flip-flat/src/index.ts
-// Reference strategy (§8): buy and hold until the forecast side flips.
+// Reference strategy (§8): buy and hold until the market prices in the forecast.
 // Pure decisions — the engine sizes, risk-checks, and executes.
 
 import { z } from "zod";
@@ -16,7 +16,6 @@ import {
 export const FlipFlatConfigSchema = z.object({
   /** Enter when |prob − price| in percentage points is at least this. */
   entrySpreadPp: z.number().default(10),
-  reenterOnFlip: z.boolean().default(true),
   /** Hold at most the top N eligible signals, ranked by edge. */
   topN: z.number().int().positive().default(2),
   /** Cumulative entry notional allowed per UTC day. */
@@ -31,20 +30,16 @@ export const FlipFlatConfigSchema = z.object({
   /** Perps entry sanity bound: skip if mid drifted more than this % from refPrice. */
   refPriceSanityPct: z.number().positive().default(2),
   /**
-   * Convergence exit (prediction markets, on by default): take profit when the
-   * market has priced in the forecast, rather than holding for a flip that may
-   * never come. Fires when the remaining edge has closed to `convergenceExitPp`
-   * or less AND the position is up at least `minProfitPct`.
-   *
-   * The two conditions are both required on purpose: edge closing while the
-   * position is flat or down means the market moved against the entry, which
-   * is a losing exit rather than a converged one.
+   * Convergence exit (prediction markets, on by default): the sole exit. Fires
+   * when the remaining edge on the held side has closed to `convergenceExitPp`
+   * or less, in profit or at a loss — once the forecast is at or below the
+   * price, holding has no expected upside left. While edge remains, the
+   * position is held regardless of P&L: a cheap market under a higher forecast
+   * is still +EV to hold.
    */
   convergenceExit: z.boolean().default(true),
   /** Remaining edge, in pp, at or below which the forecast counts as priced in. */
   convergenceExitPp: z.number().default(2),
-  /** Floor on realized gain before a convergence exit may fire, in % of entry. */
-  minProfitPct: z.number().default(1),
 });
 export type FlipFlatConfig = z.output<typeof FlipFlatConfigSchema>;
 
@@ -112,14 +107,12 @@ export class FlipFlatStrategy implements Strategy {
         continue;
       }
       const held = ctx.positions.find((p) => p.marketRef === marketRef && p.size > 0);
-      const hasRestingOrder = ctx.openOrders.some((o) => o.marketRef === marketRef);
-
-      const spreadPp = signalEdgePp(sig);
-      const entryConditionMet = await this.entryOk(ctx, cfg, sig, spreadPp);
 
       if (!held) {
         // Flat → enter the signaled side when the edge is wide enough.
-        if (hasRestingOrder) continue;
+        if (ctx.openOrders.some((o) => o.marketRef === marketRef)) continue;
+        const spreadPp = signalEdgePp(sig);
+        const entryConditionMet = await this.entryOk(ctx, cfg, sig, spreadPp);
         if (openCount >= cfg.topN) {
           // Say what was passed over, and at what edge — a silent cap reads as
           // "nothing else qualified" when the truth is "we ran out of slots".
@@ -149,29 +142,10 @@ export class FlipFlatStrategy implements Strategy {
         continue;
       }
 
-      if (held.side !== sig.side) {
-        // Forecast flipped: exit, then re-enter per config.
-        actions.push({ kind: "exit", marketRef, reason: `flip ${held.side}→${sig.side} (signal ${sig.id})` });
-        openCount -= 1;
-        if (cfg.reenterOnFlip && entryConditionMet && openCount < cfg.topN && !hasRestingOrder) {
-          const notional = await this.entryNotional(ctx, cfg, sig, remainingBudgetUsd);
-          if (notional > 0) {
-            actions.push({
-              kind: "enter",
-              marketRef,
-              side: sig.side,
-              notional,
-              minNotional: cfg.minEntryNotional,
-              reason: `flip re-entry (signal ${sig.id})`,
-            });
-            remainingBudgetUsd -= notional;
-            openCount += 1;
-          }
-        }
-      }
-      // Sides agree. Hold, unless the market has converged onto the forecast
-      // and the position is in profit — the thesis paid out, so bank it.
-      else if (cfg.convergenceExit) {
+      // Held. Hold until the market has converged onto the forecast — the
+      // signal's side flipping on its own is not an exit; the forecast can sit
+      // on the unheld side of 50% while the held side still carries edge.
+      if (cfg.convergenceExit) {
         const conv = await this.convergenceCheck(ctx, cfg, sig, held);
         if (conv) {
           actions.push({ kind: "exit", marketRef, reason: conv });
@@ -201,11 +175,12 @@ export class FlipFlatStrategy implements Strategy {
 
   /**
    * Convergence exit test. Returns the exit reason when the forecast has been
-   * priced in at a profit, or undefined to keep holding.
+   * priced in, or undefined to keep holding.
    *
    * Both legs are measured on the held side's own token: for a NO position the
-   * price is 1 − YES mid, and `sig.prob` already arrives expressed for the
-   * signaled side. Mixing the two conventions would invert every NO decision.
+   * price is 1 − YES mid, and `sig.prob` arrives expressed for the signaled
+   * side — when the signal sits on the other side, it is re-expressed as
+   * 1 − prob. Mixing the two conventions would invert every NO decision.
    */
   private async convergenceCheck(
     ctx: StrategyContext,
@@ -227,18 +202,13 @@ export class FlipFlatStrategy implements Strategy {
     if (!(mid > 0 && mid < 1)) return undefined;
 
     const curPrice = held.side === "NO" ? 1 - mid : mid;
+    const prob = sig.side === held.side ? sig.prob : 1 - sig.prob;
     // Signed on purpose: an overshoot past the forecast is past converged.
-    const remainingEdgePp = (sig.prob - curPrice) * 100;
-    const profitPct = ((curPrice - held.avgPrice) / held.avgPrice) * 100;
+    const remainingEdgePp = (prob - curPrice) * 100;
 
     if (remainingEdgePp > cfg.convergenceExitPp) return undefined;
-    if (profitPct < cfg.minProfitPct) {
-      ctx.log.info(
-        `${sig.marketRef} converged (${remainingEdgePp.toFixed(1)}pp left) but only ${profitPct.toFixed(1)}% up; holding for ${cfg.minProfitPct}%`,
-      );
-      return undefined;
-    }
-    return `converged: ${remainingEdgePp.toFixed(1)}pp edge left at ${curPrice.toFixed(3)}, +${profitPct.toFixed(1)}%`;
+    const profitPct = ((curPrice - held.avgPrice) / held.avgPrice) * 100;
+    return `converged: ${remainingEdgePp.toFixed(1)}pp edge left at ${curPrice.toFixed(3)}, ${profitPct >= 0 ? "+" : ""}${profitPct.toFixed(1)}%`;
   }
 
   /** USD notional for a new entry, bounded by today's remaining budget and cash. */

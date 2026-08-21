@@ -1,7 +1,7 @@
 // packages/cli/src/commands/strategy.ts
-// The one strategy is `signals`: follow Quotient signals, hold until the side
-// flips. The wizard offers the recommended settings in one keystroke; this
-// command is the manual flow for tuning them.
+// The one strategy is `signals`: follow Quotient signals, hold until the
+// market prices in the forecast. The wizard offers the recommended settings in
+// one keystroke; this command is the manual flow for tuning them.
 
 import pc from "picocolors";
 import { ask, confirm } from "../context.js";
@@ -13,7 +13,6 @@ export const RECOMMENDED_STRATEGY = {
   positionBudgetPct: 50,
   entrySpreadPp: 10,
   minEntryNotional: 1,
-  reenterOnFlip: true,
   universe: "from-signals",
   tickIntervalMin: 5,
 } as const;
@@ -56,7 +55,6 @@ export async function elicitStrategyConfig(current: Record<string, unknown> = {}
     positionBudgetPct,
     entrySpreadPp,
     minEntryNotional,
-    reenterOnFlip: true,
     universe: universeRaw === "from-signals" ? "from-signals" : universeRaw.split(",").map((s) => s.trim()),
     tickIntervalMin,
   };
@@ -68,7 +66,7 @@ export interface StrategyOptions {
   positionBudgetPct?: string;
   minEntryNotional?: string;
   signalMaxAgeHours?: string;
-  maxBookWalkCents?: string;
+  slippage?: string;
   maxOrderNotional?: string;
 }
 
@@ -92,9 +90,7 @@ export async function runStrategy(botId: string, opts: StrategyOptions = {}): Pr
         : positiveNumber("signal max age hours", opts.signalMaxAgeHours) * 60 * 60;
     const risk = {
       ...cfg.risk,
-      ...(opts.maxBookWalkCents === undefined
-        ? {}
-        : { maxBookWalkCents: positiveNumber("maximum book walk cents", opts.maxBookWalkCents) }),
+      ...(opts.slippage === undefined ? {} : { slippageCents: positiveNumber("slippage cents", opts.slippage) }),
       ...(opts.maxOrderNotional === undefined
         ? {}
         : { maxOrderNotional: positiveNumber("maximum order notional", opts.maxOrderNotional) }),
@@ -151,7 +147,7 @@ function normalizeStrategyConfig(config: Record<string, unknown>): Record<string
 function printStrategy(
   config: Record<string, unknown>,
   maxAgeSec: number,
-  risk: { maxOrderNotional: number; maxSlippageBps: number; maxBookWalkCents?: number },
+  risk: { maxOrderNotional: number; slippageCents: number },
 ): void {
   const current = { ...RECOMMENDED_STRATEGY, ...normalizeStrategyConfig(config) };
   const dailyBudgetUsd = Number(current.dailyBudgetUsd);
@@ -162,11 +158,7 @@ function printStrategy(
   console.log(`  budget per entry:     ${positionBudgetPct}% = $${perEntryUsd.toFixed(2)} before liquidity/risk caps`);
   console.log(`  minimum entry edge:   ${current.entrySpreadPp}pp`);
   console.log(`  minimum viable entry: $${Number(current.minEntryNotional).toFixed(2)}`);
-  console.log(`  executable band:      ${
-    risk.maxBookWalkCents === undefined
-      ? `${risk.maxSlippageBps}bps from midpoint`
-      : `${risk.maxBookWalkCents}¢ from best executable price`
-  }`);
+  console.log(`  slippage:             ${risk.slippageCents}¢ from best executable price`);
   console.log(`  hard per-order cap:   $${risk.maxOrderNotional.toFixed(2)} (risk module)`);
   console.log(`  signal max age:       ${(maxAgeSec / 3600).toFixed(2)}h`);
   console.log(`  tick interval:        ${current.tickIntervalMin} min`);

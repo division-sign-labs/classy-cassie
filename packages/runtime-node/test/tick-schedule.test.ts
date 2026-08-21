@@ -1,4 +1,4 @@
-// packages/runtime-cf/test/tick-schedule.test.ts
+// packages/runtime-node/test/tick-schedule.test.ts
 
 import { describe, expect, it } from "vitest";
 import {
@@ -8,7 +8,7 @@ import {
 } from "../src/tick-schedule.js";
 
 describe("durable tick scheduling", () => {
-  it("converts the configured minute cadence to Cloudflare delay seconds", () => {
+  it("converts the configured minute cadence to seconds", () => {
     expect(tickIntervalSeconds(JSON.stringify({ tickIntervalMin: 5 }))).toBe(300);
     expect(tickIntervalSeconds(JSON.stringify({ tickIntervalMin: 0.01 }))).toBe(1);
   });

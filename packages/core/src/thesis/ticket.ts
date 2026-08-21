@@ -265,7 +265,7 @@ export function buildTicket(
 
 // ---------------------------------------------------------------------------
 // Prediction-markets variant (§13): thin by design — binaries have no
-// meaningful TP/SL. Exit is flip or resolution, owned by flip-flat.
+// meaningful TP/SL. Exit is convergence or resolution, owned by flip-flat.
 // ---------------------------------------------------------------------------
 
 export interface PredictionSizeResult {

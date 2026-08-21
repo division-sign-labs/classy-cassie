@@ -1,6 +1,6 @@
 {
   "name": "@quotient-forecasting/strategy-flip-flat",
-  "version": "0.1.1",
+  "version": "0.1.5",
   "type": "module",
   "license": "Apache-2.0",
   "description": "Flip-flat Quotient signal strategy for Cassie",
@@ -21,7 +21,10 @@
       "import": "./dist/index.js"
     }
   },
-  "files": ["dist"],
+  "files": [
+    "dist",
+    "README.md"
+  ],
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "prepack": "pnpm build",
@@ -34,5 +37,9 @@
   "devDependencies": {
     "@types/node": "24.2.1",
     "typescript": "5.9.2"
+  },
+  "homepage": "https://github.com/Quotient-Solutions-Inc/classy-cassie#readme",
+  "bugs": {
+    "url": "https://github.com/Quotient-Solutions-Inc/classy-cassie/issues"
   }
 }

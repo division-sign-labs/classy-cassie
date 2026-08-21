@@ -19,7 +19,7 @@ import {
   type ManualOrderResult,
   type ThesisTicket,
 } from "@quotient-forecasting/cassie-core";
-import { SqliteStateStore } from "@quotient-forecasting/cassie-runtime-local";
+import { SqliteStateStore } from "@quotient-forecasting/cassie-runtime-node";
 import { adapterFor, confirm, controlFetch, getKeystoreSecret, isDeployed, requireAccount } from "../context.js";
 import { loadBotConfig, statePath } from "../paths.js";
 import { resolveQuotientToken } from "../quotient-token.js";
@@ -64,6 +64,8 @@ export interface TradeOpts {
   yes?: boolean;
   /** Human rationale; the feed caption when the bot publishes (§Ares). */
   note?: string;
+  /** Per-order slippage tolerance in cents from the touch. */
+  slippage?: string;
 }
 
 async function localEngine(botId: string): Promise<{ engine: Engine; close: () => void }> {
@@ -117,6 +119,10 @@ export async function runTrade(botId: string, sideArg: string | undefined, marke
   const side = sideArg.toUpperCase() === "SELL" ? "SELL" : "BUY";
   const size = Number(opts.size);
   if (!Number.isFinite(size) || size <= 0) throw new Error("--size <n> required (base units: shares/contracts)");
+  if (opts.slippage !== undefined) {
+    const cents = Number(opts.slippage);
+    if (!Number.isFinite(cents) || cents <= 0 || cents >= 100) throw new Error("--slippage <cents> must be between 0 and 100");
+  }
 
   const params: ManualOrderParams = {
     marketRef,
@@ -129,6 +135,7 @@ export async function runTrade(botId: string, sideArg: string | undefined, marke
     tpPx: opts.tp !== undefined ? Number(opts.tp) : undefined,
     trailBps: opts.trail !== undefined ? Number(opts.trail) : undefined,
     note: opts.note,
+    slippageCents: opts.slippage !== undefined ? Number(opts.slippage) : undefined,
   };
 
   console.log(pc.bold("order:"));
@@ -143,9 +150,9 @@ export async function runTrade(botId: string, sideArg: string | undefined, marke
   if (!opts.yes && !(await confirm("place this order?", false))) return;
 
   // A widget-only manual post makes Ares invent generic copy such as
-  // "manually adding YES". Prefer Q's actual latest forecast thesis. This is
-  // deliberately best-effort and happens only after order confirmation; a
-  // read failure never blocks the trade.
+  // "manually adding YES". Prefer Q's actual latest published-signal thesis.
+  // This is deliberately best-effort and happens only after order
+  // confirmation; a read failure never blocks the trade.
   if (params.note === undefined && cfg.venue === "polymarket" && cfg.reporting?.post) {
     try {
       const token = (await resolveQuotientToken(botId))?.token;
@@ -155,8 +162,8 @@ export async function runTrade(botId: string, sideArg: string | undefined, marke
     }
     console.log(
       params.note
-        ? pc.dim("Ares caption: latest Quotient forecast thesis")
-        : pc.dim("no latest forecast thesis found; skipping the manual Ares post"),
+        ? pc.dim("Ares caption: latest Quotient published-signal thesis")
+        : pc.dim("no active published-signal thesis found; skipping the manual Ares post"),
     );
   }
 

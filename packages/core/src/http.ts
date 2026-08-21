@@ -1,13 +1,11 @@
 // packages/core/src/http.ts
-// Fetch injection that survives Cloudflare Workers.
+// Fetch injection that stays callable across runtimes.
 //
 // Storing the global `fetch` on an object and calling it back as a method —
 // `this.fetchImpl(url)` — invokes it with `this` bound to that object instead
-// of the global scope. Node tolerates it; workerd rejects it with
+// of the global scope. Node tolerates it; stricter runtimes reject it with
 // "Illegal invocation: function called with incorrect `this` reference", which
-// surfaced as every strategy tick failing while local runs passed.
-//
-// https://developers.cloudflare.com/workers/observability/errors/#illegal-invocation-errors
+// once surfaced as every strategy tick failing while local runs passed.
 
 /**
  * Wraps a fetch implementation so it is always called as a plain function.

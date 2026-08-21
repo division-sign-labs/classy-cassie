@@ -10,18 +10,21 @@ import { registerSplitsSigner, runFund } from "./commands/fund.js";
 import { runWithdraw } from "./commands/withdraw.js";
 import { runStrategy } from "./commands/strategy.js";
 import { runBot } from "./commands/run.js";
-import { alertsTest, showLogs, showOrders, showPortfolio, venueStatus } from "./commands/ops.js";
+import { alertsTest, showOrders, showPortfolio, venueStatus } from "./commands/ops.js";
+import { runSsh, showLogs, showStatus } from "./commands/monitor.js";
 import { runTrade } from "./commands/trade.js";
 import { runDeploy } from "./commands/deploy.js";
+import { runDestroy } from "./commands/destroy.js";
 import { configureReporting } from "./commands/reporting.js";
 import { installSkill } from "./commands/skill.js";
+import { cliVersion } from "./version.js";
 
 const program = new Command();
 
 program
   .name("cassie")
-  .description("open-source, self-hosted, non-custodial trading bot for prediction markets and perps venues")
-  .version("0.1.4");
+  .description("self-hosted, non-custodial trading bots for prediction markets and perps venues")
+  .version(cliVersion());
 
 program.command("init").description("wizard: create a bot (wallet, venue, strategy, alerts, funding)").action(wrap(runInit));
 
@@ -60,9 +63,28 @@ program
 
 program
   .command("deploy <botId>")
-  .description("deploy the bot to an EEUR Cloudflare Container")
-  .option("--rotate-token", "issue a new control token instead of reusing the stored one")
+  .description("run the bot on a DigitalOcean droplet in your own account")
+  .option("--region <slug>", "droplet region (default: sgp1)")
+  .option("--size <slug>", "droplet size (default: s-1vcpu-1gb)")
+  .option("-y, --yes", "skip confirmation")
   .action(wrap(runDeploy));
+
+program
+  .command("destroy <botId>")
+  .description("cancel resting orders and delete the bot's droplet")
+  .option("-y, --yes", "skip confirmation")
+  .option("--force", "delete without stopping the bot first")
+  .action(wrap(runDestroy));
+
+program
+  .command("status <botId>")
+  .description("droplet, service, and engine on one screen")
+  .action(wrap(showStatus));
+
+program
+  .command("ssh <botId>")
+  .description("open a shell on the bot's droplet")
+  .action(wrap(runSsh));
 
 program
   .command("reporting <botId>")
@@ -91,6 +113,7 @@ program
   .option("--tp <px>", "take-profit trigger")
   .option("--outcome <yes|no>", "prediction venues: which outcome token")
   .option("--note <text>", "rationale for the trade; becomes the caption if the bot publishes to a feed")
+  .option("--slippage <cents>", "max book walk from the best price for this order, in cents (default: bot risk config)")
   .option("--thesis", "six questions → sized, guardrailed trade → approve → place (numbers computed in code)")
   .option("--save <file>", "with --thesis: also save the thesis JSON for reuse")
   .option("--from-thesis <file>", "place from a saved thesis JSON")
@@ -100,9 +123,12 @@ program
 
 program
   .command("logs <botId>")
-  .description("structured error/log table (local sqlite or control API)")
-  .option("--level <level>", "filter: error|warn|info")
-  .option("--tail <n>", "last N entries", "50")
+  .description("recent log lines from the droplet's journal")
+  .option("--tail <n>", "last N lines", "200")
+  .option("-f, --follow", "stream new lines until Ctrl-C")
+  .option("--since <when>", "start from a time journalctl understands, e.g. '1 hour ago'")
+  .option("--errors", "read the engine's recorded errors instead of the journal")
+  .option("--level <level>", "with --errors: error|warn|info")
   .action(wrap(showLogs));
 
 const alerts = program.command("alerts").description("alerting");
@@ -116,7 +142,7 @@ program
   .option("--position-budget-pct <pct>", "percentage of the daily budget requested per entry")
   .option("--min-entry-notional <usd>", "entry-only floor after sizing and capacity caps")
   .option("--signal-max-age-hours <hours>", "maximum age of a live signal")
-  .option("--max-book-walk-cents <cents>", "measure executable capacity this many cents from the best price")
+  .option("--slippage <cents>", "max book walk from the best executable price, in cents")
   .option("--max-order-notional <usd>", "hard per-order notional cap in the risk module")
   .action(wrap(runStrategy));
 

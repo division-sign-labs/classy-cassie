@@ -32,11 +32,13 @@ export interface CapacityResult {
 }
 
 /**
- * Compute executable size within the configured band (an absolute book walk
- * from the touch when maxBookWalkCents is set, otherwise maxSlippageBps from
- * mid), cap at
- * min(desired, depthCapPct × bandDepth, maxOrderNotional), enforce market
- * eligibility (volume/spread floors) and minViableNotional.
+ * Compute executable size within the slippage band — `risk.slippageCents`
+ * measured from the best executable price (the touch) — cap at
+ * min(desired, depthCapPct × bandDepth, maxOrderNotional), enforce the
+ * volume eligibility floor and minViableNotional. Execution quality is
+ * governed by how far the order may walk the book, not by the quoted
+ * bid–ask spread: a wide quote costs nothing when the order fills at the
+ * touch, so there is no spread-based eligibility gate.
  */
 export function checkCapacity(input: CapacityInput): CapacityResult {
   const { side, desiredSize, refPrice, book, quote, risk } = input;
@@ -46,18 +48,13 @@ export function checkCapacity(input: CapacityInput): CapacityResult {
 
   const levels = side === "BUY" ? book.asks : book.bids;
   const touch = levels[0]?.price;
-  const maxBookWalkCents = risk.maxBookWalkCents;
-  const usesBookWalk = maxBookWalkCents !== undefined;
-  const band = maxBookWalkCents !== undefined ? maxBookWalkCents / 100 : (quote.mid * risk.maxSlippageBps) / 10_000;
-  const anchor = usesBookWalk && touch !== undefined ? touch : quote.mid;
+  const band = risk.slippageCents / 100;
+  const anchor = touch ?? quote.mid;
   const limitPrice = side === "BUY" ? anchor + band : anchor - band;
 
   // Market eligibility floor (§9).
   if (quote.volume24h < risk.minDailyVolume) {
     skipReasons.push(`24h volume $${quote.volume24h.toFixed(0)} < minDailyVolume $${risk.minDailyVolume}`);
-  }
-  if (quote.spreadBps > risk.maxSpreadBps) {
-    skipReasons.push(`spread ${quote.spreadBps.toFixed(0)}bps > maxSpreadBps ${risk.maxSpreadBps}`);
   }
 
   // Executable depth within the band.
@@ -68,11 +65,7 @@ export function checkCapacity(input: CapacityInput): CapacityResult {
     bandDepth += lvl.size;
   }
   if (bandDepth <= 0) {
-    skipReasons.push(
-      usesBookWalk
-        ? `no depth within ${maxBookWalkCents}¢ of best ${side === "BUY" ? "ask" : "bid"}`
-        : `no depth within ${risk.maxSlippageBps}bps of mid`,
-    );
+    skipReasons.push(`no depth within ${risk.slippageCents}¢ of best ${side === "BUY" ? "ask" : "bid"}`);
   }
 
   const depthCap = bandDepth * (risk.depthCapPct / 100);

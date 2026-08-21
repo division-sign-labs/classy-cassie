@@ -1,5 +1,5 @@
 // packages/cli/src/commands/ops.ts
-// portfolio / orders / logs / alerts test / venue status.
+// portfolio / orders / alerts test / venue status.
 
 import pc from "picocolors";
 import {
@@ -10,18 +10,16 @@ import {
   createAdapter,
   parseBotConfig,
   type BotPortfolio,
-  type ErrorRecord,
   type Order,
 } from "@quotient-forecasting/cassie-core";
-import { SqliteStateStore } from "@quotient-forecasting/cassie-runtime-local";
 import { adapterFor, controlFetch, getKeystoreSecret, isDeployed, requireAccount } from "../context.js";
-import { listBotIds, loadBotConfig, statePath } from "../paths.js";
+import { listBotIds, loadBotConfig } from "../paths.js";
 import { money, num, renderTable, shortRef } from "../render.js";
 
 export async function showPortfolio(botId?: string): Promise<void> {
   const ids = botId ? [botId] : listBotIds();
   if (ids.length === 0) {
-    console.log("no bots — `cassie init`");
+    console.log("no bots yet. Run cassie init.");
     return;
   }
   const portfolios: BotPortfolio[] = [];
@@ -120,41 +118,12 @@ function printOrders(orders: Order[]): void {
   );
 }
 
-export async function showLogs(botId: string, opts: { level?: string; tail?: string }): Promise<void> {
-  const cfg = loadBotConfig(botId);
-  let errors: ErrorRecord[];
-  if (isDeployed(cfg)) {
-    const qs = new URLSearchParams();
-    if (opts.level) qs.set("level", opts.level);
-    if (opts.tail) qs.set("tail", opts.tail);
-    errors = (await controlFetch(cfg, `/logs?${qs}`)) as ErrorRecord[];
-  } else {
-    const store = new SqliteStateStore(statePath(botId));
-    errors = await store.readErrors({
-      level: opts.level as ErrorRecord["level"] | undefined,
-      tail: opts.tail ? Number(opts.tail) : 50,
-    });
-    store.close();
-  }
-  if (errors.length === 0) {
-    console.log("no log entries");
-    return;
-  }
-  for (const e of errors) {
-    const color = e.level === "error" ? pc.red : e.level === "warn" ? pc.yellow : pc.dim;
-    console.log(
-      `${new Date(e.ts).toISOString()} ${color(e.level.toUpperCase())} [${e.code}]${e.tickSeq !== undefined ? ` tick=${e.tickSeq}` : ""} ${e.message}` +
-        (e.context ? pc.dim(` ${JSON.stringify(e.context)}`) : ""),
-    );
-  }
-}
-
 export async function alertsTest(botId: string): Promise<void> {
   const cfg = loadBotConfig(botId);
   const chatId = cfg.alerts.telegram?.chatId;
   const token = process.env.TELEGRAM_BOT_TOKEN ?? (await getKeystoreSecret(botId, KeyRoles.telegramToken));
   if (!chatId || !token) {
-    console.error(pc.red("telegram not configured — rerun `cassie init` or set the token/chat id"));
+    console.error(pc.red("telegram is not configured — rerun cassie init, or set the token and chat id"));
     process.exit(1);
   }
   await new TelegramAlerter(token, chatId).send({ kind: "test", botId, message: "test ping from `cassie alerts test`" });

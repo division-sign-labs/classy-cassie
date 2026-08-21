@@ -1,5 +1,6 @@
-// packages/runtime-cf/src/tick-schedule.ts
-// Pure cadence helpers shared by the durable tick scheduler and its tests.
+// packages/runtime-node/src/tick-schedule.ts
+// Pure cadence helpers for the tick loop. Slot-derived tick ids make a restart
+// mid-interval skip a slot the engine already completed.
 
 export function tickIntervalSeconds(configJson: string): number {
   let parsed: unknown;

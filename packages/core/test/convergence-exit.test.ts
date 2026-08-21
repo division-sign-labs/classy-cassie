@@ -1,8 +1,9 @@
 // packages/core/test/convergence-exit.test.ts
-// Convergence exit: bank the trade when the market prices in the forecast,
-// instead of holding for a flip that may never come. Both legs must hold —
-// edge closed AND in profit — so a market moving against the entry (which also
-// closes the edge) is not mistaken for the thesis paying out.
+// Convergence exit — the strategy's sole exit: sell once the market has priced
+// in the forecast on the held side, in profit or at a loss. While edge remains
+// the position is held regardless of P&L, including when the published signal
+// sits on the opposite side (a cheap market under a higher forecast is still
+// +EV to hold).
 
 import { describe, expect, it } from "vitest";
 import { silentLogger, type Position, type Signal, type SignalSource, type StrategyMemory } from "@quotient-forecasting/cassie-core";
@@ -76,16 +77,18 @@ describe("convergence exit", () => {
     expect(await exits(ctxWith([sig()], [position()], 0.6))).toHaveLength(0);
   });
 
-  it("holds when the edge closed but the position is not up enough", async () => {
-    // Entered at 0.69 and the market barely moved: converged, but +0% — this is
-    // the case that separates "thesis paid" from "market moved against us".
-    expect(await exits(ctxWith([sig()], [position({ avgPrice: 0.69 })], 0.69))).toHaveLength(0);
+  it("exits at breakeven once the edge is closed", async () => {
+    // Entered at 0.69 and the market barely moved: 1pp left, +0% — with no
+    // edge remaining there is no expected upside in holding.
+    expect(await exits(ctxWith([sig()], [position({ avgPrice: 0.69 })], 0.69))).toHaveLength(1);
   });
 
-  it("does not fire when the market moved against the entry", async () => {
-    // Entered 0.80, forecast 0.70, market fell to 0.69: edge is closed, but the
-    // position is down 14%. Exiting here would book a loss as a "convergence".
-    expect(await exits(ctxWith([sig()], [position({ avgPrice: 0.8 })], 0.69))).toHaveLength(0);
+  it("exits at a loss once the edge is gone", async () => {
+    // Entered 0.80, forecast 0.70, market fell to 0.69: down 14%, but the
+    // forecast is priced in — bank what's left rather than hold on hope.
+    const got = await exits(ctxWith([sig()], [position({ avgPrice: 0.8 })], 0.69));
+    expect(got).toHaveLength(1);
+    expect(got[0]!.reason).toMatch(/converged:.*-13\.\d%/);
   });
 
   it("exits on an overshoot past the forecast", async () => {
@@ -111,20 +114,19 @@ describe("convergence exit", () => {
     expect(await exits(ctx)).toHaveLength(0);
   });
 
-  it("respects a custom profit floor", async () => {
-    // +25% clears the default 1% but not a 40% floor.
-    const ctx = ctxWith([sig()], [position()], 0.69, { minProfitPct: 40 });
-    expect(await exits(ctx)).toHaveLength(0);
+  it("holds through a signal-side flip while the held side keeps edge", async () => {
+    // Held YES from 0.55, market fell to 0.10. The published signal now sits on
+    // NO at 0.75, i.e. Q still values YES at 0.25 — 15pp above the price, so
+    // holding remains +EV despite the flipped side and the deep loss.
+    const got = await exits(ctxWith([sig({ side: "NO", prob: 0.75 })], [position()], 0.1));
+    expect(got).toHaveLength(0);
   });
 
-  it("still exits on a flip regardless of profit", async () => {
-    // Flip takes precedence: the forecast itself changed side.
-    const got = await exits(
-      ctxWith([sig({ side: "NO" })], [position({ side: "YES", size: 2 })], 0.69, {
-        minEntryNotional: 10,
-      }),
-    );
+  it("exits when the forecast crosses below the held side's price", async () => {
+    // Signal flipped to NO at 0.70 → YES valued at 0.30 against a 0.55 mid:
+    // −25pp of edge. The forecast has converged past the price, so sell.
+    const got = await exits(ctxWith([sig({ side: "NO", prob: 0.7 })], [position()], 0.55));
     expect(got).toHaveLength(1);
-    expect(got[0]!.reason).toMatch(/flip/);
+    expect(got[0]!.reason).toMatch(/converged/);
   });
 });

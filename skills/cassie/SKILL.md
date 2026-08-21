@@ -1,6 +1,6 @@
 ---
 name: cassie
-description: Operate cassie — self-hosted, non-custodial trading bots for prediction markets (Polymarket) and perps venues (Hyperliquid, Lighter). Use for creating and funding a bot, wallets and keystore, running or deploying a bot locally or to Cloudflare, checking portfolio/orders/logs, placing manual or thesis-driven trades, and the risk module's sizing, stop, and leverage rules.
+description: Operate cassie — self-hosted, non-custodial trading bots for prediction markets (Polymarket) and perps venues (Hyperliquid, Lighter). Use for creating and funding a bot, wallets and keystore, running a bot locally or deploying it to a DigitalOcean droplet, monitoring it with status and logs, checking portfolio and orders, placing manual or thesis-driven trades, and the risk module's sizing, stop, and leverage rules.
 ---
 
 # cassie — operator manual
@@ -11,8 +11,8 @@ Agent-agnostic. Works the same whether the operator is a human at a terminal or 
 ## 1. What cassie is
 
 An open-source, self-hosted, **non-custodial** trading bot system. One bot = one wallet =
-one venue = one strategy. Bots run locally (`cassie run`) or on the operator's own
-Cloudflare account (`cassie deploy`). Signals come from the Quotient developer API
+one venue = one strategy. Bots run locally (`cassie run`) or on a DigitalOcean droplet in
+the operator's own account (`cassie deploy`). Signals come from the Quotient developer API
 (a separate product with its own skill, `quotient-api`). Nothing in this repo routes
 orders through Quotient infrastructure, and Quotient never holds keys or funds.
 
@@ -40,14 +40,14 @@ venue terms and the laws of your jurisdiction. Start small.
 
 ## 2. Install
 
-Prerequisites: Node 20+ (better-sqlite3 native build needs a working toolchain) and
-`pnpm` for source checkouts. Cloudflare deploys additionally require a Workers Paid
-account, Docker running, and `pnpm exec wrangler login`.
+Prerequisites: Node 24+ (better-sqlite3 native build needs a working toolchain) and
+`pnpm` for source checkouts. Deploying additionally needs a DigitalOcean account and an
+API token with read and write scope; `cassie deploy` walks through creating one.
 
 - From source (current path): `pnpm install && pnpm build`, then run
   `node packages/cli/dist/index.js …` or link it with pnpm 10:
   `pnpm --dir packages/cli link`.
-- Published (when released): `npx @quotient-forecasting/cassie init` or `npm i -g @quotient-forecasting/cassie`.
+- Published: `npm i -g @quotient-forecasting/cassie`, or `npx @quotient-forecasting/cassie init`.
   Note the bare `cassie` npm name is taken by an unrelated package — the published names
   are the scoped `@quotient-forecasting/*` packages; the installed binary is still `cassie`.
 
@@ -57,7 +57,8 @@ keystore passphrase non-interactively (testing convenience — prefer the prompt
 the nearest `.local.env` (preferred and authoritative over stale exported values) or
 the exported environment override keystore copies; `TELEGRAM_BOT_TOKEN` overrides its
 keystore copy; `CASSIE_DEBUG=1`
-prints stack traces; `CASSIE_RUNTIME_CF` points `deploy` at a non-standard runtime-cf dir.
+prints stack traces; `DIGITALOCEAN_TOKEN` / `DIGITALOCEAN_ACCESS_TOKEN` override the token
+stored at `~/.cassie/digitalocean.token`.
 
 ## 3. The wizard (`cassie init`), step by step
 
@@ -101,8 +102,9 @@ Every step happens in the terminal; you only leave it to copy-paste dashboard va
      in the funding flow, after the account exists on the L1.
    - **Lighter** — derives the L1 address. Account registration and API-key provisioning
      happen in the funding flow.
-7. **Strategy** — one strategy: `signals` (follow Quotient signals, hold until the side
-   flips). The recommended allocation holds up to 2 positions, prioritizes the widest
+7. **Strategy** — one strategy: `signals` (follow Quotient signals, hold until Q's
+   forecast converges with the market price; positions with remaining edge are held
+   regardless of P&L). The recommended allocation holds up to 2 positions, prioritizes the widest
    eligible edges for new entries, and requests 50% of the daily entry budget per position;
    the wizard always asks for the
    dollar budget (default $25). The budget resets at 00:00 UTC, counts only entry notional
@@ -142,7 +144,7 @@ All flows print exactly what to send where, then poll until the venue credits.
   requests a CCTP intent address, you send **≥5 USDC** to it, it polls until the account
   is credited, resolves the integer `account_index`, provisions an API key at index 2 via
   ChangePubKey (signed by the L1 key, which stays local), and marks the API key
-  runtime-eligible. **Lighter is local-runtime-only in MVP** (§8 below).
+  runtime-eligible. **Lighter is local-runtime-only in MVP** (§11 below).
 
 `cassie fund <botId>` re-enters the flow for top-ups. With a configured treasury,
 `--from splits` is automated only for Hyperliquid mainnet: it fixes the source to Arbitrum
@@ -178,15 +180,19 @@ cassie withdraw <botId> <amount|all> --to <address>   # send collateral out (sig
 cassie run <botId> [--debug]
 cassie strategy <botId>                      # view/tune top N, daily budget, allocation, guardrails
 cassie strategy <botId> --top 3 --daily-budget 100 --position-budget-pct 33
-cassie deploy <botId>                        # EEUR Container + Worker control plane on YOUR CF account
+cassie deploy <botId> [--region <slug>] [--size <slug>] [-y]   # a droplet in YOUR DigitalOcean account
+cassie destroy <botId> [-y] [--force]        # cancel resting orders, delete the droplet
+cassie status <botId>                        # droplet + service + engine, one screen
+cassie ssh <botId>                           # a shell on the droplet
 cassie reporting <botId> [--no-post|--off]   # configure Ares for this bot only
 cassie portfolio [botId]                     # balances/positions/orders/PnL, per bot + aggregate
 cassie orders <botId> [--cancel <id>] [--cancel-all]
 cassie trade <botId> buy|sell <marketRef> --size <n> [--limit <px>] [--tif gtc|ioc|fok]
-             [--stop <px>] [--trail <bps>] [--tp <px>] [--outcome yes|no] [-y]
+             [--slippage <cents>] [--stop <px>] [--trail <bps>] [--tp <px>] [--outcome yes|no] [-y]
 cassie trade <botId> --thesis [--save <file>] [--mappings <file>]   # develop a trade from a thesis
 cassie trade <botId> --from-thesis <file> [--mappings <file>]       # place a saved thesis
-cassie logs <botId> [--level error|warn|info] [--tail <n>]
+cassie logs <botId> [--tail <n>] [-f] [--since '1 hour ago']   # the droplet's journal
+cassie logs <botId> --errors [--level error|warn|info]         # the engine's recorded errors
 cassie alerts test <botId>                   # Telegram ping
 cassie venue status                          # adapters + verifiedAgainst dates
 ```
@@ -199,20 +205,118 @@ Notes:
   Polymarket they arm **synthetic** engine-managed triggers, best-effort at poll cadence
   (the CLI says so when you arm one). `--trail` is engine-managed everywhere.
 - Every order — strategy, manual, or thesis-driven — passes the risk module:
-  slippage band, depth cap (25% of in-band depth by default), 24h volume floor ($10k),
-  spread ceiling, min-viable-notional. Skips raise alerts.
-- For a deployed bot, `portfolio`, `trade`, `orders`, and `logs` transparently go through
-  the bot's control API using the control token issued at deploy.
-- **Agent access.** `cassie deploy` asks whether local agents may reach the bot without the
-  keystore passphrase. Answering yes caches the control token at
-  `~/.cassie/control/<botId>.token` (mode 0600), so an agent driving the CLI reads logs and
-  portfolio without stalling on a prompt it cannot answer. The question is asked on every
-  deploy, so answering no later revokes it. The token reaches only that bot's control API —
-  which includes `/trade` — so it is a key, just a far smaller one than the passphrase.
-  `cassie deploy --rotate-token` invalidates any copy. Resolution order for every control
-  call: `CASSIE_CONTROL_TOKEN` → the cache → the keystore (which prompts).
+  slippage (cents of book walk from the best price, default 2¢ — set per bot with
+  `cassie strategy <botId> --slippage <cents>` or per order with `--slippage`), depth cap
+  (25% of in-band depth by default), 24h volume floor ($10k), min-viable-notional. Skips
+  raise alerts. There is no quoted-spread gate: a wide market with depth at the touch is
+  tradable, because execution cost is bounded by the slippage band, not the quote.
+- For a deployed bot, `portfolio`, `trade`, `orders`, `status`, and `logs` reach the
+  droplet over SSH. No token is involved, and no passphrase prompt blocks an agent: the
+  SSH key at `~/.cassie/ssh/id_ed25519` is the whole credential. `cassie trade` and
+  `cassie withdraw` still unlock the keystore, because those sign.
 
-## 5. Wiring Quotient signals
+## 5. Deploy
+
+`cassie deploy <botId>` provisions a DigitalOcean droplet in the operator's own account and
+runs the bot there under systemd. Default `s-1vcpu-1gb` in `sgp1`, $6/mo, about three
+minutes on a first deploy and under a minute on a redeploy. One droplet per bot.
+
+DigitalOcean has no Japan region. Droplet regions are `nyc1/2/3`, `sfo2/3`, `ams3`,
+`lon1`, `fra1`, `tor1`, `blr1`, `sgp1`, `syd1`, `atl1`, `ric1`, `mkc1`, `mem1`.
+
+What deploy does, in order:
+
+1. Resolves a DigitalOcean token: `DIGITALOCEAN_TOKEN` → `~/.cassie/digitalocean.token` →
+   `doctl`'s config → a guided prompt. This runs **before** the passphrase prompt, so
+   nobody unlocks a keystore only to hit a login wall.
+2. Checks the region and size are available on that account.
+3. Gathers credentials: runtime creds from the keystore, the Quotient key, Telegram, and
+   the Ares key with a local `/me` verification.
+4. Stops any bot already running on the old droplet and cancels its resting orders.
+5. Registers `~/.cassie/ssh/id_ed25519.pub`, creates the droplet, waits for cloud-init,
+   and pins the host key.
+6. Writes `/etc/cassie/<botId>.env` over SSH on stdin, mode 0600, owned by `cassie`.
+7. `systemctl enable --now cassie@<botId>`.
+8. **Verifies before trading.** `/runtime` must report a droplet in the pinned region,
+   confirmed by DigitalOcean's metadata service rather than by anything the deploy passed
+   in. Polymarket bots must pass `/geoblock/check`. `/signals/check` must pass.
+   Reporting, if enabled, must match. Then `/resume` and `/init`.
+
+Any failure at step 8 stops the deploy with the reason and leaves the bot idle. The
+droplet is already recorded in the bot config at that point, so a retry picks up from
+there rather than orphaning a droplet.
+
+Nothing secret goes into droplet user-data. The metadata service serves user-data to
+every process on the box, so it carries only the systemd unit, the firewall rules, and the
+pinned runtime version.
+
+Reaching a deployed bot needs no token and no open port. The runtime listens on a unix
+socket at `/run/cassie/<botId>.sock`; the CLI runs `curl --unix-socket` over SSH. The
+droplet firewall allows inbound 22 and nothing else.
+
+```sh
+cassie deploy <botId> --region fra1     # somewhere else
+cassie deploy <botId> --size s-1vcpu-2gb
+cassie deploy <botId> -y                # no confirmation prompt
+cassie destroy <botId>                  # cancel resting orders, then delete the droplet
+```
+
+`cassie destroy` leaves the keystore and the venue balance alone. Redeploying after a
+destroy creates a fresh droplet; the bot's SQLite state does not survive it, and the
+engine rebuilds what it needs from the venue on the next tick.
+
+On the droplet: the service is `cassie@<botId>`, the binary is `/usr/bin/cassie-runtime`,
+state is `/var/lib/cassie/<botId>.sqlite`, and the process runs as the unprivileged
+`cassie` user with `ProtectSystem=strict`. `systemctl stop` sends SIGTERM, which cancels
+resting orders before exit, with 45 seconds to do it.
+
+## 6. Monitoring
+
+```sh
+cassie status <botId>                      # droplet + service + engine, one screen
+cassie logs <botId>                        # last 200 journal lines
+cassie logs <botId> -f                     # follow until Ctrl-C
+cassie logs <botId> --since '1 hour ago'
+cassie logs <botId> --errors               # the engine's recorded errors instead
+cassie ssh <botId>                         # a shell on the droplet
+```
+
+`cassie status` reads the DigitalOcean API, `systemctl show`, and the control socket, then
+prints the droplet (region, size, address, monthly cost, uptime), the service (state,
+restart count, start time), the engine (live or paused, last tick), the book, and the last
+five journal lines. It does not unlock the keystore. `cassie portfolio` is the command that
+does, because it prices a book.
+
+Two log sources, and they answer different questions:
+
+- **The journal** is everything the process wrote, at every level. This is the default and
+  the right place to start. Line format is
+  `[ISO timestamp] [botId] LEVEL message`, with structured context as a second argument.
+- **`--errors`** reads the `errors` table the engine persists through `Engine.recordError`.
+  Every row is a real engine failure with a code: `strategy-tick`, `reconcile-fills`,
+  `order-ttl`, `triggers`, `action-<kind>`, `deadman`. Format is
+  `<ISO> LEVEL [code] tick=<n> <message> {context}`. This table holds errors only, so
+  `--level warn` and `--level info` match nothing here — use the journal for those.
+
+Telegram carries the events worth interrupting someone for. `cassie alerts test <botId>`
+sends a ping. The kinds, each prefixed with its own marker in the message:
+
+| kind | when |
+|---|---|
+| `entry` | a position opened |
+| `exit` | a position closed |
+| `flip` | a position reversed |
+| `fill` | an order filled |
+| `partial-fill-timeout` | a resting remainder hit its TTL |
+| `skipped-order` | the risk module refused an order, with the reason |
+| `deposit` | collateral credited |
+| `deploy` | a deploy finished |
+| `error` | an engine error, deduped by fingerprint for `alerts.errorDedupMin` minutes |
+| `deadman` | the venue cancelled resting orders because the runtime stopped heartbeating |
+| `resolution` | a prediction market resolved |
+| `test` | `cassie alerts test` |
+
+## 7. Wiring Quotient signals
 
 Live signals come from the Quotient gateway
 (`https://quotient-api-gateway.onrender.com/api/v1/signals`, authenticated with an
@@ -239,10 +343,11 @@ keys, or funds:
 pnpm exec vitest run packages/core/test/engine-e2e.test.ts
 ```
 
-The test enters YES with size capped by the thin test book, then flips, exits, and
-re-enters NO. The fixture venue and signal source are test doubles, not product options.
+The test enters YES with size capped by the thin test book, then exits when the forecast
+converges past the price. The fixture venue and signal source are test doubles, not
+product options.
 
-## 5b. Trade reporting (opt-in, Polymarket only)
+## 8. Trade reporting (opt-in, Polymarket only)
 
 Ares is a social feed, **not a venue** — there is no adapter and nothing to fund. Trades
 execute on Polymarket exactly as before; Ares reads Polymarket's builder-attributed trade
@@ -275,9 +380,9 @@ bot carries that bot's configured builder code.
 
 The provider key (`ares_sk_live_…` for `provider: "ares"`) comes from the nearest
 `.local.env`, exported `ARES_API_KEY`, or the bot's keystore (`ares-api-key` role), in
-that order. `cassie deploy` forwards it as an encrypted Worker secret consumed only by
-the Container. If posts are enabled, deploy refuses to proceed or resume unless both the
-local Ares `/me` check and the deployed Container check accept the same account.
+that order. `cassie deploy` writes it into the droplet's environment file, readable only
+by the service user. If posts are enabled, deploy refuses to proceed or resume unless both
+the local Ares `/me` check and the droplet's own check accept the same account.
 
 ### Captions
 
@@ -297,13 +402,14 @@ side, conviction, timeframe, expected move, and the invalidation level — the t
 copy-trader needs. Size and price are deliberately left out of the prose: the card
 carries those from the real fill, and repeating them invites the two to disagree.
 
-For a direct manual Polymarket trade without `--note`, the CLI maps the traded token to
-its condition and fetches the latest reviewable Quotient forecast thesis after the user
-confirms the order. The lookup is best-effort and never blocks the fill. If no thesis is
-available, Cassie skips the manual Ares post rather than allowing Ares to invent generic
-copy. Strategy trades without a note still post the card alone. The engine's internal
-`reason` (`signal sig_8f21 spread 12.3pp`) is never published — it's an internal id and
-telemetry, meaningless to a reader.
+For a direct manual Polymarket trade without `--note`, the CLI resolves the traded token
+with CLOB's exact `/markets-by-token/{token}` endpoint, then reads the latest active thesis
+from Quotient's published `/api/v1/signals` feed after the user confirms the order. It does
+not use Gamma or the forecast lookup API. The read is best-effort and never blocks the fill.
+If no thesis is available, Cassie skips the manual Ares post rather than allowing Ares to
+invent generic copy. Strategy trades without a note still post the card alone. The
+engine's internal `reason` (`signal sig_8f21 spread 12.3pp`) is never published — it's an
+internal id and telemetry, meaningless to a reader.
 
 Notes:
 
@@ -311,7 +417,7 @@ Notes:
   (They previously raised none at all, so they were invisible to every sink.)
 - The card is built server-side from the real trade, so size, price and P&L can't be
   faked and are never sent. cassie only sends the order id, the traded token, and the
-  trading address — **the funder, not the signer** (§5.1's classic confusion; sending the
+  trading address — **the funder, not the signer** (the classic confusion; sending the
   signer fails to resolve the position).
 - Posting runs as an `Alerter` alongside Telegram, wrapped in `SafeAlerter`. An Ares
   outage cannot block, delay, or fail a fill.
@@ -320,7 +426,7 @@ Notes:
 - **Attributed fills pay Polymarket's builder taker fee.** That is the cost of the
   relationship, and it lands on your side of the trade.
 
-## 6. Thesis intake (perps-first)
+## 9. Thesis intake (perps-first)
 
 The split is strict: **elicitation lives here, arithmetic lives in code.** The agent asks
 the questions; `cassie trade <botId> --thesis` (or `--from-thesis <file>`) computes every
@@ -357,35 +463,37 @@ Confidence maps to an entry-spread threshold (low 12pp / medium 10pp / high 7pp)
 reuses min(fixed-fractional, quarter-Kelly) with `p` = model probability and `b` implied by
 the share price. When a fresh live Quotient signal covers the market, the CLI takes `p`
 from it automatically (mirrored if the signal's side differs from the thesis side);
-otherwise it asks the operator. Exit is flip or resolution, owned by flip-flat.
+otherwise it asks the operator. Exit is convergence or resolution, owned by flip-flat.
 
-## 7. Rules for the agent operating cassie
+## 10. Rules for the agent operating cassie
 
-1. **Never** print or persist private keys outside Cassie's encrypted keystore. The
-   Container-first ceremony may hold a generated key in process memory only long enough to
-   encrypt-export it; Workers/DO state, logs, messages, and scratch files must never contain it.
+1. **Never** print or persist private keys outside Cassie's encrypted keystore and the
+   droplet's `/etc/cassie/<botId>.env`. Logs, messages, scratch files, droplet user-data,
+   and command lines must never contain one.
 2. **Always** show the operator the exact order — market, side, size, limit — and get
    their confirmation before any live `trade`. (The CLI also asks; `-y` is for the
    operator to decide, not the agent.)
 3. **Never** initiate a funding transfer without explicit operator confirmation of the
    destination address and amount.
-4. On any error, read `cassie logs <botId> --level error` **before** retrying.
-5. Numbers come from the CLI (§6). Categorical answers in, computed figures out.
+4. On any error, read `cassie status <botId>` and `cassie logs <botId>` **before**
+   retrying. `--errors` narrows to the engine's own recorded failures.
+5. Numbers come from the CLI (§9). Categorical answers in, computed figures out.
 
-## 8. Venue support and runtime notes
+## 11. Venue support and runtime notes
 
-| venue       | trading | native TP/SL | Cloudflare deploy | dead man's switch |
-|-------------|---------|--------------|-------------------|-------------------|
-| polymarket  | ✓       | synthetic    | ✓                 | CLOB heartbeat (~10s window) |
-| hyperliquid | ✓       | ✓            | ✓                 | scheduleCancel (10-min horizon, refreshed) |
-| lighter     | ✓       | ✓            | ✗ local-only      | scheduled cancel-all (15-min, refreshed) |
+| venue       | trading | native TP/SL | deploy | dead man's switch |
+|-------------|---------|--------------|--------|-------------------|
+| polymarket  | ✓       | synthetic    | ✓      | CLOB heartbeat (~10s window) |
+| hyperliquid | ✓       | ✓            | ✓      | scheduleCancel (10-min horizon, refreshed) |
+| lighter     | ✓       | ✓            | ✗      | scheduled cancel-all (15-min, refreshed) |
 
-Lighter remains local-only in this release because its filesystem-backed WASM signer has
-not yet been wired and verified in the deployed Container runtime.
+Lighter's filesystem-backed WASM signer loads on a droplet the same way it loads on a
+laptop, so the technical blocker is gone. `cassie deploy` still refuses lighter until one
+verified droplet run happens.
 
 Never attach a Polymarket bot EOA to a Splits account.
 
-## 9. Troubleshooting
+## 12. Troubleshooting
 
 - **Polymarket 401 / "order owner mismatch"** — the classic signer-vs-funder confusion.
   Orders are *signed* by the bot's EOA (`POLY_ADDRESS`, L2 auth); the *funder* is the
@@ -404,18 +512,27 @@ Never attach a Polymarket bot EOA to a Splits account.
 - **Lighter nonce errors** — each API key index has its own nonce, incremented by 1 per
   tx and fetched from `next_nonce`. Run one bot process per API key; don't share index 2
   across processes. Auth tokens expire after 8h and are re-derived automatically.
-- **Duplicate-looking ticks on Cloudflare** — the Container serializes engine work and
-  the engine dedupes by interval-slot `tickId`; a repeated slot logs that it was already
-  completed and skips it. That line is normal, not a second trade.
+- **Duplicate-looking ticks** — the runtime serializes engine work and the engine dedupes
+  by interval-slot `tickId`. A restart inside an interval re-presents a slot that already
+  completed; the log says so and skips it. That line is normal, not a second trade.
 - **Polymarket resting order vanished** — the dead man's switch. While orders rest, the
   runtime heartbeats every ~5s; if the runtime dies (or laptop sleeps), the venue cancels
   all resting orders ~10–15s later. That is the designed behavior (kill-safety), not a bug.
 - **"wrong passphrase (or corrupted keystore)"** — scrypt+AES-GCM authentication failed:
   wrong passphrase, or the keystore file was edited. There is no recovery without the
   passphrase; re-import the key (`cassie wallet import`) if you have it elsewhere.
-- **`cassie deploy` fails immediately** — verify the account is on Workers Paid, Docker
-  is running, and `pnpm exec wrangler login` succeeds. Deploys run against your own
-  Cloudflare account. Lighter bots refuse to deploy by design.
+- **`cassie deploy` fails immediately** — the DigitalOcean token is missing or lacks write
+  scope, the account is at its droplet limit, or the region does not offer the size. The
+  error names which. Deploys run against your own DigitalOcean account. Lighter bots refuse
+  to deploy by design.
+- **`refusing to resume: Polymarket reports … as blocked`** — orders leave from the
+  droplet, and the venue does not accept them from that region. Redeploy elsewhere:
+  `cassie deploy <botId> --region <slug>`. The bot stays idle until one passes.
+- **`cannot confirm this host's region`** — the runtime asks DigitalOcean's metadata
+  service where it is and refuses to trade without an answer. Check that
+  `169.254.169.254` is reachable from the droplet.
+- **`cassie logs` says the host key changed** — the droplet was rebuilt outside cassie.
+  Verify that is what happened, then `ssh-keygen -R <ip> -f ~/.cassie/ssh/known_hosts`.
 - **Splits shows the wrong organization** — `SPLITS_API_KEY` overrides the CLI's saved auth
   and every key belongs to one org. Stop at the org confirmation, unset/change the key,
   and verify with `splits auth whoami`; Cassie has no team-switch command.

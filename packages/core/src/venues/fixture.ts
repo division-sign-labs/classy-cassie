@@ -59,6 +59,7 @@ export class FixtureVenue implements VenueAdapter {
   private readonly positionsByRef = new Map<string, SimPosition>();
   private readonly restingOrders = new Map<string, Order & { outcome?: "YES" | "NO"; placedAt: number }>();
   private readonly fillLog: Fill[] = [];
+  private lastFillTs = 0;
   private orderCounter = 0;
   private readonly now: () => number;
 
@@ -167,6 +168,9 @@ export class FixtureVenue implements VenueAdapter {
     if (filledSize > 0) {
       const avg = filledNotional / filledSize;
       this.applyFill(intent, filledSize, avg);
+      // Strictly monotonic ts: the engine's fill cursor is `last ts + 1`, so a
+      // fill sharing a millisecond with the previous tick's would never surface.
+      this.lastFillTs = Math.max(this.now(), this.lastFillTs + 1);
       this.fillLog.push({
         id: `fill-${id}`,
         orderId: id,
@@ -174,7 +178,7 @@ export class FixtureVenue implements VenueAdapter {
         side: intent.side,
         size: filledSize,
         price: avg,
-        ts: this.now(),
+        ts: this.lastFillTs,
       });
     }
     if (remaining > 1e-9 && (intent.tif === "GTC" || intent.tif === "GTD")) {

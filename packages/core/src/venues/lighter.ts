@@ -8,12 +8,9 @@
 //   the package directory on the FILESYSTEM (dist/esm/signer/wasm-signer.js:
 //   runtime `import('node:fs'/'node:path')` shims, `resolveWasmPath` →
 //   `fs.readFileSync`, then `WebAssembly.instantiate(bytes, go.importObject)`).
-//   Cloudflare Workers have no filesystem, disallow the dynamic-import shim,
-//   and restrict `WebAssembly.instantiate` from raw bytes — so option (a)
-//   "load WASM via Workers module import" would require repackaging the signer,
-//   and (b) vendoring lighter-go for the Workers target is out of MVP scope.
-//   ⇒ Fallback (c): Lighter ships LOCAL-RUNTIME-ONLY. Constructing this
-//   adapter outside Node throws. Do not let this block the Polymarket e2e.
+//   A droplet has a filesystem, so this loads there the same way it loads on a
+//   laptop. What is missing is a verified run: `cassie deploy` still refuses
+//   lighter until one happens. Constructing this adapter outside Node throws.
 //
 // marketRef convention: the market SYMBOL (e.g. "ETH"), resolved to the
 // integer market_id via GET /api/v1/orderBooks (cached). A purely numeric
@@ -43,7 +40,7 @@ import type {
 import { registerAdapter, type AdapterOpts } from "./registry.js";
 
 // Type-only imports are erased at runtime; the SDK itself loads lazily so that
-// bundling core for Workers doesn't pull the WASM loader in eagerly.
+// importing core does not pull the WASM loader in eagerly.
 import type {
   Account as SdkAccount,
   AccountApi,

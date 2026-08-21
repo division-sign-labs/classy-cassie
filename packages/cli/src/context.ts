@@ -15,8 +15,9 @@ import {
   type SetupContext,
   type VenueAdapter,
 } from "@quotient-forecasting/cassie-core";
-import { dirs, readControlToken } from "./paths.js";
+import { dirs } from "./paths.js";
 import { getOperatorDefault, setOperatorDefault } from "./defaults.js";
+import { controlCall, type Target } from "./ssh.js";
 
 let cachedPassphrase: string | undefined;
 
@@ -80,6 +81,12 @@ export async function select(
   return String(v ?? choices[0]?.value ?? "");
 }
 
+export function openUrl(url: string): void {
+  const opener = process.platform === "darwin" ? "open" : process.platform === "win32" ? "start" : "xdg-open";
+  const res = spawnSync(opener, [url], { stdio: "ignore" });
+  if (res.status !== 0) console.log(pc.dim(`→ ${url}`));
+}
+
 export function makeSetupContext(botId: string): SetupContext {
   const ks = keystore();
   return {
@@ -114,11 +121,7 @@ export function makeSetupContext(botId: string): SetupContext {
     async setOperatorDefault(name, value) {
       setOperatorDefault(name, value);
     },
-    openUrl(url) {
-      const opener = process.platform === "darwin" ? "open" : process.platform === "win32" ? "start" : "xdg-open";
-      const res = spawnSync(opener, [url], { stdio: "ignore" });
-      if (res.status !== 0) console.log(pc.dim(`→ ${url}`));
-    },
+    openUrl,
   };
 }
 
@@ -181,38 +184,21 @@ export async function getKeystoreSecret(botId: string, role: string): Promise<st
 // Control API (deployed bots)
 // ---------------------------------------------------------------------------
 
-export async function controlFetch(cfg: BotConfig, path: string, init: RequestInit = {}): Promise<unknown> {
-  if (!cfg.controlUrl) throw new Error("bot is not deployed (no controlUrl)");
-  // Reaching a deployed bot (logs, portfolio, orders) should not unlock the
-  // keystore: talking to your own Worker needs one token, and that is not the
-  // passphrase guarding the keys that move money.
-  // env → the cache `deploy` offers to write → the keystore (prompts).
-  const token =
-    process.env.CASSIE_CONTROL_TOKEN ??
-    readControlToken(cfg.id) ??
-    (await getKeystoreSecret(cfg.id, KeyRoles.controlToken));
-  if (!token) {
-    throw new Error(
-      "no control token — redeploy with `cassie deploy` to mint one (it offers to cache it for agents)",
-    );
-  }
-  const res = await fetch(`${cfg.controlUrl}/bots/${cfg.id}${path}`, {
-    ...init,
-    headers: {
-      ...(init.headers ?? {}),
-      authorization: `Bearer ${token}`,
-      ...(init.body ? { "content-type": "application/json" } : {}),
-    },
-  });
-  const text = await res.text();
-  if (!res.ok) throw new Error(`control API ${res.status}: ${text.slice(0, 300)}`);
-  try {
-    return JSON.parse(text);
-  } catch {
-    return text;
-  }
+export function isDeployed(cfg: BotConfig): boolean {
+  return Boolean(cfg.deployment);
 }
 
-export function isDeployed(cfg: BotConfig): boolean {
-  return Boolean(cfg.controlUrl);
+export function targetFor(cfg: BotConfig): Target {
+  if (!cfg.deployment) throw new Error(`bot "${cfg.id}" is not deployed — run \`cassie deploy ${cfg.id}\``);
+  return { host: cfg.deployment.host, user: cfg.deployment.user };
+}
+
+/**
+ * Reach a deployed bot. The droplet serves this on a unix socket, so the SSH
+ * key is the only credential involved and reads never touch the keystore.
+ */
+export async function controlFetch(cfg: BotConfig, path: string, init: RequestInit = {}): Promise<unknown> {
+  const method = (init.method ?? "GET").toUpperCase() === "POST" ? "POST" : "GET";
+  const body = typeof init.body === "string" ? init.body : undefined;
+  return controlCall(targetFor(cfg), cfg.id, method, path, body);
 }

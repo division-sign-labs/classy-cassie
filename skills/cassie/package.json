@@ -1,6 +1,6 @@
 {
   "name": "@quotient-forecasting/cassie-skill",
-  "version": "0.1.3",
+  "version": "0.1.5",
   "type": "module",
   "license": "Apache-2.0",
   "description": "Agent Skill operator manual and policy files for Cassie",
@@ -26,9 +26,14 @@
     "SKILL.md",
     "thesis",
     "install.mjs",
-    "install.d.ts"
+    "install.d.ts",
+    "README.md"
   ],
   "scripts": {
     "postinstall": "node install.mjs"
+  },
+  "homepage": "https://github.com/Quotient-Solutions-Inc/classy-cassie#readme",
+  "bugs": {
+    "url": "https://github.com/Quotient-Solutions-Inc/classy-cassie/issues"
   }
 }

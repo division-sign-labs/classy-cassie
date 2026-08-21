@@ -1,5 +1,5 @@
 // packages/core/test/engine-idempotency.test.ts
-// Cloudflare alarms are at-least-once: a retried alarm re-presents the same
+// Tick ids come from the interval slot: a restart re-presents the same
 // tickId and the engine must no-op instead of double-executing entries (§10).
 
 import { describe, expect, it } from "vitest";

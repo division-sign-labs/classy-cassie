@@ -1,13 +1,13 @@
-// packages/runtime-container/src/index.ts
-// Private HTTP control surface inside a Cloudflare Container. The outer Worker
-// authenticates requests; this server is reachable only through its Container
-// Durable Object binding.
+// packages/runtime-node/src/control.ts
+// Control API for a running bot, served on a unix domain socket. Reaching it
+// means having a shell on the host, so the socket's file permissions are the
+// whole authorization story — no token, no port, no TLS.
 
-import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
+import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
+import { chmodSync, mkdirSync, rmSync } from "node:fs";
+import { dirname } from "node:path";
 import type { LogLevel, ManualOrderParams } from "@quotient-forecasting/cassie-core";
-import { BotService } from "./service.js";
-
-const service = new BotService();
+import type { BotService } from "./service.js";
 
 function send(response: ServerResponse, data: unknown, status = 200): void {
   const body = JSON.stringify(data, null, 2);
@@ -28,14 +28,15 @@ async function bodyJson<T>(request: IncomingMessage): Promise<T> {
   return (text ? JSON.parse(text) : {}) as T;
 }
 
+/** Tolerates both /bots/:botId/x and /x so callers can use either shape. */
 function actionOf(request: IncomingMessage): { action: string; url: URL } {
-  const url = new URL(request.url ?? "/", "http://container.local");
+  const url = new URL(request.url ?? "/", "http://cassie.local");
   const segments = url.pathname.split("/").filter(Boolean);
   const action = segments[0] === "bots" ? segments.slice(2).join("/") : segments.join("/");
   return { action, url };
 }
 
-async function handle(request: IncomingMessage, response: ServerResponse): Promise<void> {
+export async function handle(service: BotService, request: IncomingMessage, response: ServerResponse): Promise<void> {
   const { action, url } = actionOf(request);
   const method = request.method?.toUpperCase() ?? "GET";
 
@@ -43,8 +44,8 @@ async function handle(request: IncomingMessage, response: ServerResponse): Promi
     send(response, { ok: true });
     return;
   }
-  if (method === "GET" && action === "runtime") {
-    send(response, { ...service.identity, active: service.running });
+  if (method === "GET" && (action === "runtime" || action === "status")) {
+    send(response, { ...service.status(), paused: await service.paused() });
     return;
   }
   if (method === "GET" && action === "geoblock/check") {
@@ -108,16 +109,17 @@ async function handle(request: IncomingMessage, response: ServerResponse): Promi
     send(response, { ok: true, paused: false });
     return;
   }
-  if (method === "POST" && (action === "init" || action === "internal/autostart")) {
+  if (method === "POST" && action === "init") {
     await service.start();
+    const status = service.status();
     send(response, {
       ok: true,
-      botId: service.config.id,
+      botId: status.botId,
       venue: service.config.venue,
       strategy: service.config.strategy.id,
-      tickIntervalMin: service.config.tickIntervalMin,
-      runtime: "cloudflare-container",
-      region: service.identity.region,
+      tickIntervalMin: status.tickIntervalMin,
+      runtime: status.runtime,
+      region: status.region,
     });
     return;
   }
@@ -130,7 +132,7 @@ async function handle(request: IncomingMessage, response: ServerResponse): Promi
     send(response, await service.tick(body.tickId === undefined ? undefined : Number(body.tickId)));
     return;
   }
-  if (method === "POST" && (action === "shutdown" || action === "internal/shutdown")) {
+  if (method === "POST" && action === "shutdown") {
     await service.shutdown(true);
     send(response, { ok: true, stopped: true, restingOrdersCanceled: true });
     return;
@@ -138,26 +140,18 @@ async function handle(request: IncomingMessage, response: ServerResponse): Promi
   send(response, { error: `unknown route ${method} ${url.pathname}` }, 404);
 }
 
-const server = createServer((request, response) => {
-  void handle(request, response).catch((error) => send(response, { error: (error as Error).message }, 500));
-});
-
-server.listen(8080, "0.0.0.0", () => {
-  console.log(`[${new Date().toISOString()}] [${service.config.id}] INFO listening on :8080`);
-});
-
-let signalHandled = false;
-async function terminate(signal: string): Promise<void> {
-  if (signalHandled) return;
-  signalHandled = true;
-  console.log(`[${new Date().toISOString()}] [${service.config.id}] INFO ${signal} received`);
-  await service.shutdown(true).catch((error) => console.error(`shutdown failed: ${(error as Error).message}`));
-  server.close(() => process.exit(0));
-  setTimeout(() => process.exit(1), 30_000).unref();
+/** Bind the control API to a unix socket, replacing a stale one from a crash. */
+export function serveControl(service: BotService, socketPath: string): Server {
+  mkdirSync(dirname(socketPath), { recursive: true, mode: 0o750 });
+  rmSync(socketPath, { force: true });
+  const server = createServer((request, response) => {
+    void handle(service, request, response).catch((error) =>
+      send(response, { error: (error as Error).message }, 500),
+    );
+  });
+  server.listen(socketPath, () => {
+    chmodSync(socketPath, 0o660);
+    service.log.info(`control socket ${socketPath}`);
+  });
+  return server;
 }
-
-process.once("SIGTERM", () => void terminate("SIGTERM"));
-process.once("SIGINT", () => void terminate("SIGINT"));
-
-export { BotService } from "./service.js";
-export { DurableObjectStateStore } from "./state.js";

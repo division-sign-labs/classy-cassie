@@ -1,28 +1,14 @@
 # cassie
 
 Open-source, self-hosted, non-custodial trading bots for prediction markets and perps
-venues. An operator spins up one or more bots — each with its own wallet, trading on one
-venue, running one strategy — locally or on their own Cloudflare account. Signals come
-from the [Quotient](https://dev.quotient.social) developer API (separate product); nothing
-in this repo routes orders through Quotient infrastructure, and Quotient never holds keys
-or funds.
+venues. An operator runs one or more bots — each with its own wallet, one venue, one
+strategy — on their own machine or their own DigitalOcean account. Signals come from the
+[Quotient](https://dev.quotient.social) developer API, a separate product. No order in
+this repo routes through Quotient infrastructure, and Quotient holds no keys or funds.
 
 Cassie is experimental, open-source software. Check every funding destination carefully:
 something may go wrong, and you may lose funds. Quotient is a publisher; its signals are
 informational and are not trading advice.
-
-## Layout
-
-| path                   | what                                                                 |
-|------------------------|----------------------------------------------------------------------|
-| `packages/core`        | venue adapters, wallet/keystore, strategy engine, risk module, signal client, alerts, thesis sizing |
-| `packages/cli`         | the `cassie` binary: wizard, wallet, fund, run, deploy, portfolio, trade, orders, logs, ticket |
-| `packages/runtime-local` | Node runner (better-sqlite3 state, Ctrl-C cancels resting orders)  |
-| `packages/runtime-container` | Long-running Node trading runtime packaged into the Cloudflare Container image |
-| `packages/runtime-cf`  | Cloudflare Worker control plane + Durable Object state, backed by an EEUR Container |
-| `strategies/flip-flat` | the `signals` strategy: follow Quotient signals, hold until the side flips |
-| `skills/cassie`        | agent-facing operator manual ([SKILL.md](skills/cassie/SKILL.md)) + thesis policy (`thesis/mappings.json`) |
-| `fixtures/`            | signal + order-book fixtures for the offline e2e                     |
 
 ## Quickstart
 
@@ -31,9 +17,8 @@ npm install --global @quotient-forecasting/cassie
 cassie init
 ```
 
-The npm package installs the Cassie operator skill for Codex and Claude Code,
-the local runtime, and the Cloudflare Worker + Container deployment assets. If
-npm lifecycle scripts are disabled, run `cassie skill install` once.
+Node 24 or newer. The npm package installs the operator skill for Codex and Claude Code
+alongside the CLI. If npm lifecycle scripts are disabled, run `cassie skill install` once.
 
 `cassie init` can also create a dedicated Splits Teams subaccount under the organization
 authenticated by the official Splits CLI. It is passkey-operated by default, appears with
@@ -48,35 +33,65 @@ pnpm install && pnpm build
 # create a bot: wallet, venue account, strategy, Telegram, funding — all in the terminal
 node packages/cli/dist/index.js init
 
-# deterministic offline engine test: entry → capacity cap → flip → exit → re-entry
+# deterministic offline engine test: entry → capacity cap → convergence → exit
 pnpm exec vitest run packages/core/test/engine-e2e.test.ts
 
 # live, locally
 node packages/cli/dist/index.js run <botId>
 
-# or on your own Cloudflare Workers Paid account (Docker running; pnpm exec wrangler login first)
+# or on a droplet in your own DigitalOcean account
 node packages/cli/dist/index.js deploy <botId>
 ```
 
-`pnpm test` runs the suite (engine idempotency, capacity checks, the flip e2e, thesis
-arithmetic, keystore round-trips).
+`pnpm test` runs the suite (engine idempotency, capacity checks, the convergence e2e,
+thesis arithmetic, keystore round-trips).
 
 ## Venues
 
-| venue       | status | TP/SL     | Cloudflare deploy | notes |
-|-------------|--------|-----------|-------------------|-------|
-| Polymarket  | ✓      | synthetic (engine-managed) | ✓ | raw venue signer is deployed; never reuse it for Splits authority |
-| Hyperliquid | ✓      | native    | ✓                 | master/agent key split; agent key is the only key a runtime sees |
-| Lighter     | ✓      | native    | ✗ local-only      | not yet wired or verified in the deployed Container runtime |
+| venue       | status | TP/SL     | deploy | notes |
+|-------------|--------|-----------|--------|-------|
+| Polymarket  | ✓      | synthetic (engine-managed) | ✓ | the raw venue signer is deployed; keep it away from Splits authority |
+| Hyperliquid | ✓      | native    | ✓      | master/agent key split; the agent key is the only key a runtime sees |
+| Lighter     | ✓      | native    | ✗      | works on a droplet in principle; no verified run yet, so deploy refuses it |
 
 Adapters carry a `verifiedAgainst` date (`cassie venue status`). All three venues ship
 breaking changes on months-long cadence; SDK versions are pinned exactly and bumps must
 re-verify against live docs.
 
-Cloudflare deploys execute trading and outbound venue/API calls in a Container whose
-placement constraint is exactly `EEUR`; the Worker is only the authenticated control
-plane. Deploy refuses to resume a bot unless the running Container reports `EEUR` and
-the venue and signal checks pass.
+## Deploy
+
+`cassie deploy <botId>` provisions a DigitalOcean droplet in the operator's own account —
+`s-1vcpu-1gb`, $6/mo, `sgp1` by default — and runs the bot there under systemd. Orders
+leave from that droplet, which is what the region choice decides.
+
+Deploy refuses to start trading unless four things hold: the droplet confirms its region
+to DigitalOcean's metadata service, the venue accepts orders from there, the signal
+credential works from the droplet, and Ares reporting matches local configuration. Any
+failure stops the deploy with the reason and leaves the bot idle.
+
+Credentials reach the droplet over SSH on stdin and land in `/etc/cassie/<botId>.env`,
+mode 0600, owned by the service user. Droplet user-data carries none, since the metadata
+service serves it to anything running on the box.
+
+Reaching a deployed bot needs no token and no open port. The runtime listens on a unix
+socket at `/run/cassie/<botId>.sock`; `cassie status`, `cassie logs`, `cassie ssh`,
+`cassie portfolio`, and `cassie trade` all go over SSH with a key generated at
+`~/.cassie/ssh/id_ed25519`. Host keys are pinned to `~/.cassie/ssh/known_hosts` on first
+contact, and every later connection runs with `StrictHostKeyChecking=yes`.
+
+`cassie destroy <botId>` cancels resting orders, stops the service, and deletes the
+droplet. Keys and venue balances are untouched.
+
+## Layout
+
+| path                   | what                                                                 |
+|------------------------|----------------------------------------------------------------------|
+| `packages/core`        | venue adapters, wallet/keystore, strategy engine, risk module, signal client, alerts, thesis sizing |
+| `packages/cli`         | the `cassie` binary: wizard, wallet, fund, run, deploy, status, logs, portfolio, trade, orders, ticket |
+| `packages/runtime-node` | the bot process: engine loop, SQLite state, unix-socket control API. Same code for `cassie run` and a droplet |
+| `strategies/flip-flat` | the `signals` strategy: follow Quotient signals, hold until the forecast converges with the price |
+| `skills/cassie`        | agent-facing operator manual ([SKILL.md](skills/cassie/SKILL.md)) + thesis policy (`thesis/mappings.json`) |
+| `fixtures/`            | signal + order-book fixtures for the offline e2e                     |
 
 ## Ares reporting (per bot)
 
@@ -128,11 +143,16 @@ subject to the engine's per-order, liquidity, spread, and volume guardrails.
 
 ## Risk module
 
-Engine-enforced on every order (strategy, manual, or ticket): executable size within a
-slippage band of mid (default 100bps), order size capped at 25% of in-band depth and a
-per-order notional cap, 24h-volume floor ($10k default) and spread ceiling for market
-eligibility, minimum viable notional (skip rather than dribble), TTL-based re-price/cancel
-of resting remainders. Skips raise alerts.
+Engine-enforced on every order, whether it came from the strategy, a manual `trade`, or a
+thesis ticket:
+
+- Executable size within a slippage band of mid, 100bps by default.
+- Order size capped at 25% of in-band depth, and at a per-order notional cap.
+- Market eligibility: a 24-hour volume floor, $10k by default, and a spread ceiling.
+- A minimum viable notional, so a capped order is skipped rather than dribbled out.
+- A TTL that re-prices or cancels a resting remainder.
+
+A skip raises an alert naming the limit that stopped it.
 
 ## Thesis intake
 

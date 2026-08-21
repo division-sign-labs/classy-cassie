@@ -103,7 +103,7 @@ async function reuseExistingAccount(
     console.log(pc.dim("keeping the existing account — no new wallet is created."));
     return account;
   }
-  if (existing?.controlUrl) {
+  if (existing?.deployment) {
     throw new Error(
       "this account has a deployed runtime. Cassie will not repoint the same bot id while that deployment exists; keep the account or use a new bot id",
     );
@@ -148,7 +148,7 @@ export async function runInit(): Promise<void> {
       createdAt: existing?.createdAt ?? new Date().toISOString(),
     };
   }
-  if (existing?.controlUrl && venue !== existing.venue) {
+  if (existing?.deployment && venue !== existing.venue) {
     throw new Error(
       `bot "${botId}" still points at a deployed ${existing.venue} runtime. Cassie will not change its venue to ${venue}; use a new bot id or remove the existing deployment first`,
     );
@@ -217,7 +217,7 @@ export async function runInit(): Promise<void> {
   }
   if (
     state.account &&
-    existing?.controlUrl &&
+    existing?.deployment &&
     existing.account &&
     !sameVenueAccountIdentity(state.account, existing.account)
   ) {
@@ -285,7 +285,7 @@ export async function runInit(): Promise<void> {
     const provisioned = (await reuseExistingAccount(existing, venue, wallet.address!)) ?? (await adapter.setup(setupCtx));
     if (provisioned?.venue === "fixture") throw new Error("fixture accounts cannot be saved by cassie init");
     account = provisioned as NonNullable<BotConfig["account"]>;
-    if (existing?.controlUrl && existing.account && !sameVenueAccountIdentity(account, existing.account)) {
+    if (existing?.deployment && existing.account && !sameVenueAccountIdentity(account, existing.account)) {
       throw new Error(
         "venue setup resolved a different account while an older deployed runtime is still attached to this bot id; use a new bot id or keep the deployed account",
       );
@@ -297,7 +297,7 @@ export async function runInit(): Promise<void> {
   if (!account) throw new Error("venue setup returned no account");
 
   // Strategy: one strategy (signals); recommended settings in one keystroke.
-  console.log(pc.bold("\nStrategy: signals — follow Quotient signals, hold until the side flips."));
+  console.log(pc.bold("\nStrategy: signals — follow Quotient signals, hold until the forecast converges with the price."));
   console.log(pc.dim(`Recommended: ${RECOMMENDED_SUMMARY}.`));
   const existingStrategy = (existing?.strategy.config ?? {}) as Record<string, unknown>;
   const strategyConfig: Record<string, unknown> = (await confirm("Use recommended allocation rules?", true))
@@ -380,14 +380,14 @@ export async function runInit(): Promise<void> {
     reporting,
     venueUrls: existing?.venueUrls,
     tickIntervalMin,
-    controlUrl: existing?.controlUrl,
+    deployment: existing?.deployment,
     createdAt: state.createdAt,
   });
   saveBotConfig(cfg);
   clearInitState(botId);
   console.log(pc.green(`\nsaved ${botConfigPath(botId)}`));
-  if (existing?.controlUrl) {
-    console.log(pc.yellow("The existing deployed runtime was not changed; run `cassie deploy` to apply this configuration."));
+  if (existing?.deployment) {
+    console.log(pc.yellow(`The droplet still runs the old configuration. Apply this one with cassie deploy ${botId}.`));
   }
 
   if (venue === "polymarket") {

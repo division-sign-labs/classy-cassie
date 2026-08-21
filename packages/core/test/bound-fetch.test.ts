@@ -2,7 +2,7 @@
 // Every injected fetch must be called as a plain function, never as a method.
 //
 // `this.fetchImpl(url)` binds `this` to the calling object. Node ignores it;
-// Cloudflare Workers throws "Illegal invocation: function called with incorrect
+// Strict runtimes throw "Illegal invocation: function called with incorrect
 // `this` reference" and kills the request. That failed every deployed strategy
 // tick while local runs and tests stayed green, so these assert the calling
 // convention directly rather than trusting the platform to surface it.
@@ -26,7 +26,7 @@ function spyingFetch(body: unknown = {}, status = 200) {
   return { impl: impl as unknown as typeof fetch, seen };
 }
 
-/** workerd's rule: the receiver must not be the object holding the reference. */
+/** The rule: the receiver must not be the object holding the reference. */
 function assertNotMethodCall(seen: unknown[], holder: object) {
   expect(seen.length).toBeGreaterThan(0);
   for (const receiver of seen) {

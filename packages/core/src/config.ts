@@ -1,35 +1,46 @@
 // packages/core/src/config.ts
 // Bot configuration: zod schemas, defaults (§8, §9), and (de)serialization.
-// File I/O lives in the CLI/runtime-local; this module stays Workers-safe.
+// File I/O lives in the CLI and the runtime; this module holds no side effects.
 
 import { z } from "zod";
 
 /** Live signals older than three hours are stale unless a bot overrides this. */
 export const DEFAULT_SIGNAL_MAX_AGE_SEC = 3 * 60 * 60;
 
-export const RiskConfigSchema = z.object({
-  /** Max slippage from mid when computing the executable band, in bps. */
-  maxSlippageBps: z.number().positive().default(100),
-  /**
-   * Optional absolute book-walk band, in cents, measured from the best
-   * executable price. Intended for binary markets where a one-cent tick can
-   * already exceed a midpoint-relative bps band. When set, this takes
-   * precedence over maxSlippageBps for capacity and crossing-limit checks.
-   */
-  maxBookWalkCents: z.number().positive().max(100).optional(),
-  /** Cap order size at this % of executable depth within the band. */
-  depthCapPct: z.number().positive().max(100).default(25),
-  /** Market eligibility floor: 24h volume in USD. */
-  minDailyVolume: z.number().nonnegative().default(10_000),
-  /** Market eligibility ceiling on spread, in bps. */
-  maxSpreadBps: z.number().positive().default(500),
-  /** Skip rather than dribble below this notional. */
-  minViableNotional: z.number().nonnegative().default(1),
-  /** Hard cap per order, USD notional. */
-  maxOrderNotional: z.number().positive().default(1_000),
-  /** Resting order lifetime before re-price/cancel. */
-  orderTtlSec: z.number().positive().default(300),
-});
+export const RiskConfigSchema = z.preprocess(
+  // Migrate pre-slippage configs: maxBookWalkCents carries over; the removed
+  // bps knobs (maxSlippageBps, maxSpreadBps) are dropped — slippage from the
+  // best executable price is the one operator-facing control.
+  (raw) => {
+    if (typeof raw !== "object" || raw === null) return raw;
+    const legacy = raw as Record<string, unknown>;
+    if (legacy.slippageCents === undefined && typeof legacy.maxBookWalkCents === "number") {
+      return { ...legacy, slippageCents: legacy.maxBookWalkCents };
+    }
+    return raw;
+  },
+  z.object({
+    /**
+     * Slippage tolerance, in cents from the best executable price (the touch).
+     * Bounds both the capacity band and the crossing limit: an order may walk
+     * the book at most this far past the best bid/ask. The single
+     * operator-facing execution-quality control; set it per bot with
+     * `cassie strategy <botId> --slippage <cents>` or per order with
+     * `cassie trade … --slippage <cents>`.
+     */
+    slippageCents: z.number().positive().max(99).default(2),
+    /** Cap order size at this % of executable depth within the band. */
+    depthCapPct: z.number().positive().max(100).default(25),
+    /** Market eligibility floor: 24h volume in USD. */
+    minDailyVolume: z.number().nonnegative().default(10_000),
+    /** Skip rather than dribble below this notional. */
+    minViableNotional: z.number().nonnegative().default(1),
+    /** Hard cap per order, USD notional. */
+    maxOrderNotional: z.number().positive().default(1_000),
+    /** Resting order lifetime before re-price/cancel. */
+    orderTtlSec: z.number().positive().default(300),
+  }),
+);
 export type RiskConfig = z.output<typeof RiskConfigSchema>;
 
 export const SignalsConfigSchema = z
@@ -200,6 +211,18 @@ export const VenueAccountSchema = z.discriminatedUnion("venue", [
   }),
 ]);
 
+/** Where a deployed bot runs. `cassie deploy` writes it; `cassie destroy` clears it. */
+export const DeploymentSchema = z.object({
+  provider: z.literal("digitalocean"),
+  dropletId: z.number().int().positive(),
+  /** Public IPv4. */
+  host: z.string(),
+  region: z.string(),
+  size: z.string(),
+  user: z.string().default("root"),
+  deployedAt: z.string().optional(),
+});
+
 export const BotConfigSchema = z
   .object({
     id: z.string().regex(/^[a-z0-9][a-z0-9-]{0,31}$/, "bot id: lowercase alphanumerics and dashes, max 32 chars"),
@@ -220,8 +243,8 @@ export const BotConfigSchema = z
     reporting: ReportingConfigSchema.optional(),
     venueUrls: VenueUrlsSchema.prefault({}),
     tickIntervalMin: z.number().positive().default(5),
-    /** Set by `cassie deploy`: the Workers control API base URL for this bot. */
-    controlUrl: z.string().optional(),
+    /** Set by `cassie deploy`: the droplet this bot runs on. */
+    deployment: DeploymentSchema.optional(),
     createdAt: z.string().optional(),
   })
   .superRefine((config, ctx) => {
@@ -273,6 +296,11 @@ export const BotConfigSchema = z
   });
 export type BotConfig = z.output<typeof BotConfigSchema>;
 
+/**
+ * Unknown keys are dropped, which is also the migration path off the
+ * Cloudflare-era `controlUrl`: an older config still loads, and saving it back
+ * writes the field out.
+ */
 export function parseBotConfig(raw: unknown): BotConfig {
   return BotConfigSchema.parse(raw);
 }

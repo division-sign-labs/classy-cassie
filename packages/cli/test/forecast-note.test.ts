@@ -21,51 +21,122 @@ const config = parseBotConfig({
 });
 
 describe("latestForecastThesis", () => {
-  it("maps the traded token to a condition and returns the latest forecast thesis", async () => {
+  it("maps the traded token through CLOB and returns the latest active published-signal thesis", async () => {
     const fetchImpl = vi
       .fn<typeof fetch>()
+      .mockResolvedValueOnce(jsonResponse({ condition_id: CONDITION_ID }))
       .mockResolvedValueOnce(
-        jsonResponse([
-          {
-            conditionId: CONDITION_ID,
-            clobTokenIds: JSON.stringify([TOKEN, "a-no-token"]),
-          },
-        ]),
-      )
-      .mockResolvedValueOnce(
-        jsonResponse({ results: [{ forecast: { thesis: "  The latest Q thesis.  " }, bluf: "Short version" }] }),
+        jsonResponse({
+          signals: [
+            {
+              id: "other-market",
+              side: "YES",
+              is_active: true,
+              thesis: "Wrong market",
+              forecast_updated_at: "2026-08-16T14:00:00Z",
+              market: { venue: "polymarket", condition_id: `0x${"cd".repeat(32)}` },
+            },
+            {
+              id: "older",
+              side: "YES",
+              is_active: true,
+              thesis: "Older thesis",
+              forecast_updated_at: "2026-08-16T12:00:00Z",
+              market: { venue: "polymarket", condition_id: CONDITION_ID },
+            },
+            {
+              id: "latest",
+              side: "YES",
+              is_active: true,
+              thesis: "  The latest Q thesis.  ",
+              forecast_updated_at: "2026-08-16T13:00:00Z",
+              market: { venue: "polymarket", condition_id: CONDITION_ID },
+            },
+          ],
+        }),
       );
 
     await expect(latestForecastThesis(config, TOKEN, "q-secret", fetchImpl)).resolves.toBe(
       "The latest Q thesis.",
     );
 
-    const [gammaInput] = fetchImpl.mock.calls[0]!;
-    const gammaUrl = new URL(String(gammaInput));
-    expect(gammaUrl.pathname).toBe("/markets");
-    expect(gammaUrl.searchParams.get("clob_token_ids")).toBe(TOKEN);
+    const [clobInput, clobInit] = fetchImpl.mock.calls[0]!;
+    expect(String(clobInput)).toBe(`https://clob.polymarket.com/markets-by-token/${TOKEN}`);
+    expect(new Headers(clobInit?.headers).has("x-quotient-api-key")).toBe(false);
 
-    const [lookupInput, lookupInit] = fetchImpl.mock.calls[1]!;
-    const lookupUrl = new URL(String(lookupInput));
-    expect(lookupUrl.href).toBe(`https://q.example/api/v1/markets/lookup?condition_ids=${CONDITION_ID}`);
-    expect(new Headers(lookupInit?.headers).get("x-quotient-api-key")).toBe("q-secret");
+    const [signalsInput, signalsInit] = fetchImpl.mock.calls[1]!;
+    const signalsUrl = new URL(String(signalsInput));
+    expect(signalsUrl.href).toBe("https://q.example/api/v1/signals");
+    expect([...signalsUrl.searchParams.keys()]).toEqual([]);
+    expect(new Headers(signalsInit?.headers).get("x-quotient-api-key")).toBe("q-secret");
   });
 
-  it("uses the lookup BLUF when the forecast has no thesis", async () => {
+  it("ignores inactive signal rows", async () => {
     const fetchImpl = vi
       .fn<typeof fetch>()
-      .mockResolvedValueOnce(jsonResponse([{ condition_id: CONDITION_ID, clobTokenIds: [TOKEN] }]))
-      .mockResolvedValueOnce(jsonResponse({ results: [{ forecast: { thesis: null }, bluf: "  Legacy BLUF  " }] }));
+      .mockResolvedValueOnce(jsonResponse({ conditionId: CONDITION_ID }))
+      .mockResolvedValueOnce(
+        jsonResponse({
+          signals: [
+            {
+              id: "inactive",
+              side: "YES",
+              is_active: false,
+              thesis: "Do not use",
+              forecast_updated_at: "2026-08-16T14:00:00Z",
+              market: { venue: "polymarket", condition_id: CONDITION_ID },
+            },
+            {
+              id: "active",
+              side: "YES",
+              is_active: true,
+              thesis: "Active thesis",
+              forecast_updated_at: "2026-08-16T13:00:00Z",
+              market: { venue: "polymarket", condition_id: CONDITION_ID },
+            },
+          ],
+        }),
+      );
 
-    await expect(latestForecastThesis(config, TOKEN, "q-secret", fetchImpl)).resolves.toBe("Legacy BLUF");
+    await expect(latestForecastThesis(config, TOKEN, "q-secret", fetchImpl)).resolves.toBe(
+      "Active thesis",
+    );
   });
 
-  it("rejects an unfiltered Gamma row that does not contain the requested token", async () => {
-    const fetchImpl = vi
-      .fn<typeof fetch>()
-      .mockResolvedValueOnce(jsonResponse([{ conditionId: CONDITION_ID, clobTokenIds: ["some-other-token"] }]));
+  it("stops after the exact CLOB lookup when it returns no condition", async () => {
+    const fetchImpl = vi.fn<typeof fetch>().mockResolvedValueOnce(jsonResponse({}));
 
     await expect(latestForecastThesis(config, TOKEN, "q-secret", fetchImpl)).resolves.toBeUndefined();
     expect(fetchImpl).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not substitute older lookup copy when the latest signal has no thesis", async () => {
+    const fetchImpl = vi
+      .fn<typeof fetch>()
+      .mockResolvedValueOnce(jsonResponse({ condition_id: CONDITION_ID }))
+      .mockResolvedValueOnce(
+        jsonResponse({
+          signals: [
+            {
+              id: "older",
+              side: "YES",
+              is_active: true,
+              thesis: "Older thesis",
+              forecast_updated_at: "2026-08-16T12:00:00Z",
+              market: { venue: "polymarket", condition_id: CONDITION_ID },
+            },
+            {
+              id: "latest",
+              side: "YES",
+              is_active: true,
+              thesis: null,
+              forecast_updated_at: "2026-08-16T13:00:00Z",
+              market: { venue: "polymarket", condition_id: CONDITION_ID },
+            },
+          ],
+        }),
+      );
+
+    await expect(latestForecastThesis(config, TOKEN, "q-secret", fetchImpl)).resolves.toBeUndefined();
   });
 });

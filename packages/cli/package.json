@@ -1,13 +1,29 @@
 {
   "name": "@quotient-forecasting/cassie",
-  "version": "0.1.4",
+  "version": "0.1.5",
   "type": "module",
   "license": "Apache-2.0",
-  "description": "Open-source, self-hosted, non-custodial trading bot for prediction markets and perps venues",
+  "description": "Self-hosted, non-custodial trading bots for prediction markets and perps venues",
+  "keywords": [
+    "polymarket",
+    "hyperliquid",
+    "lighter",
+    "prediction-markets",
+    "perps",
+    "trading-bot",
+    "non-custodial",
+    "self-hosted",
+    "cli",
+    "digitalocean"
+  ],
   "repository": {
     "type": "git",
     "url": "git+https://github.com/Quotient-Solutions-Inc/classy-cassie.git",
     "directory": "packages/cli"
+  },
+  "homepage": "https://github.com/Quotient-Solutions-Inc/classy-cassie#readme",
+  "bugs": {
+    "url": "https://github.com/Quotient-Solutions-Inc/classy-cassie/issues"
   },
   "engines": {
     "node": ">=24"
@@ -24,7 +40,10 @@
       "import": "./dist/index.js"
     }
   },
-  "files": ["dist", "README.md"],
+  "files": [
+    "dist",
+    "README.md"
+  ],
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "prepack": "pnpm build",
@@ -32,13 +51,11 @@
   },
   "dependencies": {
     "@quotient-forecasting/cassie-core": "workspace:*",
-    "@quotient-forecasting/cassie-runtime-cf": "workspace:*",
-    "@quotient-forecasting/cassie-runtime-local": "workspace:*",
+    "@quotient-forecasting/cassie-runtime-node": "workspace:*",
     "@quotient-forecasting/cassie-skill": "workspace:*",
     "commander": "15.0.0",
     "picocolors": "1.1.1",
-    "prompts": "2.4.2",
-    "wrangler": "4.123.0"
+    "prompts": "2.4.2"
   },
   "devDependencies": {
     "@types/node": "24.2.1",

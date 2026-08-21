@@ -1,7 +1,8 @@
 // packages/core/src/wallet/keystore.ts
 // Local keystore: per-bot file of named secret entries, AES-256-GCM with a
 // scrypt-derived key from an operator passphrase. Node-only (uses node:crypto
-// and node:fs); never imported by the Workers runtime path at runtime.
+// and node:fs). The deployed runtime never sees it — only the credentials
+// `cassie deploy` extracts from it cross to the droplet.
 
 import { randomBytes, scryptSync, createCipheriv, createDecipheriv } from "node:crypto";
 import {
@@ -215,5 +216,4 @@ export const KeyRoles = {
   telegramToken: "telegram-token", // bot token (runtime-eligible)
   quotientToken: "quotient-token", // signal API token (runtime-eligible)
   aresApiKey: "ares-api-key", // Ares feed key, ares_sk_live_… (runtime-eligible)
-  controlToken: "control-token", // deployed control API token
 } as const;

@@ -6,7 +6,7 @@
 // Live contract (verified against the running gateway on 2026-08-13):
 //   GET {gateway}/api/v1/signals  with header  x-quotient-api-key: <token>
 //   → { signals: [{ id, side, latest_q, current_cost_cents, entry_spread_pp,
-//        forecast_updated_at, published_at, is_active,
+//        forecast_updated_at, published_at, is_active, thesis,
 //        market: { venue, condition_id, volume_24h, … }, … }] }
 // The operator obtains a key at quotient.social; the quotient-api skill / CLI
 // is a separate product surface — cassie only consumes this one read endpoint.
@@ -53,6 +53,7 @@ const GatewaySignalSchema = z.object({
   published_at: z.string().nullish(),
   is_active: z.boolean().nullish(),
   status: z.string().nullish(),
+  thesis: z.string().nullish(),
   market: z
     .object({
       venue: z.string().nullish(),
@@ -68,15 +69,47 @@ async function fetchGatewayRows(
   cfg: Pick<SignalsConfig, "baseUrl" | "path">,
   token: string,
   fetchImpl: typeof fetch,
+  signal?: AbortSignal,
 ): Promise<unknown[]> {
   const url = new URL(cfg.path, cfg.baseUrl);
   const res = await fetchImpl(url.toString(), {
     headers: { "x-quotient-api-key": token, accept: "application/json" },
+    signal,
   });
   if (!res.ok) {
     throw new Error(`signal API ${res.status} ${res.statusText} for ${url.pathname}`);
   }
   return GatewayResponseSchema.parse(await res.json()).signals;
+}
+
+/** Latest active published-signal thesis for one Polymarket condition. */
+export async function latestPublishedSignalThesis(
+  cfg: Pick<SignalsConfig, "baseUrl" | "path">,
+  conditionId: string,
+  token: string,
+  fetchImpl?: typeof fetch,
+  signal?: AbortSignal,
+): Promise<string | undefined> {
+  const rows = await fetchGatewayRows(cfg, token, boundFetch(fetchImpl), signal);
+  const matches = rows
+    .map((row) => GatewaySignalSchema.safeParse(row))
+    .filter((result) => result.success)
+    .map((result) => result.data)
+    .filter(
+      (row) =>
+        row.is_active !== false &&
+        row.market?.venue?.startsWith("polymarket") === true &&
+        row.market.condition_id?.toLowerCase() === conditionId.toLowerCase(),
+    )
+    .sort((a, b) => signalTimestamp(b) - signalTimestamp(a));
+
+  const thesis = matches[0]?.thesis;
+  return typeof thesis === "string" && thesis.trim() ? thesis.trim() : undefined;
+}
+
+function signalTimestamp(row: z.output<typeof GatewaySignalSchema>): number {
+  const value = Date.parse(row.forecast_updated_at ?? row.published_at ?? "");
+  return Number.isNaN(value) ? 0 : value;
 }
 
 /** Read-only credential preflight: authenticate and validate the feed envelope. */

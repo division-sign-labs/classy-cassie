@@ -1,8 +1,8 @@
 // packages/core/src/engine/engine.ts
 // The runtime-agnostic engine (§10): tick = pull signals → strategy decisions →
 // risk checks → execute → reconcile fills → alert → persist. Ticks are
-// idempotent and guarded by a monotonic tick sequence in the StateStore,
-// because Cloudflare alarms are at-least-once.
+// idempotent and guarded by a monotonic tick sequence in the StateStore: tick
+// ids come from the interval slot, so a restart mid-interval re-presents one.
 
 import type {
   Action,
@@ -58,6 +58,8 @@ export interface ManualOrderParams {
   trailBps?: number;
   /** Skip §9 volume-floor eligibility (still slippage/depth-capped). Manual override only. */
   ignoreVolumeFloor?: boolean;
+  /** Per-order slippage tolerance in cents from the touch; overrides risk.slippageCents. */
+  slippageCents?: number;
   /**
    * Human-facing rationale for this trade, written for readers rather than
    * logs — a thesis `reasoningSummary`, or `--note` on the CLI. Carried into
@@ -333,9 +335,7 @@ export class Engine {
     const refPrice = p.limitPrice ?? quote.mid;
     const desiredSize = p.desiredSize ?? (p.desiredNotional ?? 0) / refPrice;
 
-    const risk = p.ignoreVolumeFloor
-      ? { ...config.risk, minDailyVolume: 0, maxSpreadBps: Number.MAX_SAFE_INTEGER }
-      : config.risk;
+    const risk = p.ignoreVolumeFloor ? { ...config.risk, minDailyVolume: 0 } : config.risk;
     const cap = checkCapacity({
       side: p.side,
       desiredSize,
@@ -396,9 +396,11 @@ export class Engine {
     const { adapter, account, config, botId } = this.d;
     const { book, quote } = await this.quoteFor(p.marketRef, p.outcome);
     const refPrice = p.limitPrice ?? quote.mid;
-    const risk = p.ignoreVolumeFloor
-      ? { ...config.risk, minDailyVolume: 0, maxSpreadBps: Number.MAX_SAFE_INTEGER }
-      : config.risk;
+    const risk = {
+      ...config.risk,
+      ...(p.ignoreVolumeFloor ? { minDailyVolume: 0 } : {}),
+      ...(p.slippageCents !== undefined ? { slippageCents: p.slippageCents } : {}),
+    };
     const cap = checkCapacity({ side: p.side, desiredSize: p.size, refPrice, book, quote, risk });
     if (!cap.ok) {
       return {

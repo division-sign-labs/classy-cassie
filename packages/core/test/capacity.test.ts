@@ -27,11 +27,11 @@ function quote(volume24h = 50_000): Quote {
 
 describe("checkCapacity (§9)", () => {
   it("caps a BUY at depthCapPct of in-band depth", () => {
-    const risk = RiskConfigSchema.parse({ maxSlippageBps: 300 });
+    const risk = RiskConfigSchema.parse({ slippageCents: 0.5 });
     const res = checkCapacity({ side: "BUY", desiredSize: 90.9, refPrice: 0.55, book, quote: quote(), risk });
     expect(res.ok).toBe(true);
-    // band = 0.55 * 3% = 0.0165 → limit 0.5665; only the 40 @ 0.56 is in-band.
-    expect(res.limitPrice).toBeCloseTo(0.5665, 10);
+    // Half a cent from the 0.56 best ask → limit 0.565; only the 40 @ 0.56 is in-band.
+    expect(res.limitPrice).toBeCloseTo(0.565, 10);
     expect(res.bandDepth).toBe(40);
     // 25% of 40 = 10 shares.
     expect(res.size).toBe(10);
@@ -41,15 +41,15 @@ describe("checkCapacity (§9)", () => {
   });
 
   it("caps by maxOrderNotional when that binds first", () => {
-    const risk = RiskConfigSchema.parse({ maxSlippageBps: 300, maxOrderNotional: 2, depthCapPct: 100 });
+    const risk = RiskConfigSchema.parse({ slippageCents: 0.5, maxOrderNotional: 2, depthCapPct: 100 });
     const res = checkCapacity({ side: "BUY", desiredSize: 30, refPrice: 0.55, book, quote: quote(), risk });
     expect(res.ok).toBe(true);
     expect(res.size).toBeCloseTo(2 / 0.55, 10);
     expect(res.notes.join(" ")).toMatch(/maxOrderNotional/);
   });
 
-  it("can measure an absolute book-walk band from the best executable price", () => {
-    const risk = RiskConfigSchema.parse({ maxBookWalkCents: 2, depthCapPct: 100 });
+  it("measures the slippage band from the best executable price", () => {
+    const risk = RiskConfigSchema.parse({ slippageCents: 2, depthCapPct: 100 });
     const res = checkCapacity({ side: "BUY", desiredSize: 1_000, refPrice: 0.55, book, quote: quote(), risk });
     // Two cents from the 0.56 best ask includes 0.56 and 0.57, but not 0.60.
     expect(res.ok).toBe(true);
@@ -58,37 +58,39 @@ describe("checkCapacity (§9)", () => {
     expect(res.size).toBe(100);
   });
 
-  it("uses the absolute book-walk band instead of the midpoint bps band when both are configured", () => {
-    const risk = RiskConfigSchema.parse({ maxSlippageBps: 10, maxBookWalkCents: 2, depthCapPct: 100 });
+  it("migrates a legacy maxBookWalkCents config onto slippageCents", () => {
+    const risk = RiskConfigSchema.parse({ maxBookWalkCents: 2, maxSlippageBps: 100, maxSpreadBps: 500, depthCapPct: 100 });
+    expect(risk.slippageCents).toBe(2);
     const res = checkCapacity({ side: "BUY", desiredSize: 100, refPrice: 0.55, book, quote: quote(), risk });
     expect(res.ok).toBe(true);
     expect(res.bandDepth).toBe(100);
   });
 
+  it("ignores quoted spread: a wide market with depth at the touch is tradable", () => {
+    const risk = RiskConfigSchema.parse({ slippageCents: 2 });
+    // 0.54/0.56 on a 0.55 mid quotes ~364bps; the old spread gate would skip it.
+    const res = checkCapacity({ side: "BUY", desiredSize: 10, refPrice: 0.55, book, quote: quote(), risk });
+    expect(res.ok).toBe(true);
+    expect(res.skipReasons).toHaveLength(0);
+  });
+
   it("skips when 24h volume is below the floor", () => {
-    const risk = RiskConfigSchema.parse({ maxSlippageBps: 300 });
+    const risk = RiskConfigSchema.parse({ slippageCents: 2 });
     const res = checkCapacity({ side: "BUY", desiredSize: 10, refPrice: 0.55, book, quote: quote(5_000), risk });
     expect(res.ok).toBe(false);
     expect(res.size).toBe(0);
     expect(res.skipReasons.join(" ")).toMatch(/volume/);
   });
 
-  it("skips when spread exceeds maxSpreadBps", () => {
-    const risk = RiskConfigSchema.parse({ maxSlippageBps: 300, maxSpreadBps: 100 });
-    const res = checkCapacity({ side: "BUY", desiredSize: 10, refPrice: 0.55, book, quote: quote(), risk });
-    expect(res.ok).toBe(false);
-    expect(res.skipReasons.join(" ")).toMatch(/spread/);
-  });
-
   it("skips rather than dribbles below minViableNotional", () => {
-    const risk = RiskConfigSchema.parse({ maxSlippageBps: 300, minViableNotional: 5 });
+    const risk = RiskConfigSchema.parse({ slippageCents: 2, minViableNotional: 5 });
     const res = checkCapacity({ side: "BUY", desiredSize: 1, refPrice: 0.55, book, quote: quote(), risk });
     expect(res.ok).toBe(false);
     expect(res.skipReasons.join(" ")).toMatch(/minimum notional/);
   });
 
   it("honours a stricter per-entry floor after depth capping", () => {
-    const risk = RiskConfigSchema.parse({ maxSlippageBps: 300 });
+    const risk = RiskConfigSchema.parse({ slippageCents: 0.5 });
     const res = checkCapacity({
       side: "BUY",
       desiredSize: 90.9,
@@ -104,7 +106,7 @@ describe("checkCapacity (§9)", () => {
   });
 
   it("does not let a per-order floor weaken the bot risk floor", () => {
-    const risk = RiskConfigSchema.parse({ maxSlippageBps: 300, minViableNotional: 5 });
+    const risk = RiskConfigSchema.parse({ slippageCents: 2, minViableNotional: 5 });
     const res = checkCapacity({
       side: "BUY",
       desiredSize: 1,
@@ -119,23 +121,26 @@ describe("checkCapacity (§9)", () => {
   });
 
   it("skips when no depth sits within the slippage band", () => {
-    const risk = RiskConfigSchema.parse({ maxSlippageBps: 10 });
-    const res = checkCapacity({ side: "BUY", desiredSize: 10, refPrice: 0.55, book, quote: quote(), risk });
+    // Band from the touch always includes the touch level when one exists, so
+    // an empty band needs an empty side of the book.
+    const emptyAsks: OrderBook = { ...book, asks: [] };
+    const risk = RiskConfigSchema.parse({ slippageCents: 2 });
+    const res = checkCapacity({ side: "BUY", desiredSize: 10, refPrice: 0.55, book: emptyAsks, quote: quote(), risk });
     expect(res.ok).toBe(false);
     expect(res.skipReasons.join(" ")).toMatch(/no depth/);
   });
 
   it("SELL walks the bid side", () => {
-    const risk = RiskConfigSchema.parse({ maxSlippageBps: 300 });
+    const risk = RiskConfigSchema.parse({ slippageCents: 0.5 });
     const res = checkCapacity({ side: "SELL", desiredSize: 100, refPrice: 0.55, book, quote: quote(), risk });
-    // limit = 0.5335; only the 50 @ 0.54 is in-band → 25% = 12.5
+    // limit = 0.535; only the 50 @ 0.54 is in-band → 25% = 12.5
     expect(res.ok).toBe(true);
     expect(res.bandDepth).toBe(50);
     expect(res.size).toBe(12.5);
   });
 
-  it("measures an absolute SELL book walk down from the best bid", () => {
-    const risk = RiskConfigSchema.parse({ maxBookWalkCents: 1, depthCapPct: 100 });
+  it("measures the SELL band down from the best bid", () => {
+    const risk = RiskConfigSchema.parse({ slippageCents: 1, depthCapPct: 100 });
     const res = checkCapacity({ side: "SELL", desiredSize: 1_000, refPrice: 0.55, book, quote: quote(), risk });
     expect(res.ok).toBe(true);
     expect(res.limitPrice).toBeCloseTo(0.53, 10);

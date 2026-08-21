@@ -38,7 +38,8 @@ export const dirs = {
   bots: () => join(cassieHome(), "bots"),
   keys: () => join(cassieHome(), "keys"),
   state: () => join(cassieHome(), "state"),
-  control: () => join(cassieHome(), "control"),
+  run: () => join(cassieHome(), "run"),
+  ssh: () => join(cassieHome(), "ssh"),
 };
 
 export function botConfigPath(botId: string): string {
@@ -49,20 +50,7 @@ export function statePath(botId: string): string {
   return join(dirs.state(), `${safeBotId(botId)}.sqlite`);
 }
 
-/**
- * Cached control token for a deployed bot, mode 0600.
- *
- * `deploy` already holds this token and has already unlocked the keystore, so
- * caching it there means later reads (logs, portfolio, orders) need no
- * passphrase — the keystore passphrase guards keys that move money, and
- * reaching your own Worker is not that. Delete with `cassie control-token
- * <botId> --forget`.
- */
-export function controlTokenPath(botId: string): string {
-  return join(dirs.control(), `${safeBotId(botId)}.token`);
-}
-
-/** Crash-safe private-file replacement used for configs and local tokens. */
+/** Crash-safe private-file replacement used for configs and local credentials. */
 export function atomicWritePrivateFile(path: string, contents: string): void {
   const parent = dirname(path);
   mkdirSync(parent, { recursive: true, mode: 0o700 });
@@ -92,26 +80,6 @@ export function atomicWritePrivateFile(path: string, contents: string): void {
     if (descriptor !== undefined) closeSync(descriptor);
     if (existsSync(temporary)) rmSync(temporary);
   }
-}
-
-export function saveControlToken(botId: string, token: string): string {
-  const p = controlTokenPath(botId);
-  atomicWritePrivateFile(p, token);
-  return p;
-}
-
-export function readControlToken(botId: string): string | null {
-  const p = controlTokenPath(botId);
-  if (!existsSync(p)) return null;
-  const raw = readFileSync(p, "utf8").trim();
-  return raw.length > 0 ? raw : null;
-}
-
-export function forgetControlToken(botId: string): boolean {
-  const p = controlTokenPath(botId);
-  if (!existsSync(p)) return false;
-  rmSync(p);
-  return true;
 }
 
 export function loadBotConfig(botId: string): BotConfig {

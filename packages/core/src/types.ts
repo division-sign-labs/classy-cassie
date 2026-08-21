@@ -1,6 +1,6 @@
 // packages/core/src/types.ts
-// Shared domain types for cassie. Everything here is runtime-agnostic
-// (must run under Node and Cloudflare Workers).
+// Shared domain types for cassie. Everything here is runtime-agnostic and
+// free of side effects.
 
 export type VenueId = "polymarket" | "hyperliquid" | "lighter" | "fixture";
 
@@ -198,8 +198,8 @@ export type VenueAccount =
     };
 
 /**
- * Runtime-eligible credentials: the JSON blob that gets pushed to a deployed
- * runtime (Workers secret) or decrypted into memory by the local runtime.
+ * Runtime-eligible credentials: the JSON blob that reaches a deployed runtime
+ * as an environment file, or is decrypted into memory by a local run.
  * Hyperliquid master keys, Lighter L1 keys, and Polymarket Relayer/Builder keys
  * are never part of this. Polymarket is the explicit exception: its pinned SDK
  * requires the raw venue signer in the runtime. Treat that signer as deployed
@@ -467,7 +467,7 @@ export interface Alerter {
 }
 
 // ---------------------------------------------------------------------------
-// State store — implemented by runtime-local (better-sqlite3) and runtime-cf (DO SQLite)
+// State store — implemented by runtime-node (better-sqlite3)
 // ---------------------------------------------------------------------------
 
 export interface LogQuery {
