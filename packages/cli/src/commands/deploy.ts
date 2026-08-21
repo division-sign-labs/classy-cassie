@@ -4,7 +4,7 @@
 // on stdin — never in argv, never in droplet user-data.
 
 import pc from "picocolors";
-import { KeyRoles, serializeBotConfig, type BotConfig } from "@quotient-forecasting/cassie-core";
+import { KeyRoles, type BotConfig } from "@quotient-forecasting/cassie-core";
 import { buildRuntimeCreds, confirm, getKeystoreSecret } from "../context.js";
 import { loadBotConfig, saveBotConfig } from "../paths.js";
 import { resolveQuotientToken } from "../quotient-token.js";
@@ -235,7 +235,10 @@ export async function runDeploy(botId: string, opts: DeployOpts = {}): Promise<v
   const target: Target = { host, user: "root" };
 
   if (!reuse) {
-    pinHostKey(host);
+    await waitFor("waiting for sshd", 1, 1, async () => {
+      await pinHostKey(host);
+      return true;
+    });
     await waitForSsh(target);
     await waitForProvisioning(target);
   } else {
@@ -272,7 +275,10 @@ export async function runDeploy(botId: string, opts: DeployOpts = {}): Promise<v
 
   const env: [string, string | null][] = [
     ["CASSIE_BOT_ID", botId],
-    ["CASSIE_BOT_CONFIG", serializeBotConfig(deployedCfg).trim()],
+    // Compact, not pretty-printed: systemd's EnvironmentFile unescapes \" inside
+    // a quoted value but leaves \n as a literal backslash-n, which lands in the
+    // middle of the JSON and fails to parse. One line has no newlines to escape.
+    ["CASSIE_BOT_CONFIG", JSON.stringify(deployedCfg)],
     ["CASSIE_BOT_CREDS", JSON.stringify(creds)],
     ["CASSIE_REQUIRED_REGION", droplet.region.slug],
     ["QUOTIENT_API_TOKEN", quotientToken],
@@ -285,6 +291,9 @@ export async function runDeploy(botId: string, opts: DeployOpts = {}): Promise<v
       // Silence here reads as "set" — say which capability is off instead.
       console.log(pc.dim(`${key}: not set locally, skipping`));
       continue;
+    }
+    if (/[\r\n]/.test(value)) {
+      throw new Error(`${key} contains a newline; systemd would deliver it escaped and the runtime would fail to parse it`);
     }
     lines.push(`${key}=${JSON.stringify(value)}`);
   }
@@ -318,9 +327,10 @@ export async function runDeploy(botId: string, opts: DeployOpts = {}): Promise<v
       region?: string;
     };
     if (geoblock.blocked) {
+      const where = [geoblock.country, geoblock.region].filter(Boolean).join("/") || "unknown";
       throw new Error(
-        `refusing to resume: Polymarket reports ${chosen.name} as blocked (${geoblock.country ?? "unknown"}/${geoblock.region ?? "unknown"}). ` +
-          `Redeploy with --region <slug> somewhere it is not.`,
+        `refusing to resume: Polymarket does not accept orders from ${chosen.name} (${where}). ` +
+          `The bot is installed and idle. Redeploy elsewhere with: cassie deploy ${botId} --region <slug>`,
       );
     }
     console.log(pc.green(`Polymarket order placement permitted from ${geoblock.country ?? chosen.name}`));

@@ -95,9 +95,17 @@ export async function runSsh(botId: string): Promise<void> {
   if (code !== 0) process.exitCode = code;
 }
 
+/** Elapsed time without the "ago" suffix, for durations rather than instants. */
+function uptime(iso: number | string | undefined): string {
+  const text = ago(iso);
+  return text.endsWith(" ago") ? text.slice(0, -4) : text;
+}
+
 function ago(iso: number | string | undefined): string {
   if (iso === undefined) return "never";
-  const ms = Date.now() - (typeof iso === "number" ? iso : Date.parse(iso));
+  const ms =
+    Date.now() -
+    (typeof iso === "number" ? iso : Date.parse(String(iso).replace(/^[A-Za-z]{3}\s+/, "")));
   if (!Number.isFinite(ms)) return "unknown";
   const minutes = Math.floor(ms / 60_000);
   if (minutes < 1) return "just now";
@@ -147,10 +155,24 @@ export async function showStatus(botId: string): Promise<void> {
   const target: Target = { host: deployment.host, user: deployment.user };
   const reachable = sshExec(target, "true").ok;
 
+  // Parse by key: `systemctl show --value` emits properties in systemd's own
+  // order, not the order they were requested in, so positional reads misalign.
   const service = reachable
-    ? sshExec(target, `systemctl show ${JOURNAL_UNIT(botId)} -p ActiveState -p SubState -p NRestarts -p ActiveEnterTimestamp --value`)
+    ? sshExec(target, `systemctl show ${JOURNAL_UNIT(botId)} -p ActiveState -p SubState -p NRestarts -p ActiveEnterTimestamp`)
     : null;
-  const [activeState, subState, restarts, since] = (service?.stdout ?? "").trim().split("\n");
+  const props = new Map(
+    (service?.stdout ?? "")
+      .trim()
+      .split("\n")
+      .map((line) => {
+        const at = line.indexOf("=");
+        return at === -1 ? ["", ""] : [line.slice(0, at), line.slice(at + 1)];
+      }) as [string, string][],
+  );
+  const activeState = props.get("ActiveState");
+  const subState = props.get("SubState");
+  const restarts = props.get("NRestarts") ?? "0";
+  const since = props.get("ActiveEnterTimestamp");
 
   const runtime = reachable ? await tryControl<RuntimeStatus>(target, botId, "/runtime") : null;
 
@@ -159,18 +181,18 @@ export async function showStatus(botId: string): Promise<void> {
   );
   console.log("");
 
-  const { client } = await ensureDigitalOceanReady().catch(() => ({ client: null }) as never);
+  const { client } = await ensureDigitalOceanReady({ quiet: true }).catch(() => ({ client: null }) as never);
   const droplet = client ? await client.droplet(deployment.dropletId).catch(() => null) : null;
   row(
     "droplet",
     droplet
-      ? `${droplet.region.slug}  ${droplet.size_slug}  ${publicIpv4(droplet) ?? deployment.host}  $${droplet.size.price_monthly}/mo  up ${ago(droplet.created_at)}`
+      ? `${droplet.region.slug}  ${droplet.size_slug}  ${publicIpv4(droplet) ?? deployment.host}  $${droplet.size.price_monthly}/mo  up ${uptime(droplet.created_at)}`
       : `${deployment.region}  ${deployment.size}  ${deployment.host}  (DigitalOcean unreachable)`,
   );
   row(
     "service",
     reachable
-      ? `${activeState ?? "unknown"}/${subState ?? "unknown"}, ${restarts ?? "0"} restarts, started ${ago(since)}`
+      ? `${activeState ?? "unknown"} (${subState ?? "unknown"}), ${restarts} restarts, started ${ago(since)}`
       : "no ssh — check the droplet in the DigitalOcean dashboard",
   );
   row(

@@ -42,21 +42,30 @@ export function ensureKeypair(): { publicKey: string; path: string } {
 }
 
 /**
- * Record the host's key before the first real connection. Every later call
- * runs with StrictHostKeyChecking=yes against this file, so a swapped host key
- * fails loudly instead of prompting.
+ * Record the host's key before the first real connection. Every later call runs
+ * with StrictHostKeyChecking=yes against this file, so a swapped host key fails
+ * loudly instead of prompting.
+ *
+ * DigitalOcean reports a droplet `active` before sshd is listening, so this
+ * polls: a keyscan against a booting droplet returns nothing, not an error.
  */
-export function pinHostKey(host: string): void {
+export async function pinHostKey(host: string, attempts = 40, intervalMs = 3_000): Promise<void> {
   mkdirSync(sshDir(), { recursive: true, mode: 0o700 });
   const path = knownHostsPath();
   if (existsSync(path) && readFileSync(path, "utf8").includes(`${host} `)) return;
-  const result = spawnSync("ssh-keyscan", ["-t", "ed25519", "-T", "10", host], {
-    encoding: "utf8",
-    stdio: ["ignore", "pipe", "pipe"],
-  });
-  const keys = (result.stdout ?? "").split("\n").filter((line) => line.startsWith(host));
-  if (keys.length === 0) throw new Error(`could not read the host key for ${host}`);
-  appendFileSync(path, `${keys.join("\n")}\n`, { mode: 0o600 });
+  for (let i = 0; i < attempts; i++) {
+    const result = spawnSync("ssh-keyscan", ["-t", "ed25519", "-T", "10", host], {
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+    const keys = (result.stdout ?? "").split("\n").filter((line) => line.startsWith(host));
+    if (keys.length > 0) {
+      appendFileSync(path, `${keys.join("\n")}\n`, { mode: 0o600 });
+      return;
+    }
+    await new Promise((r) => setTimeout(r, intervalMs));
+  }
+  throw new Error(`could not read the host key for ${host} after ${attempts} tries; the droplet never started sshd`);
 }
 
 export function forgetHostKey(host: string): void {

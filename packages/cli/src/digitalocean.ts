@@ -7,6 +7,7 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 import pc from "picocolors";
 import { ask, confirm, openUrl } from "./context.js";
+import { resolveLocalValue } from "./local-env.js";
 import { atomicWritePrivateFile, dirs } from "./paths.js";
 
 const API = "https://api.digitalocean.com/v2";
@@ -54,9 +55,13 @@ function tokenFromDoctl(): string | null {
   return value && value.length > 0 ? value : null;
 }
 
+const TOKEN_NAMES = ["DIGITALOCEAN_TOKEN", "DIGITALOCEAN_ACCESS_TOKEN", "DO_API_TOKEN"] as const;
+
 export function findToken(): { token: string; origin: string } | null {
-  const fromEnv = process.env.DIGITALOCEAN_TOKEN ?? process.env.DIGITALOCEAN_ACCESS_TOKEN;
-  if (fromEnv) return { token: fromEnv, origin: "environment" };
+  // Nearest .local.env first, then the exported environment — the same order
+  // the Quotient and Ares keys resolve in, so all three live in one file.
+  const resolved = resolveLocalValue(TOKEN_NAMES);
+  if (resolved) return { token: resolved.value, origin: resolved.origin };
   const path = tokenPath();
   if (existsSync(path)) {
     const stored = readFileSync(path, "utf8").trim();
@@ -202,13 +207,15 @@ export function publicIpv4(droplet: Droplet): string | null {
  * Get the operator from "I have never touched DigitalOcean" to a verified
  * token, before anything asks for the keystore passphrase.
  */
-export async function ensureDigitalOceanReady(): Promise<{ client: DigitalOcean; email: string }> {
+export async function ensureDigitalOceanReady(opts: { quiet?: boolean } = {}): Promise<{ client: DigitalOcean; email: string }> {
   const found = findToken();
   if (found) {
     const client = new DigitalOcean(found.token);
     try {
       const { account } = await client.account();
-      console.log(pc.dim(`DigitalOcean account ${account.email} (token from ${found.origin})`));
+      // `status` reads the droplet as one line of its own output; naming the
+      // token source there is noise. `deploy` says it, because it is about to act.
+      if (!opts.quiet) console.log(pc.dim(`DigitalOcean account ${account.email} (token from ${found.origin})`));
       return { client, email: account.email };
     } catch (error) {
       if (!(error instanceof DigitalOceanError) || error.status !== 401) throw error;

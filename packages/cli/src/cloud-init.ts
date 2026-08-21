@@ -78,8 +78,11 @@ export function renderCloudInit(params: CloudInitParams): string {
     : installRuntimeCommand(params.runtimeVersion);
 
   return `#cloud-config
+# Refresh the apt indexes, but skip a full distro upgrade: on a 1 vCPU droplet
+# it regenerates initramfs for every kernel and adds minutes to first boot
+# before Node is even installed. unattended-upgrades carries security patches
+# from here.
 package_update: true
-package_upgrade: true
 packages:
   - curl
   - ca-certificates
