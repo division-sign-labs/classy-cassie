@@ -137,6 +137,17 @@ export function controlSocketPath(botId: string): string {
  * Call the bot's control API through its unix socket. curl runs on the droplet;
  * the request body arrives on stdin so it stays out of the command line.
  */
+/** A non-2xx from the control API, carrying the parsed body when there is one. */
+export class ControlApiError extends Error {
+  constructor(
+    message: string,
+    readonly body?: unknown,
+  ) {
+    super(message);
+    this.name = "ControlApiError";
+  }
+}
+
 export function controlCall(
   target: Target,
   botId: string,
@@ -157,8 +168,14 @@ export function controlCall(
   const result = sshExec(target, parts.join(" "), body);
   const text = result.stdout.trim();
   if (!result.ok) {
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(text);
+    } catch {
+      parsed = undefined;
+    }
     const detail = text || result.stderr.trim();
-    throw new Error(`control API: ${detail.slice(0, 400) || `curl exited ${result.code}`}`);
+    throw new ControlApiError(`control API: ${detail.slice(0, 400) || `curl exited ${result.code}`}`, parsed);
   }
   try {
     return JSON.parse(text);

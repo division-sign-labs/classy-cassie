@@ -17,15 +17,19 @@ import {
 } from "@quotient-forecasting/cassie-core";
 import { dirs } from "./paths.js";
 import { getOperatorDefault, setOperatorDefault } from "./defaults.js";
-import { controlCall, type Target } from "./ssh.js";
+import { ControlApiError, controlCall, type Target } from "./ssh.js";
 import { resolveLocalValue } from "./local-env.js";
 
 let cachedPassphrase: string | undefined;
 
 export async function getPassphrase(confirmNew = false): Promise<string> {
   if (cachedPassphrase !== undefined) return cachedPassphrase;
-  if (process.env.CASSIE_PASSPHRASE) {
-    cachedPassphrase = process.env.CASSIE_PASSPHRASE;
+  // The nearest .local.env, then the exported environment — the same order the
+  // Quotient, Ares, DigitalOcean, and RPC credentials resolve in. Without this
+  // an agent driving the CLI stalls on a prompt it cannot answer.
+  const supplied = resolveLocalValue(["CASSIE_PASSPHRASE"]);
+  if (supplied) {
+    cachedPassphrase = supplied.value;
     return cachedPassphrase;
   }
   const { pass } = await prompts(
@@ -213,5 +217,16 @@ export function targetFor(cfg: BotConfig): Target {
 export async function controlFetch(cfg: BotConfig, path: string, init: RequestInit = {}): Promise<unknown> {
   const method = (init.method ?? "GET").toUpperCase() === "POST" ? "POST" : "GET";
   const body = typeof init.body === "string" ? init.body : undefined;
-  return controlCall(targetFor(cfg), cfg.id, method, path, body);
+  try {
+    return controlCall(targetFor(cfg), cfg.id, method, path, body);
+  } catch (error) {
+    // The runtime answers a risk-module skip with 422 and a full result body.
+    // That is an outcome the caller renders, not a transport failure.
+    if (error instanceof ControlApiError && isSkipResult(error.body)) return error.body;
+    throw error;
+  }
+}
+
+function isSkipResult(body: unknown): boolean {
+  return typeof body === "object" && body !== null && "placed" in body && "skipReasons" in body;
 }
