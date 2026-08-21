@@ -55,7 +55,7 @@ export function loadMappings(explicitPath?: string): Mappings {
 /** The six-question flow (§13). Question wording is quoted verbatim by the skill. */
 export async function elicitTicket(defaults: Partial<ThesisTicket> = {}): Promise<ThesisTicket> {
   console.log(pc.bold("Thesis intake — six questions; the sizing module does the arithmetic.\n"));
-  const venue = (await ask("1a. Venue (hyperliquid / lighter / polymarket)", { default: defaults.venue ?? "hyperliquid" }))
+  const venue = (await ask("1a. Venue (hyperliquid / polymarket)", { default: defaults.venue ?? "hyperliquid" }))
     .trim()
     .toLowerCase() as ThesisTicket["venue"];
   const instrument = (await ask("1b. Instrument (e.g. ETH, or YES-token id)", { default: defaults.instrument })).trim();

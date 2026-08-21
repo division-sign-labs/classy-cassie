@@ -1,6 +1,6 @@
 ---
 name: cassie
-description: Operate cassie — self-hosted, non-custodial trading bots for prediction markets (Polymarket) and perps venues (Hyperliquid, Lighter). Use for creating and funding a bot, wallets and keystore, running a bot locally or deploying it to a DigitalOcean droplet, monitoring it with status and logs, checking portfolio and orders, placing manual or thesis-driven trades, and the risk module's sizing, stop, and leverage rules.
+description: Operate cassie — self-hosted, non-custodial trading bots for prediction markets (Polymarket) and perps (Hyperliquid). Use for creating and funding a bot, wallets and keystore, running a bot locally or deploying it to a DigitalOcean droplet, monitoring it with status and logs, checking portfolio and orders, placing manual or thesis-driven trades, and the risk module's sizing, stop, and leverage rules.
 ---
 
 # cassie — operator manual
@@ -22,8 +22,8 @@ Custody model:
   keystore. Final keys live in
   `~/.cassie/keys/<botId>.json`, AES-256-GCM encrypted with a scrypt-derived key from the
   operator passphrase, file mode 0600.
-- Keys are split by role. Hyperliquid's master and Lighter's L1 key stay local; deployed
-  runtimes receive the Hyperliquid agent or Lighter API key. **Polymarket is an explicit
+- Keys are split by role. Hyperliquid's master stays local; a deployed runtime receives
+  the Hyperliquid agent key. **Polymarket is an explicit
   exception:** the pinned client requires the raw venue signer plus L2 HMAC credentials in
   the runtime. Builder/Relayer credentials remain local, but do not describe the deployed
   Polymarket signer as local-only or reuse it for Splits authority.
@@ -65,7 +65,7 @@ stored at `~/.cassie/digitalocean.token`.
 Every step happens in the terminal; you only leave it to copy-paste dashboard values.
 
 1. **Bot id** — lowercase, dashes, max 32 chars. Names the config, keystore, and state files.
-2. **Venue** — `polymarket`, `hyperliquid`, or `lighter`.
+2. **Venue** — `polymarket` or `hyperliquid`.
 3. **Wallet** — generate directly into the encrypted local keystore.
 4. **Passphrase** — encrypts the keystore. There is no recovery; losing it means
    re-importing or re-generating keys.
@@ -73,7 +73,7 @@ Every step happens in the terminal; you only leave it to copy-paste dashboard va
    `@splits/splits-cli@0.2.11`. Its API key is bound to one organization; Cassie runs
    `splits auth whoami`, shows the exact org name/id, and asks for confirmation. You choose
    your member and active passkey, then Cassie creates `cassie-<botId>` directly under that
-   org's treasury owner. Passkey-only is the safe default. For Hyperliquid/Lighter an
+   org's treasury owner. Passkey-only is the safe default. For Hyperliquid an
    advanced option can also register the local bot EOA and attach it to this new account
    only at threshold 1: either the passkey or EOA can move that subaccount's funds alone.
    Cassie does not yet sign Splits proposals. Polymarket's deployed signer is never offered.
@@ -100,8 +100,6 @@ Every step happens in the terminal; you only leave it to copy-paste dashboard va
      is rejected by the venue).
    - **Hyperliquid** — derives the master address from the bot key. Agent approval happens
      in the funding flow, after the account exists on the L1.
-   - **Lighter** — derives the L1 address. Account registration and API-key provisioning
-     happen in the funding flow.
 7. **Strategy** — one strategy: `signals` (follow Quotient signals, hold until Q's
    forecast converges with the market price; positions with remaining edge are held
    regardless of P&L). The recommended allocation holds up to 2 positions, prioritizes the widest
@@ -140,11 +138,6 @@ All flows print exactly what to send where, then poll until the venue credits.
   bridge deposit from the master EOA, polls the L1 until credited, generates an agent
   keypair, has the master sign `approveAgent` (named `cassie-<botId>`, truncated to 16
   chars), and marks the agent key runtime-eligible. The master key stays local.
-- **Lighter**: choose a source chain (Arbitrum / Base / Avalanche C-Chain); the flow
-  requests a CCTP intent address, you send **≥5 USDC** to it, it polls until the account
-  is credited, resolves the integer `account_index`, provisions an API key at index 2 via
-  ChangePubKey (signed by the L1 key, which stays local), and marks the API key
-  runtime-eligible. **Lighter is local-runtime-only in MVP** (§11 below).
 
 `cassie fund <botId>` re-enters the flow for top-ups. With a configured treasury,
 `--from splits` is automated only for Hyperliquid mainnet: it fixes the source to Arbitrum
@@ -152,9 +145,7 @@ One native USDC, asks the amount, and then prints the exact
 `splits transactions create transfer --account … --chain-id … --recipient … --token …`
 proposal. Approve the returned `signUrl` with the selected passkey. Cassie never reads or
 deploys the Splits API key. Hyperliquid still needs ETH at the master for bridge gas.
-Polymarket is blocked until its live bridge route can be validated. For Lighter, run the
-normal funding wizard and enter the Splits account address as the sender before proposing
-the same-chain transfer to its sender-bound intent address.
+Polymarket is blocked until its live bridge route can be validated.
 
 ### Withdrawals
 
@@ -163,8 +154,7 @@ the exact venue, amount, and destination and asks for confirmation. Withdrawals 
 the master/L1 key, which lives in the local keystore, so the command runs on the machine
 that holds it. Per venue: **Polymarket** transfers pUSD from the trading address on Polygon
 (gasless, uses the operator's Builder/Relayer key); **Hyperliquid** submits a user-signed
-withdrawal of USDC to the destination on Arbitrum ($1 venue fee, arrives in minutes);
-**Lighter** is unwired in the MVP — use the Lighter app with the L1 wallet.
+withdrawal of USDC to the destination on Arbitrum ($1 venue fee, arrives in minutes).
 
 ## 4. Command reference
 
@@ -201,7 +191,7 @@ Notes:
 
 - `trade` on Polymarket defaults `--outcome yes`; `marketRef` is always the **YES-token
   CLOB id** — NO-side orders set `--outcome no` and the adapter resolves the sibling token.
-- `--stop`/`--tp` map to **native** trigger orders on Hyperliquid and Lighter; on
+- `--stop`/`--tp` map to **native** trigger orders on Hyperliquid; on
   Polymarket they arm **synthetic** engine-managed triggers, best-effort at poll cadence
   (the CLI says so when you arm one). `--trail` is engine-managed everywhere.
 - Every order — strategy, manual, or thesis-driven — passes the risk module:
@@ -435,7 +425,7 @@ leverage figure itself.** No figure produced by an LLM ever reaches an order.
 
 The six questions, exactly as the CLI asks them (`cassie trade <botId> --thesis`):
 
-1. a. `Venue (hyperliquid / lighter / polymarket)`
+1. a. `Venue (hyperliquid / polymarket)`
    b. `Instrument (e.g. ETH, or YES-token id)`
    c. `Direction (long/short)` — or `Side (yes/no)` on Polymarket
 2. `Confidence (low / medium / high)`
@@ -485,11 +475,10 @@ otherwise it asks the operator. Exit is convergence or resolution, owned by flip
 |-------------|---------|--------------|--------|-------------------|
 | polymarket  | ✓       | synthetic    | ✓      | CLOB heartbeat (~10s window) |
 | hyperliquid | ✓       | ✓            | ✓      | scheduleCancel (10-min horizon, refreshed) |
-| lighter     | ✓       | ✓            | ✗      | scheduled cancel-all (15-min, refreshed) |
 
-Lighter's filesystem-backed WASM signer loads on a droplet the same way it loads on a
-laptop, so the technical blocker is gone. `cassie deploy` still refuses lighter until one
-verified droplet run happens.
+Lighter is not a supported venue. An adapter for it exists in the tree and `cassie init`
+does not offer it; `cassie deploy`, `cassie fund --from splits`, and `cassie withdraw`
+refuse it.
 
 Never attach a Polymarket bot EOA to a Splits account.
 
@@ -509,9 +498,6 @@ Never attach a Polymarket bot EOA to a Splits account.
 - **Hyperliquid deposit never credits** — did you send exactly ≥5 USDC on **Arbitrum** to
   the master address first, and was there ETH for gas? Amounts under 5 USDC are lost by
   the bridge.
-- **Lighter nonce errors** — each API key index has its own nonce, incremented by 1 per
-  tx and fetched from `next_nonce`. Run one bot process per API key; don't share index 2
-  across processes. Auth tokens expire after 8h and are re-derived automatically.
 - **Duplicate-looking ticks** — the runtime serializes engine work and the engine dedupes
   by interval-slot `tickId`. A restart inside an interval re-presents a slot that already
   completed; the log says so and skips it. That line is normal, not a second trade.
@@ -523,8 +509,7 @@ Never attach a Polymarket bot EOA to a Splits account.
   passphrase; re-import the key (`cassie wallet import`) if you have it elsewhere.
 - **`cassie deploy` fails immediately** — the DigitalOcean token is missing or lacks write
   scope, the account is at its droplet limit, or the region does not offer the size. The
-  error names which. Deploys run against your own DigitalOcean account. Lighter bots refuse
-  to deploy by design.
+  error names which. Deploys run against your own DigitalOcean account.
 - **`refusing to resume: Polymarket reports … as blocked`** — orders leave from the
   droplet, and the venue does not accept them from that region. Redeploy elsewhere:
   `cassie deploy <botId> --region <slug>`. The bot stays idle until one passes.

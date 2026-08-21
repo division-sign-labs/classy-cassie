@@ -133,7 +133,7 @@ export async function alertsTest(botId: string): Promise<void> {
 export function venueStatus(): void {
   const defaults = parseBotConfig({ id: "probe", venue: "polymarket" }).venueUrls;
   const rows: [string, string, string][] = [];
-  for (const venue of ["polymarket", "hyperliquid", "lighter"] as const) {
+  for (const venue of ["polymarket", "hyperliquid"] as const) {
     try {
       const adapter = createAdapter(venue, { urls: defaults });
       rows.push([venue, adapter.verifiedAgainst, adapter.supportsNativeTriggers ? "native triggers" : "synthetic triggers"]);

@@ -123,7 +123,7 @@ function writeFile(target: Target, path: string, content: string, mode: string, 
 export async function runDeploy(botId: string, opts: DeployOpts = {}): Promise<void> {
   const cfg = loadBotConfig(botId);
   if (cfg.venue === "lighter") {
-    throw new Error("lighter has not been verified on a droplet yet — use `cassie run`");
+    throw new Error("lighter is not a supported venue — use `cassie run`");
   }
   if (!cfg.account) throw new Error("bot has no venue account — finish `cassie init` first");
 

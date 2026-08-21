@@ -8,7 +8,7 @@ converge.
 Keys stay in an encrypted keystore on your machine. Quotient publishes the signals and
 holds neither keys nor funds.
 
-Venues: Polymarket, Hyperliquid, Lighter.
+Venues: Polymarket and Hyperliquid.
 
 Cassie is experimental software. It places real orders with real money, and you may lose
 funds. Check every funding destination. Quotient's signals are informational and are not
@@ -124,7 +124,7 @@ A deployed bot needs a key that can sign orders, so `cassie deploy` copies that 
 credential to the droplet over SSH and writes it to `/etc/cassie/<bot>.env`, readable only
 by the service user. On Polymarket that credential is the raw venue signer, which is why
 `cassie` refuses to let a Polymarket signer also hold Splits treasury authority. Master
-keys, Lighter L1 keys, and relayer keys stay on your machine.
+keys and relayer keys stay on your machine.
 
 Nothing secret goes into droplet user-data, into a command line, or into a log.
 

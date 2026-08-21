@@ -52,11 +52,10 @@ thesis arithmetic, keystore round-trips).
 |-------------|--------|-----------|--------|-------|
 | Polymarket  | ✓      | synthetic (engine-managed) | ✓ | the raw venue signer is deployed; keep it away from Splits authority |
 | Hyperliquid | ✓      | native    | ✓      | master/agent key split; the agent key is the only key a runtime sees |
-| Lighter     | ✓      | native    | ✗      | works on a droplet in principle; no verified run yet, so deploy refuses it |
 
-Adapters carry a `verifiedAgainst` date (`cassie venue status`). All three venues ship
-breaking changes on months-long cadence; SDK versions are pinned exactly and bumps must
-re-verify against live docs.
+Adapters carry a `verifiedAgainst` date (`cassie venue status`). Both venues ship breaking
+changes on months-long cadence; SDK versions are pinned exactly and bumps must re-verify
+against live docs.
 
 ## Deploy
 

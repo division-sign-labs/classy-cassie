@@ -1,13 +1,12 @@
 {
   "name": "@quotient-forecasting/cassie",
-  "version": "0.1.5",
+  "version": "0.2.0",
   "type": "module",
   "license": "Apache-2.0",
   "description": "Self-hosted, non-custodial trading bots for prediction markets and perps venues",
   "keywords": [
     "polymarket",
     "hyperliquid",
-    "lighter",
     "prediction-markets",
     "perps",
     "trading-bot",
@@ -45,7 +44,7 @@
     "README.md"
   ],
   "scripts": {
-    "build": "tsc -p tsconfig.json",
+    "build": "rm -rf dist && tsc -p tsconfig.json",
     "prepack": "pnpm build",
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },

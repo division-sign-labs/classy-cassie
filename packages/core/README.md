@@ -30,8 +30,8 @@ await engine.tick();
 on a monotonic sequence in the `StateStore`, so a repeated slot is skipped rather than
 traded twice. Every order it places passes the risk module first.
 
-Venues: Polymarket, Hyperliquid, Lighter. Each adapter carries a `verifiedAgainst` date;
-SDK versions are pinned exactly, and a bump has to be re-verified against live venue docs.
+Venues: Polymarket and Hyperliquid. Each adapter carries a `verifiedAgainst` date; SDK
+versions are pinned exactly, and a bump has to be re-verified against live venue docs.
 
 [Source](https://github.com/Quotient-Solutions-Inc/classy-cassie) ·
 [Apache-2.0](https://github.com/Quotient-Solutions-Inc/classy-cassie/blob/main/LICENSE)

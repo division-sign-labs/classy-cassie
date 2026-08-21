@@ -1,7 +1,7 @@
 {
   "name": "cassie-monorepo",
   "private": true,
-  "version": "0.1.5",
+  "version": "0.2.0",
   "packageManager": "pnpm@10.15.0",
   "engines": {
     "node": ">=24"
@@ -18,6 +18,9 @@
     "@types/node": "24.2.1"
   },
   "pnpm": {
-    "onlyBuiltDependencies": ["better-sqlite3", "esbuild"]
+    "onlyBuiltDependencies": [
+      "better-sqlite3",
+      "esbuild"
+    ]
   }
 }

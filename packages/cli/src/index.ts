@@ -108,7 +108,7 @@ program
   .option("--size <n>", "size in base units (shares/contracts)")
   .option("--limit <px>", "limit price (default: crossing limit within slippage band)")
   .option("--tif <tif>", "gtc|ioc|fok", "gtc")
-  .option("--stop <px>", "stop trigger (native on HL/Lighter, synthetic on Polymarket)")
+  .option("--stop <px>", "stop trigger (native on Hyperliquid, synthetic on Polymarket)")
   .option("--trail <bps>", "trailing stop distance in bps (engine-managed)")
   .option("--tp <px>", "take-profit trigger")
   .option("--outcome <yes|no>", "prediction venues: which outcome token")

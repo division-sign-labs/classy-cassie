@@ -134,10 +134,12 @@ export async function runInit(): Promise<void> {
     venue = state.venue;
   } else {
     if (existing && !(await confirm(`bot "${botId}" exists — reconfigure it?`, false))) return;
-    const requestedVenue = (await ask("Venue (polymarket / hyperliquid / lighter)", { default: existing?.venue ?? "polymarket" }))
+    const requestedVenue = (await ask("Venue (polymarket / hyperliquid)", { default: existing?.venue ?? "polymarket" }))
       .trim()
       .toLowerCase();
-    if (!["polymarket", "hyperliquid", "lighter"].includes(requestedVenue)) {
+    // Lighter has an adapter but is not a supported venue; the wizard does not
+    // offer it, and an existing lighter config still loads.
+    if (!["polymarket", "hyperliquid"].includes(requestedVenue)) {
       throw new Error(`unknown venue "${requestedVenue}"`);
     }
     venue = requestedVenue as BotConfig["venue"];
