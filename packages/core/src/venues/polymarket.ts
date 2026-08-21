@@ -18,6 +18,7 @@ import {
   buildHmacSignature,
   createPublicClient as createPmPublicClient,
   createSecureClient,
+  forkEnvironmentConfig,
   production,
   relayerApiKey,
   OrderSide as PmOrderSide,
@@ -38,16 +39,23 @@ const PUSD_ADDRESS = "0xC011a7E12a19f7B1f670d46F03B03f3342E82DFB";
 // Public Polygon RPCs for read-only approval verification. Ordered fallback:
 // a dead endpoint moves to the next, and a total outage degrades to "cannot
 // verify" (treated as unapproved so the flow errs on the side of retrying).
-const POLYGON_RPCS = ["https://polygon-rpc.com", "https://1rpc.io/matic", "https://polygon-bor-rpc.publicnode.com"];
+const PUBLIC_POLYGON_RPCS = ["https://polygon-rpc.com", "https://1rpc.io/matic", "https://polygon-bor-rpc.publicnode.com"];
 
 /** ERC-1155 isApprovedForAll(owner, operator), read from the chain itself. */
-async function isApprovedForAllOnChain(token: string, owner: string, operator: string): Promise<boolean> {
+async function isApprovedForAllOnChain(
+  token: string,
+  owner: string,
+  operator: string,
+  rpc?: string,
+): Promise<boolean> {
   const pad = (addr: string) => addr.toLowerCase().replace(/^0x/, "").padStart(64, "0");
   const data = "0xe985e9c5" + pad(owner) + pad(operator); // isApprovedForAll(address,address)
-  for (const rpc of POLYGON_RPCS) {
+  // A configured RPC goes first: the public ones are rate-limited, and some
+  // networks cannot complete a TLS handshake with them at all.
+  for (const endpoint of rpc ? [rpc, ...PUBLIC_POLYGON_RPCS] : PUBLIC_POLYGON_RPCS) {
     try {
       const res = (await (
-        await fetch(rpc, {
+        await fetch(endpoint, {
           method: "POST",
           headers: { "content-type": "application/json" },
           body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "eth_call", params: [{ to: token, data }, "latest"] }),
@@ -150,8 +158,22 @@ export class PolymarketAdapter implements VenueAdapter {
     return this.opts.urls.polymarket;
   }
 
+  /**
+   * The SDK talks to its own hardcoded Polygon RPC unless handed an environment.
+   * Forking production onto a configured RPC keeps every chain read and
+   * transaction wait on an endpoint the operator controls.
+   */
+  private get environment(): { environment: ReturnType<typeof forkEnvironmentConfig> } | Record<string, never> {
+    const rpc = this.urls.rpc;
+    if (!rpc) return {};
+    this.forkedEnvironment ??= forkEnvironmentConfig({ name: "production", rpc });
+    return { environment: this.forkedEnvironment };
+  }
+
+  private forkedEnvironment?: ReturnType<typeof forkEnvironmentConfig>;
+
   private pub(): PmPublicClient {
-    this.publicClient ??= createPmPublicClient();
+    this.publicClient ??= createPmPublicClient({ ...this.environment });
     return this.publicClient;
   }
 
@@ -161,6 +183,7 @@ export class PolymarketAdapter implements VenueAdapter {
       throw new Error("polymarket: no runtime credentials — run `cassie init`/`cassie fund` first");
     }
     this.secureClient = await createSecureClient({
+      ...this.environment,
       signer: privateKey(this.creds.signerPk),
       wallet: this.creds.funder,
       credentials: {
@@ -210,6 +233,7 @@ export class PolymarketAdapter implements VenueAdapter {
 
     ctx.print("Creating/deriving Polymarket account and CLOB credentials (gasless)…");
     const client = await createSecureClient({
+      ...this.environment,
       signer: privateKey(pk),
       ...(wallet ? { wallet } : {}),
       ...(apiKey ? { apiKey } : {}),
@@ -424,7 +448,7 @@ export class PolymarketAdapter implements VenueAdapter {
     // and verify against the chain itself — not a venue-side cache — before
     // declaring the flow complete.
     const wallet = client.account.wallet;
-    if (!(await isApprovedForAllOnChain(conditionalTokens, wallet, negRiskAdapter))) {
+    if (!(await isApprovedForAllOnChain(conditionalTokens, wallet, negRiskAdapter, this.urls.rpc))) {
       ctx.print("Approving the exchange as CTF operator (required for sells)…");
       const handle = await client.approveErc1155ForAll({
         operatorAddress: negRiskAdapter,
@@ -435,7 +459,7 @@ export class PolymarketAdapter implements VenueAdapter {
       // The relayer has been observed acking transactions that never mine;
       // poll the chain until the approval is real.
       const confirmed = await pollUntil(
-        () => isApprovedForAllOnChain(conditionalTokens, wallet, negRiskAdapter),
+        () => isApprovedForAllOnChain(conditionalTokens, wallet, negRiskAdapter, this.urls.rpc),
         { attempts: 12, delayMs: 10_000 },
       );
       if (!confirmed) {
@@ -527,6 +551,7 @@ export class PolymarketAdapter implements VenueAdapter {
     const gaslessRaw = await ctx.getSecret(GASLESS_AUTH_ROLE);
     if (!gaslessRaw) return this.secure();
     return createSecureClient({
+      ...this.environment,
       signer: privateKey(this.creds!.signerPk),
       wallet: a.funder,
       apiKey: apiKeyFromDesc(JSON.parse(gaslessRaw) as GaslessAuthDesc),
@@ -574,7 +599,7 @@ export class PolymarketAdapter implements VenueAdapter {
       this.creds = { venue: "polymarket", signerPk: pk, funder: a.funder, signatureType: a.signatureType, l2: JSON.parse(l2raw) };
       return;
     }
-    const client = await createSecureClient({ signer: privateKey(pk), wallet: a.funder });
+    const client = await createSecureClient({ ...this.environment, signer: privateKey(pk), wallet: a.funder });
     this.secureClient = client;
     const l2 = client.credentials;
     this.creds = {

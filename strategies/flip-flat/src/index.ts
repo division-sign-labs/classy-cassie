@@ -19,9 +19,9 @@ export const FlipFlatConfigSchema = z.object({
   /** Hold at most the top N eligible signals, ranked by edge. */
   topN: z.number().int().positive().default(2),
   /** Cumulative entry notional allowed per UTC day. */
-  dailyBudgetUsd: z.number().positive().default(25),
+  dailyBudgetUsd: z.number().positive().default(100),
   /** Desired notional for each entry as a percentage of the daily budget. */
-  positionBudgetPct: z.number().positive().max(100).default(50),
+  positionBudgetPct: z.number().positive().max(100).default(25),
   /** Entry-only floor after sizing and capacity caps. Exits are never subject to it. */
   minEntryNotional: z.number().nonnegative().default(1),
   /** Explicit marketRefs, or "from-signals" to trade whatever is signaled. */

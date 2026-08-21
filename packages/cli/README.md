@@ -130,8 +130,8 @@ Nothing secret goes into droplet user-data, into a command line, or into a log.
 
 ## Risk
 
-Every order — strategy, manual, or thesis — passes engine-enforced limits: a slippage band
-around mid, a depth cap of 25% of in-band liquidity, a 24-hour volume floor, a per-order
+Every order — strategy, manual, or thesis — passes engine-enforced limits: a 3% slippage band
+from the best executable price, available in-band liquidity, a 24-hour volume floor, a per-order
 notional cap, a minimum viable size, and a TTL that re-prices or cancels a resting
 remainder. Skipped orders raise an alert saying which limit stopped them.
 

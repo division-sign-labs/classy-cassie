@@ -18,6 +18,7 @@ import {
 import { dirs } from "./paths.js";
 import { getOperatorDefault, setOperatorDefault } from "./defaults.js";
 import { controlCall, type Target } from "./ssh.js";
+import { resolveLocalValue } from "./local-env.js";
 
 let cachedPassphrase: string | undefined;
 
@@ -167,12 +168,24 @@ export function requireAccount(cfg: BotConfig): NonNullable<BotConfig["account"]
   return cfg.account;
 }
 
+/**
+ * An operator-supplied Polygon RPC, for chain reads and transaction waits. The
+ * public endpoints are rate-limited, and some networks cannot complete a TLS
+ * handshake with them at all, which surfaces as a bare "fetch failed".
+ */
+export function withOperatorRpc(cfg: BotConfig): BotConfig["venueUrls"] {
+  if (cfg.venue !== "polymarket" || cfg.venueUrls.polymarket.rpc) return cfg.venueUrls;
+  const rpc = resolveLocalValue(["POLYGON_RPC_URL", "POLYGON_RPC"]);
+  if (!rpc) return cfg.venueUrls;
+  return { ...cfg.venueUrls, polymarket: { ...cfg.venueUrls.polymarket, rpc: rpc.value } };
+}
+
 export async function adapterFor(cfg: BotConfig, opts: { needCreds?: boolean; fixtureBooks?: string } = {}): Promise<VenueAdapter> {
   const creds = opts.needCreds === false ? undefined : await buildRuntimeCreds(cfg).catch((err) => {
     if (opts.needCreds) throw err;
     return undefined;
   });
-  return createAdapter(cfg.venue, { urls: cfg.venueUrls, creds, fixtureBooks: opts.fixtureBooks });
+  return createAdapter(cfg.venue, { urls: withOperatorRpc(cfg), creds, fixtureBooks: opts.fixtureBooks });
 }
 
 export async function getKeystoreSecret(botId: string, role: string): Promise<string | null> {

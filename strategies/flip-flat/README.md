@@ -12,7 +12,7 @@ what it actually placed. The UTC reset replenishes entry capacity without closin
 Tune it through the CLI rather than in code:
 
 ```sh
-cassie strategy <botId> --top 3 --daily-budget 100 --position-budget-pct 33
+cassie strategy <botId> --top 2 --daily-budget 100 --position-budget-pct 25
 ```
 
 Every entry still passes the engine's per-order, liquidity, spread, and volume guardrails.

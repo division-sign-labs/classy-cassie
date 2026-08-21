@@ -9,15 +9,15 @@ import { loadBotConfig, saveBotConfig } from "../paths.js";
 
 export const RECOMMENDED_STRATEGY = {
   topN: 2,
-  dailyBudgetUsd: 25,
-  positionBudgetPct: 50,
+  dailyBudgetUsd: 100,
+  positionBudgetPct: 25,
   entrySpreadPp: 10,
   minEntryNotional: 1,
   universe: "from-signals",
   tickIntervalMin: 5,
 } as const;
 
-export const RECOMMENDED_SUMMARY = "up to 2 positions, widest eligible edges first, 50% of the daily budget per entry, 10pp minimum edge";
+export const RECOMMENDED_SUMMARY = "up to 2 positions, widest eligible edges first, $100 daily budget, $25 per entry, 10pp minimum edge";
 
 export async function elicitRecommendedStrategyConfig(
   current: Record<string, unknown> = {},
@@ -36,11 +36,11 @@ export async function elicitStrategyConfig(current: Record<string, unknown> = {}
   const topN = positiveInteger("top positions", await ask("Top N signal positions", { default: d("topN", "2") }));
   const dailyBudgetUsd = positiveNumber(
     "daily entry budget",
-    await ask("Daily entry budget ($, resets at 00:00 UTC)", { default: d("dailyBudgetUsd", "25") }),
+    await ask("Daily entry budget ($, resets at 00:00 UTC)", { default: d("dailyBudgetUsd", "100") }),
   );
   const positionBudgetPct = percentage(
     "budget per position",
-    await ask("Daily budget per position (%)", { default: d("positionBudgetPct", "50") }),
+    await ask("Daily budget per position (%)", { default: d("positionBudgetPct", "25") }),
   );
   const entrySpreadPp = positiveNumber("entry spread", await ask("Minimum entry edge (pp)", { default: d("entrySpreadPp", "10") }));
   const minEntryNotional = nonnegativeNumber(
@@ -90,7 +90,7 @@ export async function runStrategy(botId: string, opts: StrategyOptions = {}): Pr
         : positiveNumber("signal max age hours", opts.signalMaxAgeHours) * 60 * 60;
     const risk = {
       ...cfg.risk,
-      ...(opts.slippage === undefined ? {} : { slippageCents: positiveNumber("slippage cents", opts.slippage) }),
+      ...(opts.slippage === undefined ? {} : { slippagePct: percentage("slippage", opts.slippage) }),
       ...(opts.maxOrderNotional === undefined
         ? {}
         : { maxOrderNotional: positiveNumber("maximum order notional", opts.maxOrderNotional) }),
@@ -147,7 +147,7 @@ function normalizeStrategyConfig(config: Record<string, unknown>): Record<string
 function printStrategy(
   config: Record<string, unknown>,
   maxAgeSec: number,
-  risk: { maxOrderNotional: number; slippageCents: number },
+  risk: { maxOrderNotional: number; slippagePct: number },
 ): void {
   const current = { ...RECOMMENDED_STRATEGY, ...normalizeStrategyConfig(config) };
   const dailyBudgetUsd = Number(current.dailyBudgetUsd);
@@ -158,7 +158,7 @@ function printStrategy(
   console.log(`  budget per entry:     ${positionBudgetPct}% = $${perEntryUsd.toFixed(2)} before liquidity/risk caps`);
   console.log(`  minimum entry edge:   ${current.entrySpreadPp}pp`);
   console.log(`  minimum viable entry: $${Number(current.minEntryNotional).toFixed(2)}`);
-  console.log(`  slippage:             ${risk.slippageCents}¢ from best executable price`);
+  console.log(`  slippage:             ${risk.slippagePct}% from best executable price`);
   console.log(`  hard per-order cap:   $${risk.maxOrderNotional.toFixed(2)} (risk module)`);
   console.log(`  signal max age:       ${(maxAgeSec / 3600).toFixed(2)}h`);
   console.log(`  tick interval:        ${current.tickIntervalMin} min`);

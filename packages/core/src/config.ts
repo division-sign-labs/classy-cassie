@@ -8,29 +8,29 @@ import { z } from "zod";
 export const DEFAULT_SIGNAL_MAX_AGE_SEC = 3 * 60 * 60;
 
 export const RiskConfigSchema = z.preprocess(
-  // Migrate pre-slippage configs: maxBookWalkCents carries over; the removed
-  // bps knobs (maxSlippageBps, maxSpreadBps) are dropped — slippage from the
-  // best executable price is the one operator-facing control.
+  // Migrate earlier execution controls onto the single percentage setting.
   (raw) => {
     if (typeof raw !== "object" || raw === null) return raw;
     const legacy = raw as Record<string, unknown>;
-    if (legacy.slippageCents === undefined && typeof legacy.maxBookWalkCents === "number") {
-      return { ...legacy, slippageCents: legacy.maxBookWalkCents };
+    const migrated = legacy.depthCapPct === 25 ? { ...legacy, depthCapPct: 100 } : legacy;
+    if (migrated.slippagePct === undefined) {
+      if (typeof migrated.slippageCents === "number") return { ...migrated, slippagePct: migrated.slippageCents };
+      if (typeof migrated.maxBookWalkCents === "number") return { ...migrated, slippagePct: migrated.maxBookWalkCents };
     }
-    return raw;
+    return migrated;
   },
   z.object({
     /**
-     * Slippage tolerance, in cents from the best executable price (the touch).
+     * Slippage tolerance as a percentage from the best executable price.
      * Bounds both the capacity band and the crossing limit: an order may walk
      * the book at most this far past the best bid/ask. The single
      * operator-facing execution-quality control; set it per bot with
-     * `cassie strategy <botId> --slippage <cents>` or per order with
-     * `cassie trade … --slippage <cents>`.
+     * `cassie strategy <botId> --slippage <pct>` or per order with
+     * `cassie trade … --slippage <pct>`.
      */
-    slippageCents: z.number().positive().max(99).default(2),
-    /** Cap order size at this % of executable depth within the band. */
-    depthCapPct: z.number().positive().max(100).default(25),
+    slippagePct: z.number().positive().max(100).default(3),
+    /** Cap order size at this % of executable depth within the band. Defaults to no extra cap. */
+    depthCapPct: z.number().positive().max(100).default(100),
     /** Market eligibility floor: 24h volume in USD. */
     minDailyVolume: z.number().nonnegative().default(10_000),
     /** Skip rather than dribble below this notional. */
@@ -106,6 +106,8 @@ export const VenueUrlsSchema = z.object({
   polymarket: z
     .object({
       chainId: z.number().default(137),
+      /** Polygon RPC for chain reads and transaction waits. Defaults to the SDK's. */
+      rpc: z.string().optional(),
       clob: z.string().default("https://clob.polymarket.com"),
       gamma: z.string().default("https://gamma-api.polymarket.com"),
       data: z.string().default("https://data-api.polymarket.com"),

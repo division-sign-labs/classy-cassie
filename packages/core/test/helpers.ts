@@ -37,7 +37,7 @@ export function buildFixtureEngine() {
     venue: "polymarket",
     // Half a cent keeps only the touch level of the fixture book in-band, so
     // the depth-cap path stays exercised (25% of 40 = 10 shares).
-    risk: { slippageCents: 0.5 },
+    risk: { slippagePct: 1, depthCapPct: 20 },
     strategy: {
       id: "flip-flat",
       config: { entrySpreadPp: 10, topN: 2, dailyBudgetUsd: 25, positionBudgetPct: 50 },

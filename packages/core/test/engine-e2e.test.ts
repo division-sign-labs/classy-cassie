@@ -23,11 +23,11 @@ describe("flip-flat against fixtures (offline e2e)", () => {
     let positions = await venue.positions();
     expect(positions).toHaveLength(1);
     expect(positions[0]).toMatchObject({ marketRef: "fx-yes-1", side: "YES" });
-    // 25% of the 40 shares in-band at limit 0.565 (touch + 0.5¢ slippage).
-    expect(positions[0]!.size).toBe(10);
+    // 20% of the 40 shares in-band at limit 0.5656 (1% from the touch).
+    expect(positions[0]!.size).toBe(8);
     expect(positions[0]!.avgPrice).toBeCloseTo(0.56, 10);
     const budget = JSON.parse((await state.get(StateKeys.strategyMemory("daily-entry-budget")))!);
-    expect(budget.placedUsd).toBeCloseTo(5.65, 3);
+    expect(budget.placedUsd).toBeCloseTo(4.5248, 3);
 
     // Tick 2: same side → hold. Fill from tick 1 is reconciled + alerted now.
     const t2 = await engine.tick();
@@ -35,9 +35,9 @@ describe("flip-flat against fixtures (offline e2e)", () => {
     expect(alerter.ofKind("entry")).toHaveLength(1); // no new entry
     const fillsAfterT2 = alerter.ofKind("fill");
     expect(fillsAfterT2).toHaveLength(1);
-    expect(fillsAfterT2[0]!.message).toMatch(/fill: BUY 10 fx-yes-1 @ 0.56/);
+    expect(fillsAfterT2[0]!.message).toMatch(/fill: BUY 8 fx-yes-1 @ 0.56/);
     positions = await venue.positions();
-    expect(positions[0]!.size).toBe(10);
+    expect(positions[0]!.size).toBe(8);
 
     // Tick 3: the signal moves to NO at 0.70, valuing the held YES at 0.30 —
     // the forecast has crossed below the price, so the convergence exit fires.
@@ -60,13 +60,13 @@ describe("flip-flat against fixtures (offline e2e)", () => {
     expect(alerter.ofKind("entry")[1]!.message).toMatch(/enter NO/);
     const fillsAfterT4 = alerter.ofKind("fill");
     expect(fillsAfterT4).toHaveLength(2);
-    expect(fillsAfterT4.map((f) => f.message).join("\n")).toMatch(/SELL 10/);
+    expect(fillsAfterT4.map((f) => f.message).join("\n")).toMatch(/SELL 8/);
 
     positions = await venue.positions();
     expect(positions).toHaveLength(1);
     expect(positions[0]!.side).toBe("NO");
-    // NO entry: mirrored asks give 50 in-band at 0.4635 → 25% = 12.5 @ 0.46.
-    expect(positions[0]!.size).toBe(12.5);
+    // NO entry: mirrored asks give 50 in-band at 0.4646 → 20% = 10 @ 0.46.
+    expect(positions[0]!.size).toBe(10);
     expect(positions[0]!.avgPrice).toBeCloseTo(0.46, 10);
 
     // Tick 5: reconcile the tick-4 BUY fill; NO position holds (24pp of edge).
@@ -74,7 +74,7 @@ describe("flip-flat against fixtures (offline e2e)", () => {
     expect(t5.ordersPlaced).toBe(0);
     const fills = alerter.ofKind("fill");
     expect(fills).toHaveLength(3);
-    expect(fills.map((f) => f.message).join("\n")).toMatch(/BUY 12.5/);
+    expect(fills.map((f) => f.message).join("\n")).toMatch(/BUY 10/);
     // No error alerts anywhere in the run.
     expect(alerter.ofKind("error")).toHaveLength(0);
   });

@@ -103,9 +103,9 @@ Every step happens in the terminal; you only leave it to copy-paste dashboard va
 7. **Strategy** — one strategy: `signals` (follow Quotient signals, hold until Q's
    forecast converges with the market price; positions with remaining edge are held
    regardless of P&L). The recommended allocation holds up to 2 positions, prioritizes the widest
-   eligible edges for new entries, and requests 50% of the daily entry budget per position;
+   eligible edges for new entries, with a $100 daily budget and $25 requested per entry;
    the wizard always asks for the
-   dollar budget (default $25). The budget resets at 00:00 UTC, counts only entry notional
+   dollar budget (default $100). The budget resets at 00:00 UTC, counts only entry notional
    actually placed after risk/capacity limits, and does not close positions when it resets.
    Declining the recommendation asks for top N, daily budget, allocation percentage, entry
    edge, minimum viable entry, tick interval, and universe. `cassie strategy <botId>`
@@ -178,7 +178,7 @@ cassie reporting <botId> [--no-post|--off]   # configure Ares for this bot only
 cassie portfolio [botId]                     # balances/positions/orders/PnL, per bot + aggregate
 cassie orders <botId> [--cancel <id>] [--cancel-all]
 cassie trade <botId> buy|sell <marketRef> --size <n> [--limit <px>] [--tif gtc|ioc|fok]
-             [--slippage <cents>] [--stop <px>] [--trail <bps>] [--tp <px>] [--outcome yes|no] [-y]
+             [--slippage <pct>] [--stop <px>] [--trail <bps>] [--tp <px>] [--outcome yes|no] [-y]
 cassie trade <botId> --thesis [--save <file>] [--mappings <file>]   # develop a trade from a thesis
 cassie trade <botId> --from-thesis <file> [--mappings <file>]       # place a saved thesis
 cassie logs <botId> [--tail <n>] [-f] [--since '1 hour ago']   # the droplet's journal
@@ -195,9 +195,10 @@ Notes:
   Polymarket they arm **synthetic** engine-managed triggers, best-effort at poll cadence
   (the CLI says so when you arm one). `--trail` is engine-managed everywhere.
 - Every order — strategy, manual, or thesis-driven — passes the risk module:
-  slippage (cents of book walk from the best price, default 2¢ — set per bot with
-  `cassie strategy <botId> --slippage <cents>` or per order with `--slippage`), depth cap
-  (25% of in-band depth by default), 24h volume floor ($10k), min-viable-notional. Skips
+  slippage (percentage of book walk from the best price, default 3% — set per bot with
+  `cassie strategy <botId> --slippage <pct>` or per order with `--slippage`), available
+  in-band depth, 24h volume floor ($10k), and min-viable-notional. There is no additional
+  depth-percentage cap by default. Skips
   raise alerts. There is no quoted-spread gate: a wide market with depth at the touch is
   tradable, because execution cost is bounded by the slippage band, not the quote.
 - For a deployed bot, `portfolio`, `trade`, `orders`, `status`, and `logs` reach the

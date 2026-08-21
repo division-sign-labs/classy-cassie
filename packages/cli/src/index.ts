@@ -113,7 +113,7 @@ program
   .option("--tp <px>", "take-profit trigger")
   .option("--outcome <yes|no>", "prediction venues: which outcome token")
   .option("--note <text>", "rationale for the trade; becomes the caption if the bot publishes to a feed")
-  .option("--slippage <cents>", "max book walk from the best price for this order, in cents (default: bot risk config)")
+  .option("--slippage <pct>", "max book walk from the best price, as a percentage (default: bot risk config)")
   .option("--thesis", "six questions → sized, guardrailed trade → approve → place (numbers computed in code)")
   .option("--save <file>", "with --thesis: also save the thesis JSON for reuse")
   .option("--from-thesis <file>", "place from a saved thesis JSON")
@@ -142,7 +142,7 @@ program
   .option("--position-budget-pct <pct>", "percentage of the daily budget requested per entry")
   .option("--min-entry-notional <usd>", "entry-only floor after sizing and capacity caps")
   .option("--signal-max-age-hours <hours>", "maximum age of a live signal")
-  .option("--slippage <cents>", "max book walk from the best executable price, in cents")
+  .option("--slippage <pct>", "max book walk from the best executable price, as a percentage")
   .option("--max-order-notional <usd>", "hard per-order notional cap in the risk module")
   .action(wrap(runStrategy));
 

@@ -64,7 +64,7 @@ export interface TradeOpts {
   yes?: boolean;
   /** Human rationale; the feed caption when the bot publishes (§Ares). */
   note?: string;
-  /** Per-order slippage tolerance in cents from the touch. */
+  /** Per-order slippage tolerance as a percentage from the touch. */
   slippage?: string;
 }
 
@@ -120,8 +120,8 @@ export async function runTrade(botId: string, sideArg: string | undefined, marke
   const size = Number(opts.size);
   if (!Number.isFinite(size) || size <= 0) throw new Error("--size <n> required (base units: shares/contracts)");
   if (opts.slippage !== undefined) {
-    const cents = Number(opts.slippage);
-    if (!Number.isFinite(cents) || cents <= 0 || cents >= 100) throw new Error("--slippage <cents> must be between 0 and 100");
+    const pct = Number(opts.slippage);
+    if (!Number.isFinite(pct) || pct <= 0 || pct > 100) throw new Error("--slippage <pct> must be between 0 and 100");
   }
 
   const params: ManualOrderParams = {
@@ -135,7 +135,7 @@ export async function runTrade(botId: string, sideArg: string | undefined, marke
     tpPx: opts.tp !== undefined ? Number(opts.tp) : undefined,
     trailBps: opts.trail !== undefined ? Number(opts.trail) : undefined,
     note: opts.note,
-    slippageCents: opts.slippage !== undefined ? Number(opts.slippage) : undefined,
+    slippagePct: opts.slippage !== undefined ? Number(opts.slippage) : undefined,
   };
 
   console.log(pc.bold("order:"));

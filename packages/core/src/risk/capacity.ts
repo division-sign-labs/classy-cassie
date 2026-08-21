@@ -32,7 +32,7 @@ export interface CapacityResult {
 }
 
 /**
- * Compute executable size within the slippage band — `risk.slippageCents`
+ * Compute executable size within the slippage band — `risk.slippagePct`
  * measured from the best executable price (the touch) — cap at
  * min(desired, depthCapPct × bandDepth, maxOrderNotional), enforce the
  * volume eligibility floor and minViableNotional. Execution quality is
@@ -48,8 +48,8 @@ export function checkCapacity(input: CapacityInput): CapacityResult {
 
   const levels = side === "BUY" ? book.asks : book.bids;
   const touch = levels[0]?.price;
-  const band = risk.slippageCents / 100;
   const anchor = touch ?? quote.mid;
+  const band = anchor * (risk.slippagePct / 100);
   const limitPrice = side === "BUY" ? anchor + band : anchor - band;
 
   // Market eligibility floor (§9).
@@ -65,7 +65,7 @@ export function checkCapacity(input: CapacityInput): CapacityResult {
     bandDepth += lvl.size;
   }
   if (bandDepth <= 0) {
-    skipReasons.push(`no depth within ${risk.slippageCents}¢ of best ${side === "BUY" ? "ask" : "bid"}`);
+    skipReasons.push(`no depth within ${risk.slippagePct}% of best ${side === "BUY" ? "ask" : "bid"}`);
   }
 
   const depthCap = bandDepth * (risk.depthCapPct / 100);

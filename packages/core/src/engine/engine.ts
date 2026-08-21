@@ -58,8 +58,8 @@ export interface ManualOrderParams {
   trailBps?: number;
   /** Skip §9 volume-floor eligibility (still slippage/depth-capped). Manual override only. */
   ignoreVolumeFloor?: boolean;
-  /** Per-order slippage tolerance in cents from the touch; overrides risk.slippageCents. */
-  slippageCents?: number;
+  /** Per-order slippage tolerance as a percentage from the touch; overrides risk.slippagePct. */
+  slippagePct?: number;
   /**
    * Human-facing rationale for this trade, written for readers rather than
    * logs — a thesis `reasoningSummary`, or `--note` on the CLI. Carried into
@@ -399,7 +399,7 @@ export class Engine {
     const risk = {
       ...config.risk,
       ...(p.ignoreVolumeFloor ? { minDailyVolume: 0 } : {}),
-      ...(p.slippageCents !== undefined ? { slippageCents: p.slippageCents } : {}),
+      ...(p.slippagePct !== undefined ? { slippagePct: p.slippagePct } : {}),
     };
     const cap = checkCapacity({ side: p.side, desiredSize: p.size, refPrice, book, quote, risk });
     if (!cap.ok) {

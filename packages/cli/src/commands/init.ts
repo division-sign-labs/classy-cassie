@@ -13,7 +13,7 @@ import {
   parseBotConfig,
   type BotConfig,
 } from "@quotient-forecasting/cassie-core";
-import { ask, confirm, getPassphrase, keystore, makeSetupContext, select } from "../context.js";
+import { ask, confirm, getPassphrase, keystore, makeSetupContext, select, withOperatorRpc } from "../context.js";
 import { clearInitState, loadInitState, saveInitState, type InitState } from "../init-state.js";
 import { botConfigPath, loadBotConfig, saveBotConfig } from "../paths.js";
 import { createSplitsTreasury } from "../splits-init.js";
@@ -277,7 +277,7 @@ export async function runInit(): Promise<void> {
   // Venue account provisioning (wizard-driven, adapter-owned).
   const setupCtx = makeSetupContext(botId);
   const adapter = createAdapter(venue, {
-    urls: parseBotConfig({ id: botId, venue, venueUrls: existing?.venueUrls }).venueUrls,
+    urls: withOperatorRpc(parseBotConfig({ id: botId, venue, venueUrls: existing?.venueUrls })),
   });
   // An account already provisioned for this bot is reused by default: re-running
   // the wizard to change a strategy setting should never re-provision a Polymarket

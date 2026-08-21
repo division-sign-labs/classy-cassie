@@ -14,7 +14,7 @@ describe("engine tick idempotency", () => {
     expect(first.skipped).toBe(false);
     expect(first.ordersPlaced).toBe(1);
     const posAfterFirst = await venue.positions();
-    expect(posAfterFirst[0]!.size).toBe(10);
+    expect(posAfterFirst[0]!.size).toBe(8);
     const alertCount = alerter.events.length;
 
     // Forced retry: same tickId.
@@ -26,7 +26,7 @@ describe("engine tick idempotency", () => {
     // Nothing changed: no double entry, no new alerts.
     const posAfterRetry = await venue.positions();
     expect(posAfterRetry).toHaveLength(1);
-    expect(posAfterRetry[0]!.size).toBe(10);
+    expect(posAfterRetry[0]!.size).toBe(8);
     expect(alerter.events.length).toBe(alertCount);
   });
 
