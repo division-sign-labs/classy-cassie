@@ -52,6 +52,10 @@ export async function handle(service: BotService, request: IncomingMessage, resp
     send(response, { ok: true, ...(await service.geoblockCheck()) });
     return;
   }
+  if (method === "GET" && action === "venue/check") {
+    send(response, { ok: true, ...(await service.venueAccessCheck()) });
+    return;
+  }
   if (method === "GET" && action === "portfolio") {
     send(response, await service.portfolio());
     return;
@@ -66,6 +70,18 @@ export async function handle(service: BotService, request: IncomingMessage, resp
   }
   if (method === "GET" && action === "reporting/check") {
     send(response, await service.reportingCheck());
+    return;
+  }
+  if (method === "GET" && action === "agent/check") {
+    send(response, await service.agentCheck());
+    return;
+  }
+  if (method === "GET" && action === "agent/status") {
+    send(response, await service.agentStatus());
+    return;
+  }
+  if (method === "POST" && action === "agent/dry-run") {
+    send(response, await service.agentDryRun());
     return;
   }
   if (method === "GET" && action === "logs") {

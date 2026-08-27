@@ -127,6 +127,14 @@ export const VenueUrlsSchema = z.object({
       api: z.string().default("https://mainnet.zklighter.elliot.ai"),
     })
     .prefault({}),
+  kalshi: z
+    .object({
+      api: z.string().default("https://api.elections.kalshi.com/trade-api/v2"),
+      demoApi: z.string().default("https://demo-api.kalshi.co/trade-api/v2"),
+      /** Trade against Kalshi's demo environment (separate keys, paper funds). */
+      demo: z.boolean().default(false),
+    })
+    .prefault({}),
 });
 export type VenueUrls = z.output<typeof VenueUrlsSchema>;
 
@@ -211,6 +219,11 @@ export const VenueAccountSchema = z.discriminatedUnion("venue", [
     apiKeyIndex: z.number().optional(),
     intentAddresses: z.record(z.string(), z.string()).optional(),
   }),
+  z.object({
+    venue: z.literal("kalshi"),
+    /** Kalshi API key id (UUID, non-secret). The RSA private key lives in the keystore. */
+    keyId: z.string().min(1),
+  }),
 ]);
 
 /** Where a deployed bot runs. `cassie deploy` writes it; `cassie destroy` clears it. */
@@ -228,7 +241,7 @@ export const DeploymentSchema = z.object({
 export const BotConfigSchema = z
   .object({
     id: z.string().regex(/^[a-z0-9][a-z0-9-]{0,31}$/, "bot id: lowercase alphanumerics and dashes, max 32 chars"),
-    venue: z.enum(["polymarket", "hyperliquid", "lighter"]),
+    venue: z.enum(["polymarket", "kalshi", "hyperliquid", "lighter"]),
     account: VenueAccountSchema.optional(),
     wallet: WalletConfigSchema.prefault({}),
     treasury: SplitsTreasurySchema.optional(),
@@ -276,6 +289,8 @@ export const BotConfigSchema = z
         message: `account venue ${config.account.venue} does not match bot venue ${config.venue}`,
       });
     }
+    // Kalshi accounts carry no wallet address (API-key auth), so they yield
+    // undefined here and skip the wallet/account cross-check.
     const accountWalletAddress =
       config.account?.venue === "polymarket"
         ? config.account.signerAddress

@@ -9,6 +9,7 @@ import { buildRuntimeCreds, confirm, getKeystoreSecret } from "../context.js";
 import { loadBotConfig, saveBotConfig } from "../paths.js";
 import { resolveQuotientToken } from "../quotient-token.js";
 import { discoverAresBuilderCode, resolveAresApiKey, verifyAresApiKey } from "../ares-config.js";
+import { resolveSurplusApiKey, verifySurplusApiKey } from "../surplus-config.js";
 import {
   DEFAULT_REGION,
   DEFAULT_SIZE,
@@ -43,6 +44,22 @@ export function dropletName(botId: string): string {
 
 export function firewallName(botId: string): string {
   return `cassie-${botId}`;
+}
+
+/**
+ * Kalshi accepts API access from US IPs only — the inverse of Polymarket's
+ * geoblock, which refuses them. Static allowlist of DigitalOcean's US region
+ * slugs (verified against the DO region list on 2026-08-22).
+ */
+export const US_REGION_SLUGS = ["nyc1", "nyc2", "nyc3", "sfo1", "sfo2", "sfo3", "atl1"] as const;
+export const KALSHI_DEFAULT_REGION = "nyc3";
+
+export function assertRegionForVenue(venue: BotConfig["venue"], region: string): void {
+  if (venue === "kalshi" && !(US_REGION_SLUGS as readonly string[]).includes(region)) {
+    throw new Error(
+      `Kalshi requires a US droplet; region "${region}" is not one. Use --region with one of: ${US_REGION_SLUGS.join(", ")}`,
+    );
+  }
 }
 
 /** Dot-progress for the two waits that take minutes: provisioning, then first boot. */
@@ -132,7 +149,9 @@ export async function runDeploy(botId: string, opts: DeployOpts = {}): Promise<v
   const { client } = await ensureDigitalOceanReady();
   const version = cliVersion();
 
-  const region = opts.region ?? cfg.deployment?.region ?? DEFAULT_REGION;
+  const region =
+    opts.region ?? cfg.deployment?.region ?? (cfg.venue === "kalshi" ? KALSHI_DEFAULT_REGION : DEFAULT_REGION);
+  assertRegionForVenue(cfg.venue, region);
   const size = opts.size ?? cfg.deployment?.size ?? DEFAULT_SIZE;
   const regions = await client.regions();
   const chosen = regions.find((r) => r.slug === region);
@@ -157,6 +176,22 @@ export async function runDeploy(botId: string, opts: DeployOpts = {}): Promise<v
   const quotientToken = resolvedQuotient.token;
   // Name the winning source. Never print any part of the key itself.
   console.log(pc.dim(`signals credential: ${resolvedQuotient.origin}`));
+  // The agent strategy cannot run without its LLM credential; verify locally
+  // before any droplet work so a bad key fails in seconds, not mid-deploy.
+  let surplusApiKey: string | null = null;
+  if (cfg.strategy.id === "agent") {
+    const resolvedSurplus = await resolveSurplusApiKey(botId);
+    if (!resolvedSurplus) {
+      throw new Error(
+        "this bot runs the agent strategy but no SURPLUS_API_KEY was found in the environment, nearest .local.env, or bot keystore. " +
+          "Deployment stopped so the droplet cannot come up with a strategy it cannot run.",
+      );
+    }
+    console.log(pc.dim(`Surplus credential: ${resolvedSurplus.origin}`));
+    await verifySurplusApiKey(resolvedSurplus.value);
+    console.log(pc.green("Surplus API key verified locally"));
+    surplusApiKey = resolvedSurplus.value;
+  }
   const telegramToken = process.env.TELEGRAM_BOT_TOKEN ?? (await getKeystoreSecret(botId, KeyRoles.telegramToken));
   const discoveredBuilder = discoverAresBuilderCode();
   if (
@@ -284,6 +319,7 @@ export async function runDeploy(botId: string, opts: DeployOpts = {}): Promise<v
     ["QUOTIENT_API_TOKEN", quotientToken],
     ["TELEGRAM_BOT_TOKEN", telegramToken],
     ["ARES_API_KEY", resolvedAres?.value ?? null],
+    ["SURPLUS_API_KEY", surplusApiKey],
   ];
   const lines: string[] = [];
   for (const [key, value] of env) {
@@ -336,8 +372,31 @@ export async function runDeploy(botId: string, opts: DeployOpts = {}): Promise<v
     console.log(pc.green(`Polymarket order placement permitted from ${geoblock.country ?? chosen.name}`));
   }
 
+  if (deployedCfg.venue === "kalshi") {
+    const access = controlCall(target, botId, "GET", "/venue/check") as { blocked?: boolean; detail?: string };
+    if (access.blocked) {
+      throw new Error(
+        `refusing to resume: Kalshi rejected API access from ${chosen.name}${access.detail ? ` (${access.detail})` : ""}. ` +
+          `The bot is installed and idle. Redeploy to a US region with: cassie deploy ${botId} --region ${KALSHI_DEFAULT_REGION}`,
+      );
+    }
+    console.log(pc.green(`Kalshi API access verified from ${chosen.name}`));
+  }
+
   const signals = controlCall(target, botId, "GET", "/signals/check") as { count?: number };
   console.log(pc.green(`signals credential verified by the droplet (${signals.count ?? 0} published rows)`));
+
+  if (deployedCfg.strategy.id === "agent") {
+    const agent = controlCall(target, botId, "GET", "/agent/check") as {
+      enabled?: boolean;
+      promptSet?: boolean;
+      model?: string;
+    };
+    if (!agent.enabled || !agent.promptSet) {
+      throw new Error("refusing to resume: the droplet's agent check found no usable mandate/credential");
+    }
+    console.log(pc.green(`agent strategy verified by the droplet (model ${agent.model ?? "unknown"})`));
+  }
 
   if (deployedCfg.reporting?.post) {
     const check = controlCall(target, botId, "GET", "/reporting/check") as {

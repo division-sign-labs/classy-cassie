@@ -19,7 +19,7 @@ import { boundFetch } from "../http.js";
 export const SignalSchema = z.object({
   id: z.string(),
   ts: z.string(),
-  venue: z.enum(["polymarket", "hyperliquid", "lighter", "fixture"]),
+  venue: z.enum(["polymarket", "kalshi", "hyperliquid", "lighter", "fixture"]),
   marketRef: z.string(),
   side: z.enum(["YES", "NO", "LONG", "SHORT"]),
   prob: z.number().min(0).max(1).optional(),
@@ -225,6 +225,7 @@ async function resolveYesToken(
 function mapVenue(v: string | null | undefined): VenueId | null {
   if (!v) return null;
   if (v.startsWith("polymarket")) return "polymarket";
+  if (v.startsWith("kalshi")) return "kalshi";
   if (v === "hyperliquid") return "hyperliquid";
   if (v === "lighter") return "lighter";
   return null;

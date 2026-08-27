@@ -6,6 +6,7 @@
   "description": "Self-hosted, non-custodial trading bots for prediction markets and perps venues",
   "keywords": [
     "polymarket",
+    "kalshi",
     "hyperliquid",
     "prediction-markets",
     "perps",
@@ -52,6 +53,7 @@
     "@quotient-forecasting/cassie-core": "workspace:*",
     "@quotient-forecasting/cassie-runtime-node": "workspace:*",
     "@quotient-forecasting/cassie-skill": "workspace:*",
+    "@quotient-forecasting/strategy-agent": "workspace:*",
     "commander": "15.0.0",
     "picocolors": "1.1.1",
     "prompts": "2.4.2"

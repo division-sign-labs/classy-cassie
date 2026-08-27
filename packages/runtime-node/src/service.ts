@@ -29,7 +29,19 @@ import {
   type VenueAccount,
   type VenueAdapter,
 } from "@quotient-forecasting/cassie-core";
+import {
+  QuotientResearchClient,
+  SurplusClient,
+  createMarketLister,
+} from "@quotient-forecasting/cassie-core";
 import { FlipFlatStrategy } from "@quotient-forecasting/strategy-flip-flat";
+import {
+  AgentConfigSchema,
+  AgentStrategy,
+  AGENT_MEMORY_KEYS,
+  type AgentRunReport,
+  type PreviewableStrategy,
+} from "@quotient-forecasting/strategy-agent";
 import { SqliteStateStore } from "./state.js";
 import { nextTickAtMs, tickIdAt } from "./tick-schedule.js";
 
@@ -61,16 +73,38 @@ export interface BotRuntimeOptions {
   telegramToken?: string;
   /** Ares authoring key. Absent = attribute orders, publish nothing. */
   reportingApiKey?: string;
+  /** Surplus Intelligence key (inf_…). Required by the agent strategy only. */
+  surplusApiKey?: string;
   log?: Logger;
   /** Contributor-test hook for a deterministic signal file. */
   signalsFixturePath?: string;
   fixtureBooksPath?: string;
 }
 
-export function buildStrategy(id: string): Strategy {
+export function buildStrategy(opts: BotRuntimeOptions): Strategy {
+  const id = opts.config.strategy.id;
   // "signals" is the user-facing name; "flip-flat" is the original id.
   if (id === "signals" || id === "flip-flat") return new FlipFlatStrategy();
-  throw new Error(`unknown strategy "${id}" — the MVP strategy is "signals"`);
+  if (id === "agent") {
+    if (!opts.surplusApiKey) {
+      throw new Error("the agent strategy needs SURPLUS_API_KEY (environment, .local.env, or bot keystore)");
+    }
+    if (!opts.quotientToken) {
+      throw new Error("the agent strategy needs a Quotient API key for market research");
+    }
+    const cfg = AgentConfigSchema.parse(opts.config.strategy.config);
+    return new AgentStrategy({
+      surplus: new SurplusClient({
+        apiKey: opts.surplusApiKey,
+        baseUrl: cfg.llm.baseUrl,
+        fallbackBaseUrl: cfg.llm.fallbackBaseUrl,
+        modelPool: cfg.llm.modelPool,
+      }),
+      research: new QuotientResearchClient({ baseUrl: opts.config.signals.baseUrl, token: opts.quotientToken }),
+      lister: createMarketLister(opts.config.venue, opts.config.venueUrls),
+    });
+  }
+  throw new Error(`unknown strategy "${id}" — supported strategies are "signals" and "agent"`);
 }
 
 export function buildSignalSource(opts: BotRuntimeOptions): SignalSource {
@@ -102,6 +136,7 @@ export class BotService {
   readonly log: Logger;
 
   private readonly adapter: VenueAdapter;
+  private readonly strategy: Strategy;
   private readonly engine: Engine;
   private readonly state: SqliteStateStore;
   private readonly opts: BotRuntimeOptions;
@@ -127,12 +162,13 @@ export class BotService {
       fixtureBooks: opts.fixtureBooksPath ? readFileSync(opts.fixtureBooksPath, "utf8") : undefined,
       builderCode: opts.config.reporting?.builderCode,
     });
+    this.strategy = buildStrategy(opts);
     this.engine = new Engine({
       botId: opts.config.id,
       config: opts.config,
       adapter: this.adapter,
       account: opts.account,
-      strategy: buildStrategy(opts.config.strategy.id),
+      strategy: this.strategy,
       signals: buildSignalSource(opts),
       alerter: buildAlerter(opts, this.log),
       state: this.state,
@@ -334,5 +370,87 @@ export class BotService {
     const response = await fetch("https://polymarket.com/api/geoblock");
     if (!response.ok) throw new Error(`Polymarket geoblock check ${response.status}`);
     return (await response.json()) as { blocked?: boolean; country?: string; region?: string };
+  }
+
+  /**
+   * Agent-strategy preflight for init/deploy gates: verifies the Surplus key
+   * live and reports what the agent is configured with. Key material never
+   * appears in the response.
+   */
+  async agentCheck(): Promise<{ ok: true; enabled: boolean; promptSet?: boolean; personaSet?: boolean; model?: string }> {
+    if (this.config.strategy.id !== "agent") return { ok: true, enabled: false };
+    if (!this.opts.surplusApiKey) throw new Error("the agent strategy is configured but SURPLUS_API_KEY is missing");
+    const cfg = AgentConfigSchema.parse(this.config.strategy.config);
+    await new SurplusClient({
+      apiKey: this.opts.surplusApiKey,
+      baseUrl: cfg.llm.baseUrl,
+      fallbackBaseUrl: cfg.llm.fallbackBaseUrl,
+      modelPool: cfg.llm.modelPool,
+    }).verify();
+    return {
+      ok: true,
+      enabled: true,
+      promptSet: cfg.prompt.trim().length > 0,
+      personaSet: Boolean(cfg.persona),
+      model: cfg.llm.modelPool[0],
+    };
+  }
+
+  /** Config summary plus the last wake's run report, for `cassie agent status`. */
+  async agentStatus(): Promise<{ strategy: string; config?: unknown; lastRun?: AgentRunReport }> {
+    if (this.config.strategy.id !== "agent") return { strategy: this.config.strategy.id };
+    const cfg = AgentConfigSchema.parse(this.config.strategy.config);
+    const raw = await this.state.get(`strategy:${AGENT_MEMORY_KEYS.lastRun}`);
+    return {
+      strategy: "agent",
+      config: {
+        prompt: cfg.prompt,
+        criteria: cfg.criteria,
+        personaHandle: cfg.persona?.handle,
+        budgetUsd: cfg.budgetUsd,
+        riskBudgetPct: cfg.riskBudgetPct,
+        dailyBudgetUsd: cfg.dailyBudgetUsd,
+        maxPositions: cfg.maxPositions,
+        agentIntervalMin: cfg.agentIntervalMin,
+        model: cfg.llm.modelPool[0],
+      },
+      lastRun: raw ? (JSON.parse(raw) as AgentRunReport) : undefined,
+    };
+  }
+
+  /**
+   * One full scan+decide cycle — discovery, Quotient enrichment, the model
+   * call, persona judgment, quarter-Kelly arithmetic — with nothing persisted
+   * and no orders placed. Spends real Quotient/Surplus calls.
+   */
+  agentDryRun(): Promise<AgentRunReport> {
+    return this.exclusive(async () => {
+      const preview = (this.strategy as Partial<PreviewableStrategy>).preview;
+      if (!preview) throw new Error(`strategy "${this.config.strategy.id}" has no dry-run preview`);
+      const ctx = await this.engine.strategyContext();
+      return preview.call(this.strategy, ctx);
+    });
+  }
+
+  /**
+   * Venue-dispatched access check for the deploy gate. Polymarket keeps its
+   * geoblock endpoint (blocked = the venue refuses this region); Kalshi is the
+   * inverse — an authenticated balance read from here proves the venue accepts
+   * this droplet's (US) IP and the credentials.
+   */
+  async venueAccessCheck(): Promise<{ blocked: boolean; detail?: string; country?: string; region?: string }> {
+    if (this.config.venue === "polymarket") {
+      const geo = await this.geoblockCheck();
+      return { blocked: Boolean(geo.blocked), country: geo.country, region: geo.region };
+    }
+    if (this.config.venue === "kalshi") {
+      try {
+        await this.adapter.balances(this.account);
+        return { blocked: false };
+      } catch (error) {
+        return { blocked: true, detail: (error as Error).message.slice(0, 200) };
+      }
+    }
+    return { blocked: false };
   }
 }

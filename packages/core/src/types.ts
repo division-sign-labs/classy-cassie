@@ -2,7 +2,16 @@
 // Shared domain types for cassie. Everything here is runtime-agnostic and
 // free of side effects.
 
-export type VenueId = "polymarket" | "hyperliquid" | "lighter" | "fixture";
+export type VenueId = "polymarket" | "kalshi" | "hyperliquid" | "lighter" | "fixture";
+
+/**
+ * Venues whose instruments are binary YES/NO outcome markets. Use this where
+ * the semantics are prediction-vs-perp; keep `=== "polymarket"` only for
+ * genuinely Polymarket-specific gates (Ares reporting, bridge funding, geoblock).
+ */
+export function isPredictionVenue(venue: VenueId): boolean {
+  return venue === "polymarket" || venue === "kalshi";
+}
 
 /** Side of a held position. Prediction markets use YES/NO, perps use LONG/SHORT. */
 export type PositionSide = "YES" | "NO" | "LONG" | "SHORT";
@@ -193,6 +202,15 @@ export type VenueAccount =
       intentAddresses?: Record<string, string>;
     }
   | {
+      venue: "kalshi";
+      /**
+       * Kalshi API key id (a UUID; non-secret). The paired RSA private key is
+       * the secret and lives in the keystore. A Kalshi bot has no venue wallet;
+       * the master EOA generated at init stays local-only bot identity.
+       */
+      keyId: string;
+    }
+  | {
       venue: "fixture";
       address: string;
     };
@@ -223,6 +241,16 @@ export type RuntimeCreds =
       apiPrivateKey: string;
       accountIndex: number;
       apiKeyIndex: number;
+    }
+  | {
+      venue: "kalshi";
+      keyId: string;
+      /**
+       * RSA private key as single-line base64 PKCS#8 DER — never a multi-line
+       * PEM, which the deploy env-file path rejects. Decoded by the adapter via
+       * createPrivateKey({format: "der", type: "pkcs8"}).
+       */
+      privateKeyB64: string;
     }
   | {
       venue: "fixture";
@@ -492,7 +520,7 @@ export type Timeframe = "intraday" | "days" | "weeks" | "quarter";
 export type Magnitude = "small" | "meaningful" | "repricing";
 
 export interface ThesisTicket {
-  venue: "hyperliquid" | "lighter" | "polymarket";
+  venue: "hyperliquid" | "lighter" | "polymarket" | "kalshi";
   instrument: string;
   side: PositionSide;
   confidence: Confidence;

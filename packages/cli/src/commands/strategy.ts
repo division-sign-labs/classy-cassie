@@ -73,6 +73,11 @@ export interface StrategyOptions {
 /** `cassie strategy <botId>`: view and tune the bot's strategy and signal guardrails. */
 export async function runStrategy(botId: string, opts: StrategyOptions = {}): Promise<void> {
   const cfg = loadBotConfig(botId);
+  if (cfg.strategy.id === "agent") {
+    throw new Error(
+      `bot "${botId}" runs the agent strategy — tune it with \`cassie agent prompt|persona|status ${botId}\`, or re-run \`cassie init\` to change strategies`,
+    );
+  }
   const directUpdate = Object.values(opts).some((value) => value !== undefined);
   if (directUpdate) {
     const strategyConfig = normalizeStrategyConfig(cfg.strategy.config as Record<string, unknown>);

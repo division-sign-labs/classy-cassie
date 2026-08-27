@@ -1,6 +1,6 @@
 ---
 name: cassie
-description: Operate cassie — self-hosted, non-custodial trading bots for prediction markets (Polymarket) and perps (Hyperliquid). Use for creating and funding a bot, wallets and keystore, running a bot locally or deploying it to a DigitalOcean droplet, monitoring it with status and logs, checking portfolio and orders, placing manual or thesis-driven trades, and the risk module's sizing, stop, and leverage rules.
+description: Operate cassie — self-hosted, non-custodial trading bots for prediction markets (Polymarket, Kalshi) and perps (Hyperliquid). Use for creating and funding a bot, wallets and keystore, running a bot locally or deploying it to a DigitalOcean droplet, monitoring it with status and logs, checking portfolio and orders, placing manual or thesis-driven trades, the LLM monitoring-agent strategy (mandate, persona, dry runs), and the risk module's sizing, stop, and leverage rules.
 ---
 
 # cassie — operator manual
@@ -53,7 +53,8 @@ API token with read and write scope; `cassie deploy` walks through creating one.
 
 Environment: `CASSIE_HOME` overrides `~/.cassie`; `CASSIE_PASSPHRASE` supplies the
 keystore passphrase non-interactively (testing convenience — prefer the prompt);
-`QUOTIENT_API_TOKEN` / `QUOTIENT_API_KEY`, `ARES_API_KEY`, and `ARES_BUILDER_CODE` from
+`QUOTIENT_API_TOKEN` / `QUOTIENT_API_KEY`, `ARES_API_KEY`, `ARES_BUILDER_CODE`, and
+`SURPLUS_API_KEY` (the agent strategy's LLM credential) from
 the nearest `.local.env` (preferred and authoritative over stale exported values) or
 the exported environment override keystore copies; `TELEGRAM_BOT_TOKEN` overrides its
 keystore copy; `CASSIE_DEBUG=1`
@@ -65,7 +66,7 @@ stored at `~/.cassie/digitalocean.token`.
 Every step happens in the terminal; you only leave it to copy-paste dashboard values.
 
 1. **Bot id** — lowercase, dashes, max 32 chars. Names the config, keystore, and state files.
-2. **Venue** — `polymarket` or `hyperliquid`.
+2. **Venue** — `polymarket`, `kalshi`, or `hyperliquid`.
 3. **Wallet** — generate directly into the encrypted local keystore.
 4. **Passphrase** — encrypts the keystore. There is no recovery; losing it means
    re-importing or re-generating keys.
@@ -98,9 +99,21 @@ Every step happens in the terminal; you only leave it to copy-paste dashboard va
      stores them runtime-eligible; the Relayer/Builder key stays **local-only**. It also surfaces the geoblock answer (GET polymarket.com/api/geoblock,
      informational only — if `blocked: true`, reads and funding work but order placement
      is rejected by the venue).
+   - **Kalshi** — no wallet is involved (the bot's EOA stays local-only identity). The
+     wizard first asks production vs **demo** (demo.kalshi.co, paper funds, separate
+     keys; stored as `venueUrls.kalshi.demo`). Create an API key on the site under
+     **Account → API Keys** and download the RSA private key — Kalshi shows it once.
+     The wizard asks for the key id (a UUID) and the private key **file path** (a pasted
+     single-line base64 key also works), normalizes the key to single-line base64 PKCS#8
+     DER, stores it runtime-eligible as `kalshi-api`, and verifies it with a signed
+     balance read. A 401 here usually means a demo key against production (or vice
+     versa) or a skewed clock. Splits treasuries are not offered — Kalshi runs on bank
+     rails.
    - **Hyperliquid** — derives the master address from the bot key. Agent approval happens
      in the funding flow, after the account exists on the L1.
-7. **Strategy** — one strategy: `signals` (follow Quotient signals, hold until Q's
+7. **Strategy** — `signals` or `agent` (prediction venues; Hyperliquid bots always run
+   `signals`). The `agent` strategy is the monitoring agent — plain-language mandate,
+   Quotient research, model-selected entries, quarter-Kelly sizing; see §13. `signals`: follow Quotient signals, hold until Q's
    forecast converges with the market price; positions with remaining edge are held
    regardless of P&L). The recommended allocation holds up to 2 positions, prioritizes the widest
    eligible edges for new entries, with a $100 daily budget and $25 requested per entry;
@@ -133,6 +146,9 @@ All flows print exactly what to send where, then poll until the venue credits.
   third-party bridge (DeBridge/Across/Portal) direct to Polygon USDC to limit slippage.
   After credit, the flow sets trading approvals (one-time, **gasless** via relayer) and
   syncs the CLOB allowance cache. No gas token is ever needed.
+- **Kalshi**: there is no crypto deposit address. Deposit USD on kalshi.com (**Account →
+  Deposit**: ACH, debit, or wire); the flow polls the API balance until it arrives. Demo
+  accounts come pre-funded. `--from splits` refuses Kalshi bots.
 - **Hyperliquid**: send **≥5 USDC** (below the minimum is lost — the flow warns) plus
   **~$2 of ETH** for gas to the master address **on Arbitrum**. The CLI then submits the
   bridge deposit from the master EOA, polls the L1 until credited, generates an agent
@@ -154,7 +170,9 @@ the exact venue, amount, and destination and asks for confirmation. Withdrawals 
 the master/L1 key, which lives in the local keystore, so the command runs on the machine
 that holds it. Per venue: **Polymarket** transfers pUSD from the trading address on Polygon
 (gasless, uses the operator's Builder/Relayer key); **Hyperliquid** submits a user-signed
-withdrawal of USDC to the destination on Arbitrum ($1 venue fee, arrives in minutes).
+withdrawal of USDC to the destination on Arbitrum ($1 venue fee, arrives in minutes);
+**Kalshi** is not supported over the API — withdraw on kalshi.com (**Account → Withdraw**,
+bank transfer), and the command says so instead of asking for an address.
 
 ## 4. Command reference
 
@@ -185,12 +203,19 @@ cassie logs <botId> [--tail <n>] [-f] [--since '1 hour ago']   # the droplet's j
 cassie logs <botId> --errors [--level error|warn|info]         # the engine's recorded errors
 cassie alerts test <botId>                   # Telegram ping
 cassie venue status                          # adapters + verifiedAgainst dates
+cassie agent prompt <botId> [--set <text>]   # view/update the agent strategy's mandate
+cassie agent persona <botId> [--handle <h>] [--refresh]   # persona judgment layer ($1/fetch)
+cassie agent status <botId>                  # agent config + the last wake's run report
+cassie agent dry-run <botId>                 # full scan+decide cycle, places nothing
 ```
 
 Notes:
 
-- `trade` on Polymarket defaults `--outcome yes`; `marketRef` is always the **YES-token
-  CLOB id** — NO-side orders set `--outcome no` and the adapter resolves the sibling token.
+- `trade` on prediction venues defaults `--outcome yes`. On Polymarket `marketRef` is the
+  **YES-token CLOB id** — NO-side orders set `--outcome no` and the adapter resolves the
+  sibling token. On Kalshi `marketRef` is the **market ticker** (e.g. `KXWTI-26AUG29-T80`);
+  prices are dollars 0–1 as everywhere else, converted to Kalshi's cents at the adapter,
+  and sizes are whole contracts.
 - `--stop`/`--tp` map to **native** trigger orders on Hyperliquid; on
   Polymarket they arm **synthetic** engine-managed triggers, best-effort at poll cadence
   (the CLI says so when you arm one). `--trail` is engine-managed everywhere.
@@ -221,8 +246,9 @@ What deploy does, in order:
    `doctl`'s config → a guided prompt. This runs **before** the passphrase prompt, so
    nobody unlocks a keystore only to hit a login wall.
 2. Checks the region and size are available on that account.
-3. Gathers credentials: runtime creds from the keystore, the Quotient key, Telegram, and
-   the Ares key with a local `/me` verification.
+3. Gathers credentials: runtime creds from the keystore, the Quotient key, Telegram, the
+   Ares key with a local `/me` verification, and — for agent-strategy bots — the
+   `SURPLUS_API_KEY`, verified locally against the Surplus API before any droplet work.
 4. Stops any bot already running on the old droplet and cancels its resting orders.
 5. Registers `~/.cassie/ssh/id_ed25519.pub`, creates the droplet, waits for cloud-init,
    and pins the host key.
@@ -230,8 +256,15 @@ What deploy does, in order:
 7. `systemctl enable --now cassie@<botId>`.
 8. **Verifies before trading.** `/runtime` must report a droplet in the pinned region,
    confirmed by DigitalOcean's metadata service rather than by anything the deploy passed
-   in. Polymarket bots must pass `/geoblock/check`. `/signals/check` must pass.
+   in. Polymarket bots must pass `/geoblock/check`; Kalshi bots must pass `/venue/check`
+   (an authenticated balance read proving the venue accepts the droplet's IP and the
+   credentials). `/signals/check` must pass. Agent-strategy bots must pass `/agent/check`.
    Reporting, if enabled, must match. Then `/resume` and `/init`.
+
+**Kalshi region rule**: Kalshi accepts API access from US IPs only — the inverse of
+Polymarket's geoblock. A Kalshi bot defaults to `nyc3` instead of `sgp1`, and deploy
+refuses a non-US `--region` up front (US slugs: `nyc1/2/3`, `sfo1/2/3`, `atl1`). An
+existing non-US droplet (e.g. `blr1`) cannot serve a Kalshi bot.
 
 Any failure at step 8 stops the deploy with the reason and leaves the bot idle. The
 droplet is already recorded in the bot config at that point, so a retry picks up from
@@ -475,7 +508,13 @@ otherwise it asks the operator. Exit is convergence or resolution, owned by flip
 | venue       | trading | native TP/SL | deploy | dead man's switch |
 |-------------|---------|--------------|--------|-------------------|
 | polymarket  | ✓       | synthetic    | ✓      | CLOB heartbeat (~10s window) |
+| kalshi      | ✓       | synthetic    | ✓ (US regions only) | none — the engine's TTL cancels are the only order safety net |
 | hyperliquid | ✓       | ✓            | ✓      | scheduleCancel (10-min horizon, refreshed) |
+
+Kalshi notes: RSA API-key auth (key id + private key; no wallet, no gas); markets settle
+cash automatically at resolution, so there is no redeem step; quotes and orders convert
+between cassie's dollars-0–1 and Kalshi's integer cents at the adapter; the 24h volume
+the risk module sees is approximated from contract volume × mid.
 
 Lighter is not a supported venue. An adapter for it exists in the tree and `cassie init`
 does not offer it; `cassie deploy`, `cassie fund --from splits`, and `cassie withdraw`
@@ -522,3 +561,59 @@ Never attach a Polymarket bot EOA to a Splits account.
 - **Splits shows the wrong organization** — `SPLITS_API_KEY` overrides the CLI's saved auth
   and every key belongs to one org. Stop at the org confirmation, unset/change the key,
   and verify with `splits auth whoami`; Cassie has no team-switch command.
+
+## 13. Monitoring-agent strategy (`agent`)
+
+The second strategy for prediction-venue bots. The operator supplies a plain-language
+mandate — e.g. *"look for commodities markets meeting these criteria, ending within a
+week"* — an optional persona, and a bankroll. Each wake the bot:
+
+1. **Discovers** open markets on its venue (Polymarket Gamma / Kalshi's public catalog),
+   filtered deterministically by the configured criteria (end window, volume floor,
+   category keywords). Free.
+2. **Enriches** with Quotient: the mispriced feed, a market search on the mandate text,
+   and batched forecast lookups (10 markets per billed call) for held markets and top
+   candidates. Metered by `maxQuotientSpendUsdPerWake` (default $0.10) with a per-market
+   forecast cache (default 4h TTL) so nothing is re-bought inside a wake window.
+3. **Decides** with one structured Surplus Intelligence completion (default model
+   `gpt-5.6-sol`, ordered fallback pool). The model selects, ranks, and vetoes; for each
+   entry it emits a calibrated probability and a confidence, never a size.
+4. **Sizes deterministically.** The live venue mid is re-read at decision time; the
+   sizing probability defaults to *min-edge* (whichever of the model's and Quotient's
+   probabilities implies the smaller edge); the edge must clear the thesis mappings'
+   confidence bar; the stake is `buildPredictionSize` (min of fixed-fractional and
+   quarter-Kelly) on `min(equity, budgetUsd)`, capped by bankroll headroom, the optional
+   daily budget, and `maxPositions`. **No model-produced figure ever reaches an order**,
+   and the engine's risk module (slippage band, depth, volume floor, per-order cap) still
+   gates every placement.
+
+Prerequisites: a Quotient API key (research + persona) and **`SURPLUS_API_KEY`**
+(resolved from the environment / nearest `.local.env` / bot keystore role
+`surplus-api-key`; verified live at init and deploy; the droplet env carries it). Engine
+ticks run every `tickIntervalMin` (default 15) as free housekeeping; the paid cycle runs
+at `agentIntervalMin` (default 60), restart-safe via strategy memory.
+
+**Persona (optional judgment layer)**: `cassie agent persona <botId> --handle <x-handle>`
+profiles an X account through Quotient (`$1` per fetch — confirmed each time; the test
+handle used during development was `amphib0ly`), renders a deterministic brief, and stores
+it in the bot config, so it survives redeploys and is never re-bought per wake. The model
+reviews candidates through it — veto, lower confidence, or reweight, with inferences
+treated as uncertain; the persona never adds markets and never overrides policy.
+`--refresh` re-profiles the stored handle. Persona and criteria compose; either may be
+absent.
+
+Workflow:
+
+```sh
+cassie init                          # choose venue → strategy: agent → mandate, budget, key, persona
+cassie agent dry-run <botId>         # full cycle: candidates, model reasoning, sizing arithmetic — no orders
+cassie run <botId>                   # live locally
+cassie deploy <botId>                # droplet; /agent/check gates resume
+cassie agent status <botId>          # config + last wake report (spend, decisions, skips)
+cassie agent prompt <botId> --set "…"   # update the mandate (redeploy to apply on a droplet)
+```
+
+Disclosures: the decision prompt includes held positions and budget headroom (the model
+needs them to judge exits and allocation) and is sent to Surplus Intelligence. Nothing
+about the account ever flows to Quotient — its calls stay market-scoped. Every paid
+Quotient call and its per-wake total appear in the run report.

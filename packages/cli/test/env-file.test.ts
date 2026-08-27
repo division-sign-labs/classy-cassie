@@ -50,3 +50,19 @@ describe("bot config over an EnvironmentFile", () => {
     expect(systemdDecode(`X=${JSON.stringify(value)}`)).toBe(value);
   });
 });
+
+describe("kalshi runtime creds over an EnvironmentFile", () => {
+  it("a normalized base64 key is newline-free and survives the round trip", () => {
+    // Shape of RuntimeCreds for kalshi: the key is single-line base64 PKCS#8
+    // DER by construction (normalizeKalshiPrivateKey), never a PEM.
+    const creds = {
+      venue: "kalshi",
+      keyId: "0b7e4a1c-1111-2222-3333-444455556666",
+      privateKeyB64: Buffer.from("stand-in DER bytes").toString("base64"),
+    };
+    const value = JSON.stringify(creds);
+    expect(value).not.toMatch(/[\r\n]/);
+    const delivered = systemdDecode(`CASSIE_BOT_CREDS=${JSON.stringify(value)}`);
+    expect(JSON.parse(delivered)).toEqual(creds);
+  });
+});

@@ -222,6 +222,7 @@ function accountAddress(cfg: BotConfig): string | undefined {
   if (!account) return cfg.wallet.address;
   if (account.venue === "polymarket") return account.funder;
   if (account.venue === "hyperliquid") return account.masterAddress;
+  if (account.venue === "kalshi") return `kalshi API key ${account.keyId.slice(0, 8)}…`;
   return account.l1Address;
 }
 

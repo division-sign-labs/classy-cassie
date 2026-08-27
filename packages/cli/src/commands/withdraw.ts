@@ -10,6 +10,11 @@ import { loadBotConfig } from "../paths.js";
 export async function runWithdraw(botId: string, amountArg: string, opts: { to?: string; yes?: boolean }): Promise<void> {
   const cfg = loadBotConfig(botId);
   const account = requireAccount(cfg);
+  // Before the EVM --to validation: a Kalshi withdrawal has no on-chain
+  // destination at all, so the right error names the venue, not the flag.
+  if (cfg.venue === "kalshi") {
+    throw new Error("Kalshi withdrawals run on kalshi.com (Account → Withdraw, bank transfer); the API does not support them.");
+  }
   if (!opts.to || !/^0x[0-9a-fA-F]{40}$/.test(opts.to)) {
     throw new Error("--to <address> required (0x… EVM address)");
   }

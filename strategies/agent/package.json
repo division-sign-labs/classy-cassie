@@ -1,0 +1,45 @@
+{
+  "name": "@quotient-forecasting/strategy-agent",
+  "version": "0.2.0",
+  "type": "module",
+  "license": "Apache-2.0",
+  "description": "LLM monitoring-agent strategy for Cassie: prompt-driven market discovery, Quotient enrichment, deterministic quarter-Kelly sizing",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Quotient-Solutions-Inc/classy-cassie.git",
+    "directory": "strategies/agent"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist",
+    "README.md"
+  ],
+  "scripts": {
+    "build": "rm -rf dist && tsc -p tsconfig.json",
+    "prepack": "pnpm build",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "@quotient-forecasting/cassie-core": "workspace:*",
+    "zod": "4.4.3"
+  },
+  "devDependencies": {
+    "@types/node": "24.2.1",
+    "typescript": "5.9.2"
+  },
+  "homepage": "https://github.com/Quotient-Solutions-Inc/classy-cassie#readme",
+  "bugs": {
+    "url": "https://github.com/Quotient-Solutions-Inc/classy-cassie/issues"
+  }
+}

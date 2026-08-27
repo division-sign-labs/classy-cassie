@@ -51,11 +51,13 @@ thesis arithmetic, keystore round-trips).
 | venue       | status | TP/SL     | deploy | notes |
 |-------------|--------|-----------|--------|-------|
 | Polymarket  | ✓      | synthetic (engine-managed) | ✓ | the raw venue signer is deployed; keep it away from Splits authority |
+| Kalshi      | ✓      | synthetic (engine-managed) | ✓ (US regions only) | RSA API-key auth (no wallet); funded by ACH/debit/wire on kalshi.com; cash auto-settlement; no dead man's switch |
 | Hyperliquid | ✓      | native    | ✓      | master/agent key split; the agent key is the only key a runtime sees |
 
-Adapters carry a `verifiedAgainst` date (`cassie venue status`). Both venues ship breaking
+Adapters carry a `verifiedAgainst` date (`cassie venue status`). These venues ship breaking
 changes on months-long cadence; SDK versions are pinned exactly and bumps must re-verify
-against live docs.
+against live docs. Kalshi has no official TS SDK — its RSA-PSS request signing lives in
+the adapter and is pinned by known-vector tests.
 
 ## Deploy
 

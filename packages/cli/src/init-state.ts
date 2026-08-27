@@ -141,7 +141,7 @@ export function parseInitState(value: unknown, expectedBotId?: string): InitStat
   if (typeof raw.botId !== "string") throw new Error("init journal botId is required");
   safeBotId(raw.botId);
   if (expectedBotId && raw.botId !== expectedBotId) throw new Error(`init journal belongs to ${raw.botId}, not ${expectedBotId}`);
-  if (!(["polymarket", "hyperliquid", "lighter"] as unknown[]).includes(raw.venue)) {
+  if (!(["polymarket", "kalshi", "hyperliquid", "lighter"] as unknown[]).includes(raw.venue)) {
     throw new Error("init journal venue is invalid");
   }
   if (typeof raw.createdAt !== "string" || !Number.isFinite(Date.parse(raw.createdAt))) {

@@ -225,6 +225,15 @@ export class Engine {
     };
   }
 
+  /**
+   * A read-only StrategyContext for out-of-band strategy previews (the agent
+   * strategy's dry run). Callers must not execute actions with it — orders go
+   * through tick()/manualOrder(), where the risk module runs.
+   */
+  async strategyContext(): Promise<StrategyContext> {
+    return this.buildStrategyContext();
+  }
+
   private async buildStrategyContext(): Promise<StrategyContext> {
     const { adapter, account, botId, config, signals, log } = this.d;
     const [positions, openOrders, balances] = await Promise.all([

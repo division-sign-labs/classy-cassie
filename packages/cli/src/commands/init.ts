@@ -10,6 +10,7 @@ import {
   TelegramAlerter,
   createAdapter,
   generateEoa,
+  isPredictionVenue,
   parseBotConfig,
   type BotConfig,
 } from "@quotient-forecasting/cassie-core";
@@ -20,6 +21,8 @@ import { createSplitsTreasury } from "../splits-init.js";
 import { discoverQuotientToken } from "../quotient-token.js";
 import { discoverAresApiKey, discoverAresBuilderCode, verifyAresApiKey } from "../ares-config.js";
 import { RECOMMENDED_SUMMARY, elicitRecommendedStrategyConfig, elicitStrategyConfig } from "./strategy.js";
+import { AGENT_STRATEGY_SUMMARY, elicitAgentConfig, fetchAndStorePersona } from "./agent.js";
+import { discoverSurplusApiKey, verifySurplusApiKey } from "../surplus-config.js";
 import { runFund } from "./fund.js";
 
 /**
@@ -38,12 +41,22 @@ function describeAccount(account: NonNullable<BotConfig["account"]>): string[] {
       return [`master address: ${account.masterAddress}`];
     case "lighter":
       return [`L1 address: ${account.l1Address}`, ...(account.accountIndex === undefined ? [] : [`account index: ${account.accountIndex}`])];
+    case "kalshi":
+      return [
+        `API key id: ${account.keyId}`,
+        "funds live in your Kalshi account (bank rails on kalshi.com)",
+      ];
     default:
       return [];
   }
 }
 
-function accountWalletAddress(account: NonNullable<BotConfig["account"]>): string {
+/**
+ * The EVM address a venue account is bound to, or undefined for venues with no
+ * wallet identity (Kalshi authenticates with an API key; its account carries
+ * no address, and the bot's master EOA stays local-only identity).
+ */
+function accountWalletAddress(account: NonNullable<BotConfig["account"]>): string | undefined {
   switch (account.venue) {
     case "polymarket":
       return account.signerAddress;
@@ -51,6 +64,8 @@ function accountWalletAddress(account: NonNullable<BotConfig["account"]>): strin
       return account.masterAddress;
     case "lighter":
       return account.l1Address;
+    case "kalshi":
+      return undefined;
   }
 }
 
@@ -72,6 +87,9 @@ function sameVenueAccountIdentity(
       (left.agentAddress ?? "").toLowerCase() === (right.agentAddress ?? "").toLowerCase()
     );
   }
+  if (left.venue === "kalshi" && right.venue === "kalshi") {
+    return left.keyId === right.keyId;
+  }
   return (
     left.venue === "lighter" &&
     right.venue === "lighter" &&
@@ -92,7 +110,8 @@ async function reuseExistingAccount(
 ): Promise<BotConfig["account"] | undefined> {
   const account = existing?.account;
   if (!account || account.venue !== venue) return undefined;
-  if (accountWalletAddress(account).toLowerCase() !== walletAddress.toLowerCase()) {
+  const boundAddress = accountWalletAddress(account);
+  if (boundAddress && boundAddress.toLowerCase() !== walletAddress.toLowerCase()) {
     console.log(pc.yellow("the existing venue account belongs to a different wallet and cannot be reused"));
     return undefined;
   }
@@ -134,12 +153,12 @@ export async function runInit(): Promise<void> {
     venue = state.venue;
   } else {
     if (existing && !(await confirm(`bot "${botId}" exists — reconfigure it?`, false))) return;
-    const requestedVenue = (await ask("Venue (polymarket / hyperliquid)", { default: existing?.venue ?? "polymarket" }))
+    const requestedVenue = (await ask("Venue (polymarket / kalshi / hyperliquid)", { default: existing?.venue ?? "polymarket" }))
       .trim()
       .toLowerCase();
     // Lighter has an adapter but is not a supported venue; the wizard does not
     // offer it, and an existing lighter config still loads.
-    if (!["polymarket", "hyperliquid"].includes(requestedVenue)) {
+    if (!["polymarket", "kalshi", "hyperliquid"].includes(requestedVenue)) {
       throw new Error(`unknown venue "${requestedVenue}"`);
     }
     venue = requestedVenue as BotConfig["venue"];
@@ -230,9 +249,11 @@ export async function runInit(): Promise<void> {
   const pass = await getPassphrase();
 
   const existingAccount = existing?.account?.venue === venue ? existing.account : undefined;
+  const existingAccountAddress = existingAccount ? accountWalletAddress(existingAccount) : undefined;
   if (
     existingAccount &&
-    accountWalletAddress(existingAccount).toLowerCase() !== wallet.address!.toLowerCase()
+    existingAccountAddress &&
+    existingAccountAddress.toLowerCase() !== wallet.address!.toLowerCase()
   ) {
     console.log(pc.yellow("The saved venue account is controlled by a different wallet."));
     for (const line of describeAccount(existingAccount)) console.log(`  ${line}`);
@@ -244,8 +265,11 @@ export async function runInit(): Promise<void> {
 
   // Optional organization-owned treasury. The safest default is passkey-only;
   // an advanced local-master signer is scoped to this new account alone.
+  // Kalshi is funded by bank rails on kalshi.com, so a crypto treasury has no
+  // role there and the wizard does not offer one.
   let treasury = state.treasury;
   if (
+    venue !== "kalshi" &&
     !treasury &&
     !state.pendingTreasury &&
     existing?.treasury &&
@@ -254,7 +278,7 @@ export async function runInit(): Promise<void> {
     treasury = existing.treasury;
     checkpoint({ ...state, treasury });
   }
-  if (!treasury && (state.pendingTreasury || (await confirm("Create a dedicated Splits organization subaccount for this bot?", false)))) {
+  if (venue !== "kalshi" && !treasury && (state.pendingTreasury || (await confirm("Create a dedicated Splits organization subaccount for this bot?", false)))) {
     treasury = await createSplitsTreasury({
       botId,
       venue,
@@ -275,9 +299,23 @@ export async function runInit(): Promise<void> {
   }
 
   // Venue account provisioning (wizard-driven, adapter-owned).
+  // Kalshi keys are environment-scoped, so the env choice must precede setup;
+  // it lives in venueUrls (like hyperliquid.testnet) and rides into the saved
+  // config below.
+  let venueUrlsOverride = existing?.venueUrls;
+  if (venue === "kalshi") {
+    const useDemo = await confirm(
+      "Use Kalshi's demo environment? (paper funds; keys from demo.kalshi.co)",
+      existing?.venueUrls.kalshi.demo ?? false,
+    );
+    venueUrlsOverride = {
+      ...(venueUrlsOverride ?? parseBotConfig({ id: botId, venue }).venueUrls),
+      kalshi: { ...(venueUrlsOverride?.kalshi ?? parseBotConfig({ id: botId, venue }).venueUrls.kalshi), demo: useDemo },
+    };
+  }
   const setupCtx = makeSetupContext(botId);
   const adapter = createAdapter(venue, {
-    urls: withOperatorRpc(parseBotConfig({ id: botId, venue, venueUrls: existing?.venueUrls })),
+    urls: withOperatorRpc(parseBotConfig({ id: botId, venue, venueUrls: venueUrlsOverride })),
   });
   // An account already provisioned for this bot is reused by default: re-running
   // the wizard to change a strategy setting should never re-provision a Polymarket
@@ -298,23 +336,77 @@ export async function runInit(): Promise<void> {
   }
   if (!account) throw new Error("venue setup returned no account");
 
-  // Strategy: one strategy (signals); recommended settings in one keystroke.
-  console.log(pc.bold("\nStrategy: signals — follow Quotient signals, hold until the forecast converges with the price."));
-  console.log(pc.dim(`Recommended: ${RECOMMENDED_SUMMARY}.`));
-  const existingStrategy = (existing?.strategy.config ?? {}) as Record<string, unknown>;
-  const strategyConfig: Record<string, unknown> = (await confirm("Use recommended allocation rules?", true))
-    ? await elicitRecommendedStrategyConfig(existingStrategy)
-    : await elicitStrategyConfig(existingStrategy);
-  const tickIntervalMin = Number(strategyConfig.tickIntervalMin ?? 5);
-
-  // A key may already be exported, in .local.env, or owned by the Quotient
-  // CLI. Say exactly which source won without displaying any key material.
+  // Quotient key first: both strategies need it (signals feed; the agent's
+  // research and persona calls). A key may already be exported, in .local.env,
+  // or owned by the Quotient CLI. Say exactly which source won without
+  // displaying any key material.
   const discovered = discoverQuotientToken();
   if (discovered) console.log(pc.dim(`found a Quotient API key from ${discovered.origin}`));
-  const token = discovered && (await confirm("Use that key for live signals?", true))
+  const token = discovered && (await confirm("Use that key for Quotient signals and research?", true))
     ? discovered.token
     : (await ask("Quotient API key", { secret: true })).trim();
   if (token) ks.putEntry(botId, KeyRoles.quotientToken, token, pass, { runtimeEligible: true });
+
+  // Strategy choice: hand-tuned signal following, or the prompt-driven agent.
+  const existingStrategy = (existing?.strategy.config ?? {}) as Record<string, unknown>;
+  const strategyId =
+    isPredictionVenue(venue)
+      ? await select("Strategy", [
+          {
+            value: existing?.strategy.id === "agent" ? "agent" : "signals",
+            title: existing?.strategy.id === "agent" ? "agent (current)" : "signals",
+            description:
+              existing?.strategy.id === "agent"
+                ? AGENT_STRATEGY_SUMMARY
+                : "follow Quotient signals, hold until the forecast converges with the price",
+          },
+          {
+            value: existing?.strategy.id === "agent" ? "signals" : "agent",
+            title: existing?.strategy.id === "agent" ? "signals" : "agent",
+            description:
+              existing?.strategy.id === "agent"
+                ? "follow Quotient signals, hold until the forecast converges with the price"
+                : AGENT_STRATEGY_SUMMARY,
+          },
+        ])
+      : "signals";
+
+  let strategyConfig: Record<string, unknown>;
+  let tickIntervalMin: number;
+  if (strategyId === "agent") {
+    console.log(pc.bold("\nStrategy: agent — your mandate, Quotient research, model-selected entries, quarter-Kelly sizing."));
+    strategyConfig = await elicitAgentConfig(existing?.strategy.id === "agent" ? existingStrategy : {});
+
+    // SURPLUS_API_KEY is a hard prerequisite for this strategy: discover it,
+    // store it runtime-eligible, and verify it live before saving the config.
+    const discoveredSurplus = discoverSurplusApiKey();
+    if (discoveredSurplus) console.log(pc.dim(`found a Surplus API key in ${discoveredSurplus.origin}`));
+    const surplusKey = discoveredSurplus
+      ? discoveredSurplus.value
+      : (await ask("Surplus Intelligence API key (inf_…; the agent's LLM credential)", { secret: true })).trim();
+    if (!surplusKey) throw new Error("the agent strategy requires a Surplus Intelligence API key");
+    ks.putEntry(botId, KeyRoles.surplusApiKey, surplusKey, pass, { runtimeEligible: true });
+    await verifySurplusApiKey(surplusKey);
+    console.log(pc.green("Surplus API key verified"));
+
+    const personaHandle = (await ask('Persona X handle for the judgment layer (optional; costs $1 — or "none")', {
+      default: (strategyConfig.persona as { handle?: string } | undefined)?.handle ?? "none",
+    })).trim();
+    if (personaHandle && personaHandle.toLowerCase() !== "none") {
+      const probe = parseBotConfig({ id: botId, venue, venueUrls: venueUrlsOverride });
+      const persona = await fetchAndStorePersona(botId, probe, personaHandle);
+      if (persona) strategyConfig = { ...strategyConfig, persona };
+    }
+    // Engine ticks stay cheap housekeeping between paid wakes.
+    tickIntervalMin = 15;
+  } else {
+    console.log(pc.bold("\nStrategy: signals — follow Quotient signals, hold until the forecast converges with the price."));
+    console.log(pc.dim(`Recommended: ${RECOMMENDED_SUMMARY}.`));
+    strategyConfig = (await confirm("Use recommended allocation rules?", true))
+      ? await elicitRecommendedStrategyConfig(existingStrategy)
+      : await elicitStrategyConfig(existingStrategy);
+    tickIntervalMin = Number(strategyConfig.tickIntervalMin ?? 5);
+  }
 
   // Alerts: Telegram only in MVP.
   let telegram: { chatId: string } | undefined = existing?.alerts.telegram;
@@ -373,14 +465,14 @@ export async function runInit(): Promise<void> {
     wallet,
     treasury,
     strategy: {
-      id: "signals",
+      id: strategyId,
       config: strategyConfig,
     },
     risk: existing?.risk,
     signals: existing?.signals ?? {},
     alerts: { ...existing?.alerts, telegram },
     reporting,
-    venueUrls: existing?.venueUrls,
+    venueUrls: venueUrlsOverride,
     tickIntervalMin,
     deployment: existing?.deployment,
     createdAt: state.createdAt,

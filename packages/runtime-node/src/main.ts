@@ -61,6 +61,9 @@ async function main(): Promise<void> {
     quotientToken: required("QUOTIENT_API_TOKEN"),
     telegramToken: process.env.TELEGRAM_BOT_TOKEN,
     reportingApiKey: process.env.ARES_API_KEY,
+    // Required only when the bot runs the agent strategy; buildStrategy throws
+    // a targeted error there, so a plain signals bot keeps booting without it.
+    surplusApiKey: config.strategy.id === "agent" ? required("SURPLUS_API_KEY") : process.env.SURPLUS_API_KEY,
     log,
   });
 

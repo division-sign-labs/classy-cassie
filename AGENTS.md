@@ -18,6 +18,11 @@ confirm every live order, confirm funding transfers, read `cassie status` and
   `@polymarket/client@0.6.0`, `@nktkas/hyperliquid@0.33.3`, `lighter-ts-sdk@1.0.13`.
   Version bumps are deliberate PRs that re-verify the adapter against live docs and
   update its `verifiedAgainst` date (surfaced by `cassie venue status`).
+  **Documented exception — Kalshi**: Kalshi ships no official TypeScript SDK, so its
+  adapter signs requests with `node:crypto` RSA-PSS (SHA-256, salt length = digest
+  length) per the venue's documented scheme. The signed-string format is pinned by
+  known-vector tests in `packages/core/test/kalshi-signing.test.ts`; any change there is
+  a venue-contract change that must re-verify against live docs and bump `verifiedAgainst`.
 - `pnpm test` builds the workspace, then runs vitest (`packages/core/test/**`).
   `pnpm -r typecheck` must stay clean.
 - Strategies return `Action[]`; they never touch keys and never call `placeOrder` — the

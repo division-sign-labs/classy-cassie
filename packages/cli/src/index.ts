@@ -15,6 +15,7 @@ import { runSsh, showLogs, showStatus } from "./commands/monitor.js";
 import { runTrade } from "./commands/trade.js";
 import { runDeploy } from "./commands/deploy.js";
 import { runDestroy } from "./commands/destroy.js";
+import { agentDryRun, agentPersona, agentPrompt, agentStatus } from "./commands/agent.js";
 import { configureReporting } from "./commands/reporting.js";
 import { installSkill } from "./commands/skill.js";
 import { cliVersion } from "./version.js";
@@ -145,6 +146,24 @@ program
   .option("--slippage <pct>", "max book walk from the best executable price, as a percentage")
   .option("--max-order-notional <usd>", "hard per-order notional cap in the risk module")
   .action(wrap(runStrategy));
+
+const agent = program.command("agent").description("monitoring-agent strategy: mandate, persona, status, dry runs");
+agent
+  .command("prompt <botId>")
+  .description("view or update the agent's plain-language mandate")
+  .option("--set <text>", "replace the mandate")
+  .action(wrap(agentPrompt));
+agent
+  .command("persona <botId>")
+  .description("view, set, or refresh the persona judgment layer (Quotient X profile, $1 per fetch)")
+  .option("--handle <handle>", "X handle to profile and store")
+  .option("--refresh", "re-profile the stored handle")
+  .action(wrap(agentPersona));
+agent.command("status <botId>").description("agent configuration and the last wake's run report").action(wrap(agentStatus));
+agent
+  .command("dry-run <botId>")
+  .description("one full scan+decide cycle — candidates, model reasoning, sizing arithmetic — placing nothing")
+  .action(wrap(agentDryRun));
 
 const venue = program.command("venue").description("venue adapters");
 venue.command("status").description("adapters and when they were last verified against venue docs").action(wrap(venueStatus));

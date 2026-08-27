@@ -18,6 +18,8 @@ export interface LocalRunOpts {
   telegramToken?: string;
   /** Reporting provider key (e.g. ares_sk_live_…). Absent = attribute orders, report nothing. */
   reportingApiKey?: string;
+  /** Surplus Intelligence key. Required by the agent strategy only. */
+  surplusApiKey?: string;
   fixtureBooksPath?: string;
   log?: Logger;
   /** Control socket for another terminal to reach this process. Omit for none. */

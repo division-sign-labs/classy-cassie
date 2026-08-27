@@ -13,6 +13,7 @@ import {
   LiveSignalSource,
   captionFromThesis,
   consoleLogger,
+  isPredictionVenue,
   isSignalFresh,
   type BotConfig,
   type ManualOrderParams,
@@ -36,7 +37,7 @@ async function liveSignalProb(botId: string, cfg: BotConfig, thesis: ThesisTicke
     const token = (await resolveQuotientToken(botId))?.token;
     if (!token) return undefined;
     const source = new LiveSignalSource(cfg.signals, token);
-    const sigs = await source.latest({ venue: "polymarket", marketRef: thesis.instrument });
+    const sigs = await source.latest({ venue: cfg.venue, marketRef: thesis.instrument });
     const fresh = sigs.filter((s) => isSignalFresh(s, Date.now())).sort((a, b) => Date.parse(b.ts) - Date.parse(a.ts));
     const sig = fresh[0];
     if (!sig || sig.prob === undefined) return undefined;
@@ -126,7 +127,7 @@ export async function runTrade(botId: string, sideArg: string | undefined, marke
 
   const params: ManualOrderParams = {
     marketRef,
-    outcome: opts.outcome ? (opts.outcome.toUpperCase() === "NO" ? "NO" : "YES") : cfg.venue === "polymarket" ? "YES" : undefined,
+    outcome: opts.outcome ? (opts.outcome.toUpperCase() === "NO" ? "NO" : "YES") : isPredictionVenue(cfg.venue) ? "YES" : undefined,
     side,
     size,
     limitPrice: opts.limit !== undefined ? Number(opts.limit) : undefined,
@@ -143,8 +144,8 @@ export async function runTrade(botId: string, sideArg: string | undefined, marke
   console.log(`  limit: ${params.limitPrice ?? "crossing limit within slippage band"}  tif: ${params.tif}`);
   if (params.stopPx !== undefined || params.tpPx !== undefined || params.trailBps !== undefined) {
     console.log(`  triggers: stop=${params.stopPx ?? "-"} tp=${params.tpPx ?? "-"} trail=${params.trailBps ?? "-"}bps`);
-    if (cfg.venue === "polymarket") {
-      console.log(pc.yellow("  note: Polymarket stops are synthetic, checked on a timer."));
+    if (isPredictionVenue(cfg.venue)) {
+      console.log(pc.yellow(`  note: ${cfg.venue} stops are synthetic, checked on a timer.`));
     }
   }
   if (!opts.yes && !(await confirm("place this order?", false))) return;
@@ -194,7 +195,7 @@ async function tradeFromThesis(botId: string, raw: ThesisTicket, opts: TradeOpts
     throw new Error(`thesis venue "${raw.venue}" does not match bot venue "${cfg.venue}"`);
   }
 
-  if (cfg.venue === "polymarket") {
+  if (isPredictionVenue(cfg.venue)) {
     // Prediction variant: no meaningful TP/SL; sizing via min(ff, quarter-Kelly).
     const [quote, balances] = await Promise.all([adapter.quote(raw.instrument), adapter.balances(account)]);
     const equity = balances.reduce((s, b) => s + b.total, 0);

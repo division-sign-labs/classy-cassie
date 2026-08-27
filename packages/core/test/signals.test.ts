@@ -210,3 +210,32 @@ describe("LiveSignalSource (gateway contract, verified 2026-08-13)", () => {
     expect(src.latest.length).toBe(1);
   });
 });
+
+describe("LiveSignalSource kalshi rows", () => {
+  it("maps a kalshi row to its ticker without any CLOB resolution call", async () => {
+    const kalshiRow = {
+      id: "gw-k1",
+      side: "NO",
+      latest_q: 0.3,
+      current_cost_cents: 40,
+      forecast_updated_at: new Date().toISOString(),
+      is_active: true,
+      market: { venue: "kalshi", nativeMarketId: "KXFED-26SEP-T4.00" },
+    };
+    const fetchImpl = vi.fn(async () =>
+      new Response(JSON.stringify({ signals: [kalshiRow] }), { status: 200 }),
+    ) as unknown as typeof fetch;
+    const src = new LiveSignalSource({ baseUrl: "https://gw.example", path: "/s" }, "t", fetchImpl);
+    const sigs = await src.latest({ venue: "kalshi" });
+    expect(sigs).toHaveLength(1);
+    expect(sigs[0]).toMatchObject({
+      venue: "kalshi",
+      marketRef: "KXFED-26SEP-T4.00",
+      side: "NO",
+      prob: 0.7, // NO-side expression of latest_q 0.3
+      refPrice: 0.4,
+    });
+    // one gateway call, zero market-resolution calls
+    expect((fetchImpl as unknown as ReturnType<typeof vi.fn>).mock.calls).toHaveLength(1);
+  });
+});

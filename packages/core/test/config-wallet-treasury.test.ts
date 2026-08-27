@@ -131,3 +131,37 @@ describe("wallet and Splits treasury config", () => {
     ).toThrow(/does not match this bot's wallet/);
   });
 });
+
+describe("kalshi config", () => {
+  it("parses with a wallet address and no wallet/account cross-check", () => {
+    const cfg = parseBotConfig({
+      id: "bot-k",
+      venue: "kalshi",
+      wallet: { address: BOT_ADDRESS },
+      account: { venue: "kalshi", keyId: "0b7e4a1c-1111-2222-3333-444455556666" },
+    });
+    expect(cfg.account).toMatchObject({ venue: "kalshi", keyId: "0b7e4a1c-1111-2222-3333-444455556666" });
+    expect(cfg.wallet.address).toBe(BOT_ADDRESS);
+  });
+
+  it("still rejects an account from another venue", () => {
+    expect(() =>
+      parseBotConfig({
+        id: "bot-k",
+        venue: "kalshi",
+        account: { venue: "polymarket", signerAddress: BOT_ADDRESS, funder: ACCOUNT_ADDRESS },
+      }),
+    ).toThrow(/does not match bot venue/);
+  });
+
+  it("defaults kalshi venue URLs with the demo flag off", () => {
+    const cfg = parseBotConfig({ id: "bot-k", venue: "kalshi" });
+    expect(cfg.venueUrls.kalshi).toEqual({
+      api: "https://api.elections.kalshi.com/trade-api/v2",
+      demoApi: "https://demo-api.kalshi.co/trade-api/v2",
+      demo: false,
+    });
+    const roundTripped = parseBotConfig(JSON.parse(serializeBotConfig(cfg)));
+    expect(roundTripped.venueUrls.kalshi.demo).toBe(false);
+  });
+});

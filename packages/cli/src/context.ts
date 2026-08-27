@@ -162,6 +162,11 @@ export async function buildRuntimeCreds(cfg: BotConfig): Promise<RuntimeCreds> {
       }
       return { venue: "lighter", apiPrivateKey: apiPk, accountIndex: acct.accountIndex, apiKeyIndex: acct.apiKeyIndex ?? 2 };
     }
+    case "kalshi": {
+      const privateKeyB64 = ks.getEntry(cfg.id, KeyRoles.kalshiApi, pass);
+      if (!privateKeyB64) throw new Error("missing kalshi API key — re-run `cassie init` to store it");
+      return { venue: "kalshi", keyId: acct.keyId, privateKeyB64 };
+    }
     default:
       throw new Error("unsupported venue account");
   }

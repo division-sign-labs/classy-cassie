@@ -14,6 +14,7 @@ import {
   atrSpecFor,
   buildPredictionSize,
   buildTicket,
+  isPredictionVenue,
   parseMappings,
   type BotConfig,
   type FilledTicket,
@@ -22,6 +23,7 @@ import {
   type ThesisTicket,
   type TicketOverrides,
   type VenueAdapter,
+  type VenueId,
 } from "@quotient-forecasting/cassie-core";
 import { ask, confirm } from "../context.js";
 
@@ -55,12 +57,13 @@ export function loadMappings(explicitPath?: string): Mappings {
 /** The six-question flow (§13). Question wording is quoted verbatim by the skill. */
 export async function elicitTicket(defaults: Partial<ThesisTicket> = {}): Promise<ThesisTicket> {
   console.log(pc.bold("Thesis intake — six questions; the sizing module does the arithmetic.\n"));
-  const venue = (await ask("1a. Venue (hyperliquid / polymarket)", { default: defaults.venue ?? "hyperliquid" }))
+  const venue = (await ask("1a. Venue (hyperliquid / polymarket / kalshi)", { default: defaults.venue ?? "hyperliquid" }))
     .trim()
     .toLowerCase() as ThesisTicket["venue"];
-  const instrument = (await ask("1b. Instrument (e.g. ETH, or YES-token id)", { default: defaults.instrument })).trim();
-  const sideRaw = (await ask(venue === "polymarket" ? "1c. Side (yes/no)" : "1c. Direction (long/short)", {
-    default: defaults.side?.toLowerCase() ?? (venue === "polymarket" ? "yes" : "long"),
+  const prediction = isPredictionVenue(venue as VenueId);
+  const instrument = (await ask("1b. Instrument (e.g. ETH, a YES-token id, or a Kalshi ticker)", { default: defaults.instrument })).trim();
+  const sideRaw = (await ask(prediction ? "1c. Side (yes/no)" : "1c. Direction (long/short)", {
+    default: defaults.side?.toLowerCase() ?? (prediction ? "yes" : "long"),
   }))
     .trim()
     .toUpperCase();
@@ -81,7 +84,7 @@ export async function elicitTicket(defaults: Partial<ThesisTicket> = {}): Promis
   return {
     venue,
     instrument,
-    side: (sideRaw === "SHORT" || sideRaw === "NO" ? sideRaw : venue === "polymarket" ? "YES" : "LONG") as ThesisTicket["side"],
+    side: (sideRaw === "SHORT" || sideRaw === "NO" ? sideRaw : prediction ? "YES" : "LONG") as ThesisTicket["side"],
     confidence: ["low", "high"].includes(confidence) ? confidence : "medium",
     timeframe: ["intraday", "weeks", "quarter"].includes(timeframe) ? timeframe : "days",
     magnitude,

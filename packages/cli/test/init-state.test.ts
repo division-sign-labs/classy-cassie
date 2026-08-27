@@ -81,3 +81,21 @@ describe("init state", () => {
     ).toThrow(/exact account plan/);
   });
 });
+
+describe("kalshi init journal", () => {
+  it("round-trips a kalshi checkpoint; keyId passes the secret-name guard", () => {
+    process.env.CASSIE_HOME = mkdtempSync(join(tmpdir(), "cassie-init-"));
+    const state = {
+      version: 1 as const,
+      botId: "bot-k",
+      venue: "kalshi" as const,
+      createdAt: "2026-08-22T00:00:00.000Z",
+      wallet: { origin: "local" as const, address: "0x1111111111111111111111111111111111111111" },
+      account: { venue: "kalshi" as const, keyId: "0b7e4a1c-1111-2222-3333-444455556666" },
+    };
+    const path = saveInitState(state);
+    expect(loadInitState("bot-k")).toEqual(state);
+    expect(readFileSync(path, "utf8")).not.toMatch(/privateKey|passphrase|api[-_]?key(?!Id)/i);
+    clearInitState("bot-k");
+  });
+});

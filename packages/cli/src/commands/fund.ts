@@ -17,10 +17,17 @@ export async function runFund(botId: string, opts: { from?: string }): Promise<v
   }
   const cfg = loadBotConfig(botId);
   const account = requireAccount(cfg);
-  const adapter = await adapterFor(cfg, { needCreds: false });
+  // Kalshi balance reads are authenticated, so its funding poll needs creds;
+  // every other venue's funding flow is read-only or keystore-driven.
+  const adapter = await adapterFor(cfg, { needCreds: cfg.venue === "kalshi" });
   const ctx = makeSetupContext(botId);
 
   if (opts.from === "splits") {
+    if (cfg.venue === "kalshi") {
+      throw new Error(
+        "Kalshi is funded by ACH, debit, or wire on kalshi.com; a Splits crypto treasury cannot fund it.",
+      );
+    }
     if (!cfg.treasury) {
       throw new Error(`bot "${botId}" has no Splits treasury — run \`cassie init\` and choose the Splits subaccount option`);
     }
@@ -91,6 +98,9 @@ export async function runFund(botId: string, opts: { from?: string }): Promise<v
 export async function registerSplitsSigner(botId: string): Promise<void> {
   const cfg = loadBotConfig(botId);
   const account = requireAccount(cfg);
+  if (account.venue === "kalshi") {
+    throw new Error("Kalshi bots have no on-chain signer to register; funding runs through kalshi.com bank rails.");
+  }
   const addr =
     account.venue === "polymarket"
       ? account.signerAddress
