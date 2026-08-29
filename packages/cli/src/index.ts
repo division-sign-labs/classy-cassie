@@ -138,10 +138,12 @@ alerts.command("test <botId>").description("send a Telegram test ping").action(w
 program
   .command("strategy <botId>")
   .description("view/tune ranked positions, daily entry budget, allocation, and signal guardrails")
-  .option("--top <n>", "hold at most N signal positions; widest eligible edges enter first")
+  .option("--top <n|unlimited>", "optional signal-position cap; widest eligible edges enter first")
   .option("--daily-budget <usd>", "maximum entry notional placed per UTC day")
   .option("--position-budget-pct <pct>", "percentage of the daily budget requested per entry")
   .option("--min-entry-notional <usd>", "entry-only floor after sizing and capacity caps")
+  .option("--position-check-seconds <seconds>", "reconcile and evaluate held positions on this cadence")
+  .option("--signal-check-minutes <minutes>", "refresh the Quotient signal snapshot on this cadence")
   .option("--signal-max-age-hours <hours>", "maximum age of a live signal")
   .option("--slippage <pct>", "max book walk from the best executable price, as a percentage")
   .option("--max-order-notional <usd>", "hard per-order notional cap in the risk module")

@@ -62,6 +62,11 @@ describe("isSignalFresh", () => {
 });
 
 describe("signal configuration", () => {
+  it("checks positions every 60 seconds by default", () => {
+    const cfg = parseBotConfig({ id: "default-position-cadence", venue: "polymarket" });
+    expect(cfg.tickIntervalMin).toBe(1);
+  });
+
   it("defaults live signal freshness to three hours", () => {
     const cfg = parseBotConfig({ id: "default-freshness", venue: "polymarket" });
     expect(cfg.signals.maxAgeSec).toBe(3 * 60 * 60);
@@ -187,6 +192,57 @@ describe("LiveSignalSource (gateway contract, verified 2026-08-13)", () => {
     expect(clobCalls).toHaveLength(1);
   });
 
+  it("looks up held-market forecasts even when no published signal is active", async () => {
+    const forecastAt = "2026-08-24T22:06:19.902Z";
+    const fetchImpl = vi.fn(async (input: string | URL | Request) => {
+      const url = new URL(String(input));
+      if (url.origin === "https://gamma.example" && url.pathname === "/markets") {
+        return new Response(JSON.stringify([{ id: "2966559" }]), { status: 200 });
+      }
+      if (url.pathname === "/api/v1/markets/lookup") {
+        return new Response(
+          JSON.stringify({
+            results: [{
+              marketKey: "polymarket:2966559",
+              quotient_odds: 0.9184779613,
+              last_updated: forecastAt,
+            }],
+          }),
+          { status: 200 },
+        );
+      }
+      throw new Error("unexpected request " + url);
+    }) as unknown as typeof fetch;
+    const src = new LiveSignalSource(
+      { baseUrl: "https://gw.example", path: "/api/v1/signals" },
+      "tok-123",
+      fetchImpl,
+      "https://clob.example",
+      "https://gamma.example",
+    );
+
+    await expect(
+      src.forecasts({ venue: "polymarket", marketRefs: ["111"] }),
+    ).resolves.toEqual([{
+      id: "polymarket:2966559",
+      ts: forecastAt,
+      venue: "polymarket",
+      marketRef: "111",
+      probYes: 0.9184779613,
+    }]);
+
+    const calls = (fetchImpl as unknown as ReturnType<typeof vi.fn>).mock.calls;
+    const gammaUrl = new URL(String(calls[0]![0]));
+    expect(gammaUrl.origin + gammaUrl.pathname).toBe("https://gamma.example/markets");
+    expect(gammaUrl.searchParams.get("clob_token_ids")).toBe("111");
+    const lookupUrl = new URL(String(calls[1]![0]));
+    expect(lookupUrl.pathname).toBe("/api/v1/markets/lookup");
+    expect(lookupUrl.searchParams.get("market_keys")).toBe("polymarket:2966559");
+    expect(lookupUrl.searchParams.get("venue")).toBe("polymarket");
+    const headers = new Headers((calls[1]![1] as RequestInit).headers);
+    expect(headers.get("x-quotient-api-key")).toBe("tok-123");
+  });
+
   it("rejects malformed payloads via zod", async () => {
     const fetchImpl = (async () => new Response(JSON.stringify({ nope: true }), { status: 200 })) as typeof fetch;
     const src = new LiveSignalSource({ baseUrl: "https://x.example", path: "/s" }, "t", fetchImpl);
@@ -204,10 +260,15 @@ describe("LiveSignalSource (gateway contract, verified 2026-08-13)", () => {
     // Compile-time: SignalQuery has only venue/marketRef. Excess properties are rejected.
     // @ts-expect-error — account state must not flow toward the signal API
     void (() => src.latest({ venue: "polymarket", equity: 10_000 }));
-    // Runtime: the public surface is exactly `latest`.
+    // ForecastQuery likewise accepts only market identity, never position state.
+    // @ts-expect-error — sizes and P&L must not flow toward the forecast API
+    void (() => src.forecasts?.({ venue: "polymarket", marketRefs: ["m"], size: 10, pnl: 50 }));
+    // Runtime: both methods take exactly one market-scoped query object.
     const publicMethods = Object.getOwnPropertyNames(Object.getPrototypeOf(src)).filter((n) => n !== "constructor");
-    expect(publicMethods).toEqual(["latest"]);
+    expect(publicMethods.sort()).toEqual(["forecasts", "latest"]);
     expect(src.latest.length).toBe(1);
+    expect(src.forecasts).toBeTypeOf("function");
+    expect(src.forecasts!.length).toBe(1);
   });
 });
 

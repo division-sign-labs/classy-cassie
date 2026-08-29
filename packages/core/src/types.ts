@@ -276,6 +276,17 @@ export interface Signal {
   ttlSec: number;
 }
 
+/** Latest Quotient forecast for a market, independent of signal publication. */
+export interface MarketForecast {
+  id: string;
+  ts: string;
+  venue: VenueId;
+  /** Polymarket: CLOB token ID of the YES token. */
+  marketRef: string;
+  /** Quotient's calibrated probability for the YES outcome. */
+  probYes: number;
+}
+
 // ---------------------------------------------------------------------------
 // Strategy contract (§3)
 // ---------------------------------------------------------------------------
@@ -437,13 +448,20 @@ export interface SignalQuery {
   marketRef?: string;
 }
 
+export interface ForecastQuery {
+  venue?: VenueId;
+  marketRefs: string[];
+}
+
 /**
- * Signal source abstraction (live Quotient API | fixtures).
+ * Signal/forecast source abstraction (live Quotient API | fixtures).
  * HARD RULE: this surface never accepts account state. Financial fields
  * (P&L, balances, account size) must not flow toward the signal API.
  */
 export interface SignalSource {
   latest(query: SignalQuery): Promise<Signal[]>;
+  /** Held-market forecasts are independent of whether an entry signal is active. */
+  forecasts?(query: ForecastQuery): Promise<MarketForecast[]>;
 }
 
 // ---------------------------------------------------------------------------

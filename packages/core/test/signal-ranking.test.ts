@@ -12,7 +12,7 @@ import {
   type StrategyContext,
   type StrategyMemory,
 } from "@quotient-forecasting/cassie-core";
-import { FlipFlatStrategy } from "../../../strategies/flip-flat/dist/index.js";
+import { FlipFlatConfigSchema, FlipFlatStrategy } from "../../../strategies/flip-flat/dist/index.js";
 
 function sig(marketRef: string, spreadPp: number): Signal {
   return {
@@ -62,6 +62,19 @@ function ctxWith(signals: Signal[], config: Record<string, unknown>, memory = st
 }
 
 describe("signal ranking by edge", () => {
+  it("defaults to unlimited positions with 60-second position and 5-minute signal checks", () => {
+    const config = FlipFlatConfigSchema.parse({});
+    expect(config.topN).toBeNull();
+    expect(config.tickIntervalMin).toBe(1);
+    expect(config.signalPollIntervalMin).toBe(5);
+  });
+
+  it("does not impose a position-count cap by default", async () => {
+    const signals = [sig("a", 40), sig("b", 35), sig("c", 30), sig("d", 25)];
+    const actions = await new FlipFlatStrategy().tick(ctxWith(signals, {}));
+    expect(actions.filter((action) => action.kind === "enter")).toHaveLength(4);
+  });
+
   it("funds the widest edges when slots are scarce", async () => {
     // Worst-first on the wire: the thin edges would win on insertion order.
     const signals = [sig("m-thin", 11), sig("m-mid", 18), sig("m-wide", 30)];

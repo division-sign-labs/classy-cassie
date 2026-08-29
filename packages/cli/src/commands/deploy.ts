@@ -412,7 +412,15 @@ export async function runDeploy(botId: string, opts: DeployOpts = {}): Promise<v
 
   controlCall(target, botId, "POST", "/resume");
   const started = controlCall(target, botId, "POST", "/init") as { tickIntervalMin?: number };
-  console.log(pc.green(`loop started: every ${started.tickIntervalMin ?? cfg.tickIntervalMin} minutes`));
+  const positionCheckSeconds = Number(((started.tickIntervalMin ?? deployedCfg.tickIntervalMin) * 60).toFixed(4));
+  const signalCheckMinutes = Number(
+    Number(
+      (deployedCfg.strategy.config as Record<string, unknown>).signalPollIntervalMin ?? 5,
+    ).toFixed(4),
+  );
+  console.log(
+    pc.green(`loop started: positions every ${positionCheckSeconds}s; signals every ${signalCheckMinutes}m`),
+  );
 
   console.log("");
   console.log(pc.bold(`${botId} is live on ${name} in ${chosen.name}.`));

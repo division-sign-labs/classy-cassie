@@ -123,20 +123,28 @@ interface Signal {
 }
 ```
 
-Financial fields (P&L, balances, account size) never flow toward the signal API — the
-client's type surface has no method that accepts account state.
+Financial fields (P&L, balances, position sizes, account size) never flow toward Quotient.
+For convergence, Cassie sends only the held market identifiers needed to retrieve their
+latest Q forecasts.
+
+The runtime separates the two cadences: every five minutes it refreshes the entry-signal
+snapshot and batches Q forecast lookups for held markets; every 60 seconds it re-reads
+venue odds and checks convergence. Entry-signal freshness never gates an exit. Held-market
+lookups cost $0.005 per batch of up to 10 markets per refresh. Configure the cadences with
+`cassie strategy <botId> --signal-check-minutes 5 --position-check-seconds 60`.
 
 ### Signal allocation
 
-The signal strategy holds at most the configured top N positions and evaluates competing
-new signals from widest to narrowest edge. Its daily entry budget caps cumulative entry
+The signal strategy has no position-count cap by default and evaluates competing new
+signals from widest to narrowest edge. Set an explicit cap with `--top N`; restore the
+default with `--top unlimited`. Its daily entry budget caps cumulative entry
 notional placed from 00:00–23:59 UTC;
 rejected entries do not count, and liquidity/risk-capped entries consume only their final
-order notional. The default is top 2 and 50% of the daily budget per entry, while `cassie
-init` asks for the dollar budget (default $25).
+order notional. The default allocation is 25% of the $100 daily budget per entry, while
+`cassie init` asks for the dollar budget (default $100).
 
 ```sh
-cassie strategy <botId> --top 3 --daily-budget 100 --position-budget-pct 33
+cassie strategy <botId> --top unlimited --daily-budget 100 --position-budget-pct 33
 ```
 
 The UTC reset replenishes entry capacity; it does not close positions. Every entry remains

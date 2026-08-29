@@ -44,6 +44,10 @@ import {
 } from "@quotient-forecasting/strategy-agent";
 import { SqliteStateStore } from "./state.js";
 import { nextTickAtMs, tickIdAt } from "./tick-schedule.js";
+import {
+  DEFAULT_SIGNAL_POLL_INTERVAL_MIN,
+  PollingSignalSource,
+} from "./polling-signal-source.js";
 
 const HEARTBEAT_MS = 5_000;
 const TRIGGER_CHECK_MS = 60_000;
@@ -107,14 +111,37 @@ export function buildStrategy(opts: BotRuntimeOptions): Strategy {
   throw new Error(`unknown strategy "${id}" — supported strategies are "signals" and "agent"`);
 }
 
-export function buildSignalSource(opts: BotRuntimeOptions): SignalSource {
+export function configuredSignalPollIntervalMin(config: BotConfig): number {
+  const raw = (config.strategy.config as Record<string, unknown>).signalPollIntervalMin;
+  if (raw === undefined) return DEFAULT_SIGNAL_POLL_INTERVAL_MIN;
+  if (typeof raw !== "number" || !Number.isFinite(raw) || raw <= 0) {
+    throw new Error("strategy.config.signalPollIntervalMin must be greater than zero");
+  }
+  return raw;
+}
+
+export function buildSignalSource(opts: BotRuntimeOptions, log: Logger = opts.log ?? consoleLogger(opts.config.id)): SignalSource {
   if (opts.signalsFixturePath) {
     return new FixtureSignalSource(readFileSync(opts.signalsFixturePath, "utf8"));
   }
   if (!opts.quotientToken) {
     throw new Error("live signals need a Quotient API key (environment, .local.env, Quotient CLI, or bot keystore)");
   }
-  return new LiveSignalSource(opts.config.signals, opts.quotientToken);
+  const pollIntervalMin = configuredSignalPollIntervalMin(opts.config);
+  return new PollingSignalSource(
+    new LiveSignalSource(opts.config.signals, opts.quotientToken),
+    Math.max(1_000, Math.round(pollIntervalMin * 60_000)),
+    {
+      onRefresh: (count) =>
+        log.info(`signals refreshed (${count}); next refresh in ${compactNumber(pollIntervalMin)}m`),
+      onForecastRefresh: (count) =>
+        log.info(`held forecasts refreshed (${count}); next refresh in ${compactNumber(pollIntervalMin)}m`),
+    },
+  );
+}
+
+function compactNumber(value: number): string {
+  return String(Number(value.toFixed(4)));
 }
 
 export function buildAlerter(opts: BotRuntimeOptions, log: Logger): Alerter {
@@ -169,7 +196,7 @@ export class BotService {
       adapter: this.adapter,
       account: opts.account,
       strategy: this.strategy,
-      signals: buildSignalSource(opts),
+      signals: buildSignalSource(opts, this.log),
       alerter: buildAlerter(opts, this.log),
       state: this.state,
       log: this.log,
@@ -216,7 +243,10 @@ export class BotService {
       // boundary. The slot-derived id makes that a no-op when a restart lands
       // inside a slot the engine already completed.
       this.scheduleTick(0);
-      this.log.info(`loop started; tick interval ${this.config.tickIntervalMin}m`);
+      this.log.info(
+        `loop started; position checks every ${compactNumber(this.intervalSeconds)}s; ` +
+          `signals every ${compactNumber(configuredSignalPollIntervalMin(this.config))}m`,
+      );
     } catch (error) {
       this.stopTimers();
       throw error;

@@ -36,8 +36,19 @@ export const QuotientMarketRowSchema = z
     venue: z.string().nullish(),
     market_odds: z.number().nullish(),
     latest_q_probability: z.number().nullish(),
+    quotient_odds: z.number().nullish(),
+    latest_q: z.number().nullish(),
     thesis: z.string().nullish(),
     forecast_at: z.string().nullish(),
+    last_updated: z.string().nullish(),
+    forecast: z
+      .object({
+        id: z.string().nullish(),
+        probability: z.number().nullish(),
+        created_at: z.string().nullish(),
+        thesis: z.string().nullish(),
+      })
+      .nullish(),
     has_forecast: z.boolean().nullish(),
     has_published_signal: z.boolean().nullish(),
     spread_pp: z.number().nullish(),
@@ -71,9 +82,14 @@ function mapRow(raw: unknown): QuotientMarketRow | null {
     question: r.question ?? r.title ?? undefined,
     venue: r.venue ?? undefined,
     marketOdds: r.market_odds ?? undefined,
-    qProbability: r.latest_q_probability ?? undefined,
-    thesis: r.thesis ?? undefined,
-    forecastAt: r.forecast_at ?? undefined,
+    qProbability:
+      r.latest_q_probability ??
+      r.quotient_odds ??
+      r.latest_q ??
+      r.forecast?.probability ??
+      undefined,
+    thesis: r.thesis ?? r.forecast?.thesis ?? undefined,
+    forecastAt: r.forecast_at ?? r.last_updated ?? r.forecast?.created_at ?? undefined,
     hasForecast: r.has_forecast ?? undefined,
     spreadPp: r.spread_pp ?? undefined,
     endDate: r.end_date ?? undefined,

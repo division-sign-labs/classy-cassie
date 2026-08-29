@@ -405,7 +405,7 @@ export async function runInit(): Promise<void> {
     strategyConfig = (await confirm("Use recommended allocation rules?", true))
       ? await elicitRecommendedStrategyConfig(existingStrategy)
       : await elicitStrategyConfig(existingStrategy);
-    tickIntervalMin = Number(strategyConfig.tickIntervalMin ?? 5);
+    tickIntervalMin = Number(strategyConfig.tickIntervalMin ?? 1);
   }
 
   // Alerts: Telegram only in MVP.

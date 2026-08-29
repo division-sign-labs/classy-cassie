@@ -7,6 +7,12 @@ in. Engine loop, SQLite state, and a control API on a unix socket. The same code
 You do not install this by hand. `cassie deploy` installs it on the droplet, pinned to the
 CLI's version, and `cassie run` uses the copy that came with the CLI.
 
+For the signals strategy, the engine reconciles positions and re-reads venue odds every
+60 seconds. Every five minutes it separately refreshes entry signals and batches the latest
+Q forecasts for held markets (up to 10 markets per $0.005 lookup). Convergence exits are
+therefore driven by held positions even when their entry signals are stale or no longer
+published.
+
 ## As a service
 
 `cassie deploy` writes a systemd unit that runs the `cassie-runtime` binary with an

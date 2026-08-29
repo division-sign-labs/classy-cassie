@@ -257,7 +257,8 @@ export const BotConfigSchema = z
     /** Opt-in per bot. Polymarket only — other venues carry no builder code. */
     reporting: ReportingConfigSchema.optional(),
     venueUrls: VenueUrlsSchema.prefault({}),
-    tickIntervalMin: z.number().positive().default(5),
+    /** Engine/position reconciliation cadence. Signal fetching has its own cadence. */
+    tickIntervalMin: z.number().positive().default(1),
     /** Set by `cassie deploy`: the droplet this bot runs on. */
     deployment: DeploymentSchema.optional(),
     createdAt: z.string().optional(),

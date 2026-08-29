@@ -83,7 +83,7 @@ starting the runtime.. done
 runtime verified: droplet in sgp1 (Singapore 1)
 Polymarket order placement permitted from SG
 signals credential verified by the droplet (34 published rows)
-loop started: every 5 minutes
+loop started: positions every 60s; signals every 5m
 
 bot-1 is live on cassie-bot-1 in Singapore 1.
   cassie status bot-1
@@ -135,8 +135,9 @@ from the best executable price, available in-band liquidity, a 24-hour volume fl
 notional cap, a minimum viable size, and a TTL that re-prices or cancels a resting
 remainder. Skipped orders raise an alert saying which limit stopped them.
 
-The strategy holds a bounded number of positions inside a daily entry budget that resets at
-00:00 UTC. `cassie strategy <bot>` shows and changes both.
+The strategy has no position-count cap by default and uses a daily entry budget that resets
+at 00:00 UTC. `cassie strategy <bot>` shows both and accepts either `--top N` or
+`--top unlimited`.
 
 While orders rest, the runtime heartbeats every five seconds. If it dies, the venue cancels
 those orders about ten seconds later.

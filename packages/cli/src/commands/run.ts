@@ -33,7 +33,16 @@ export async function runBot(botId: string, opts: RunOpts): Promise<void> {
     surplusApiKey = resolved.value;
   }
 
-  console.log(pc.bold(`running ${botId} on ${cfg.venue} (strategy ${cfg.strategy.id}, every ${cfg.tickIntervalMin}m)`));
+  const signalPollIntervalMin = Number(
+    (cfg.strategy.config as Record<string, unknown>).signalPollIntervalMin ?? 5,
+  );
+  console.log(
+    pc.bold(
+      `running ${botId} on ${cfg.venue} (strategy ${cfg.strategy.id}, ` +
+        `positions every ${Number((cfg.tickIntervalMin * 60).toFixed(4))}s, ` +
+        `signals every ${Number(signalPollIntervalMin.toFixed(4))}m)`,
+    ),
+  );
   console.log(pc.dim("Ctrl-C cancels resting orders before exit."));
 
   await runLocal({

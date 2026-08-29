@@ -5,7 +5,9 @@
 import { z } from "zod";
 import {
   isSignalFresh,
+  marketForecastFromSignal,
   type Action,
+  type MarketForecast,
   type Position,
   type Signal,
   type Strategy,
@@ -16,8 +18,8 @@ import {
 export const FlipFlatConfigSchema = z.object({
   /** Enter when |prob − price| in percentage points is at least this. */
   entrySpreadPp: z.number().default(10),
-  /** Hold at most the top N eligible signals, ranked by edge. */
-  topN: z.number().int().positive().default(2),
+  /** Optional position-count cap; null means no artificial strategy cap. */
+  topN: z.number().int().positive().nullable().default(null),
   /** Cumulative entry notional allowed per UTC day. */
   dailyBudgetUsd: z.number().positive().default(100),
   /** Desired notional for each entry as a percentage of the daily budget. */
@@ -26,7 +28,10 @@ export const FlipFlatConfigSchema = z.object({
   minEntryNotional: z.number().nonnegative().default(1),
   /** Explicit marketRefs, or "from-signals" to trade whatever is signaled. */
   universe: z.union([z.literal("from-signals"), z.array(z.string())]).default("from-signals"),
-  tickIntervalMin: z.number().positive().default(5),
+  /** Reconcile positions and evaluate exits every minute by default. */
+  tickIntervalMin: z.number().positive().default(1),
+  /** Refresh the complete signal snapshot independently of the engine cadence. */
+  signalPollIntervalMin: z.number().positive().default(5),
   /** Perps entry sanity bound: skip if mid drifted more than this % from refPrice. */
   refPriceSanityPct: z.number().positive().default(2),
   /**
@@ -94,63 +99,101 @@ export class FlipFlatStrategy implements Strategy {
     ]);
     let openCount = occupiedMarkets.size;
 
-    // Widest edge first. topN and the daily budget both bind
+    // Exits are position-driven, never signal-driven. Query the latest Q
+    // forecast for every held prediction market even when its entry signal is
+    // stale or no longer published, then compare it with a fresh venue quote.
+    const heldPositions = ctx.positions.filter(
+      (position) =>
+        position.size > 0 &&
+        !position.redeemable &&
+        (position.side === "YES" || position.side === "NO"),
+    );
+    if (cfg.convergenceExit && heldPositions.length > 0) {
+      const heldRefs = new Set(heldPositions.map((position) => position.marketRef));
+      const fallbackForecasts = signals
+        .map(marketForecastFromSignal)
+        .filter(
+          (forecast): forecast is MarketForecast =>
+            forecast !== null && heldRefs.has(forecast.marketRef),
+        );
+      let forecasts = fallbackForecasts;
+      const fetchForecasts = ctx.signals.forecasts?.bind(ctx.signals);
+      if (fetchForecasts) {
+        try {
+          const queried = await fetchForecasts({
+            venue: ctx.venueId,
+            marketRefs: [...heldRefs],
+          });
+          const queriedRefs = new Set(queried.map((forecast) => forecast.marketRef));
+          forecasts = [
+            ...queried,
+            ...fallbackForecasts.filter((forecast) => !queriedRefs.has(forecast.marketRef)),
+          ];
+        } catch (err) {
+          ctx.log.warn(`held forecast refresh failed: ${(err as Error).message}`);
+        }
+      }
+      const forecastByMarket = new Map(
+        forecasts.map((forecast) => [forecast.marketRef, forecast]),
+      );
+      for (const held of heldPositions) {
+        const forecast = forecastByMarket.get(held.marketRef);
+        if (!forecast) {
+          ctx.log.info(`no Q forecast for held market ${held.marketRef}; convergence not evaluated`);
+          continue;
+        }
+        const conv = await this.convergenceCheck(ctx, cfg, forecast, held);
+        if (conv) {
+          actions.push({ kind: "exit", marketRef: held.marketRef, reason: conv });
+          openCount -= 1;
+        }
+      }
+    }
+
+    // Widest edge first. An optional topN cap and the daily budget can bind
     // partway down this list, so iteration order decides which markets get the
-    // capital — unordered, that was whichever rows the gateway happened to
-    // return first. Signals with no computable edge (perps) sort as 0 and the
-    // sort is stable, so their relative order is unchanged.
+    // capital. Signals with no computable edge (perps) sort as 0 and the sort
+    // is stable, so their relative order is unchanged.
     const ranked = [...latestByMarket.entries()].sort((a, b) => edgePpOf(b[1]) - edgePpOf(a[1]));
 
     for (const [marketRef, sig] of ranked) {
+      // A held position was evaluated above from its forecast, whether or not
+      // this entry signal remains active or fresh.
+      if (ctx.positions.some((position) => position.marketRef === marketRef && position.size > 0)) continue;
       if (!isSignalFresh(sig, now)) {
-        ctx.log.info(`stale signal for ${marketRef} (ts=${sig.ts}, ttl=${sig.ttlSec}s); no action`);
+        ctx.log.info(`stale signal for ${marketRef} (ts=${sig.ts}, ttl=${sig.ttlSec}s); no entry`);
         continue;
       }
-      const held = ctx.positions.find((p) => p.marketRef === marketRef && p.size > 0);
 
-      if (!held) {
-        // Flat → enter the signaled side when the edge is wide enough.
-        if (ctx.openOrders.some((o) => o.marketRef === marketRef)) continue;
-        const spreadPp = signalEdgePp(sig);
-        const entryConditionMet = await this.entryOk(ctx, cfg, sig, spreadPp);
-        if (openCount >= cfg.topN) {
-          // Say what was passed over, and at what edge — a silent cap reads as
-          // "nothing else qualified" when the truth is "we ran out of slots".
-          ctx.log.info(
-            `top ${cfg.topN} positions already filled; skipping ${marketRef}` +
-              (spreadPp !== undefined ? ` (edge ${spreadPp.toFixed(1)}pp)` : ""),
-          );
+      // Flat → enter the signaled side when the edge is wide enough.
+      if (ctx.openOrders.some((o) => o.marketRef === marketRef)) continue;
+      const spreadPp = signalEdgePp(sig);
+      const entryConditionMet = await this.entryOk(ctx, cfg, sig, spreadPp);
+      if (cfg.topN !== null && openCount >= cfg.topN) {
+        // Say what was passed over, and at what edge — a silent cap reads as
+        // "nothing else qualified" when the truth is "we ran out of slots".
+        ctx.log.info(
+          `top ${cfg.topN} positions already filled; skipping ${marketRef}` +
+            (spreadPp !== undefined ? ` (edge ${spreadPp.toFixed(1)}pp)` : ""),
+        );
+        continue;
+      }
+      if (entryConditionMet) {
+        const notional = await this.entryNotional(ctx, cfg, sig, remainingBudgetUsd);
+        if (notional <= 0) {
+          ctx.log.info(`no sizeable edge or budget for ${marketRef}; skipping`);
           continue;
         }
-        if (entryConditionMet) {
-          const notional = await this.entryNotional(ctx, cfg, sig, remainingBudgetUsd);
-          if (notional <= 0) {
-            ctx.log.info(`no sizeable edge or budget for ${marketRef}; skipping`);
-            continue;
-          }
-          actions.push({
-            kind: "enter",
-            marketRef,
-            side: sig.side,
-            notional,
-            minNotional: cfg.minEntryNotional,
-            reason: `signal ${sig.id}${spreadPp !== undefined ? ` spread ${spreadPp.toFixed(1)}pp` : ""}`,
-          });
-          remainingBudgetUsd -= notional;
-          openCount += 1;
-        }
-        continue;
-      }
-
-      // Held. Hold until the market has converged onto the forecast — the
-      // signal's side flipping on its own is not an exit; the forecast can sit
-      // on the unheld side of 50% while the held side still carries edge.
-      if (cfg.convergenceExit) {
-        const conv = await this.convergenceCheck(ctx, cfg, sig, held);
-        if (conv) {
-          actions.push({ kind: "exit", marketRef, reason: conv });
-          openCount -= 1;
-        }
+        actions.push({
+          kind: "enter",
+          marketRef,
+          side: sig.side,
+          notional,
+          minNotional: cfg.minEntryNotional,
+          reason: `signal ${sig.id}${spreadPp !== undefined ? ` spread ${spreadPp.toFixed(1)}pp` : ""}`,
+        });
+        remainingBudgetUsd -= notional;
+        openCount += 1;
       }
     }
 
@@ -177,32 +220,31 @@ export class FlipFlatStrategy implements Strategy {
    * Convergence exit test. Returns the exit reason when the forecast has been
    * priced in, or undefined to keep holding.
    *
-   * Both legs are measured on the held side's own token: for a NO position the
-   * price is 1 − YES mid, and `sig.prob` arrives expressed for the signaled
-   * side — when the signal sits on the other side, it is re-expressed as
-   * 1 − prob. Mixing the two conventions would invert every NO decision.
+   * Both legs are measured on the held side's own token: for a NO position,
+   * both Q's YES forecast and the venue's YES mid are mirrored. Mixing the two
+   * conventions would invert every NO decision.
    */
   private async convergenceCheck(
     ctx: StrategyContext,
     cfg: FlipFlatConfig,
-    sig: Signal,
+    forecast: MarketForecast,
     held: Position,
   ): Promise<string | undefined> {
-    // Prediction markets only — perps signals carry no probability to converge on.
+    // Prediction markets only — perps carry no binary forecast to converge on.
     if (held.side !== "YES" && held.side !== "NO") return undefined;
-    if (sig.prob === undefined || !(held.avgPrice > 0)) return undefined;
+    if (!(held.avgPrice > 0)) return undefined;
 
     let mid: number;
     try {
-      mid = (await ctx.venue.quote(sig.marketRef)).mid;
+      mid = (await ctx.venue.quote(forecast.marketRef)).mid;
     } catch (err) {
-      ctx.log.warn(`convergence check skipped for ${sig.marketRef}: ${(err as Error).message}`);
+      ctx.log.warn(`convergence check skipped for ${forecast.marketRef}: ${(err as Error).message}`);
       return undefined;
     }
     if (!(mid > 0 && mid < 1)) return undefined;
 
     const curPrice = held.side === "NO" ? 1 - mid : mid;
-    const prob = sig.side === held.side ? sig.prob : 1 - sig.prob;
+    const prob = held.side === "NO" ? 1 - forecast.probYes : forecast.probYes;
     // Signed on purpose: an overshoot past the forecast is past converged.
     const remainingEdgePp = (prob - curPrice) * 100;
 

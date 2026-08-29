@@ -12,9 +12,17 @@
 // is a separate product surface — cassie only consumes this one read endpoint.
 
 import { z } from "zod";
-import type { Signal, SignalQuery, SignalSource, VenueId } from "../types.js";
+import type {
+  ForecastQuery,
+  MarketForecast,
+  Signal,
+  SignalQuery,
+  SignalSource,
+  VenueId,
+} from "../types.js";
 import { DEFAULT_SIGNAL_MAX_AGE_SEC, type SignalsConfig } from "../config.js";
 import { boundFetch } from "../http.js";
+import { QuotientResearchClient } from "../quotient/research.js";
 
 export const SignalSchema = z.object({
   id: z.string(),
@@ -32,6 +40,20 @@ export function isSignalFresh(sig: Signal, nowMs: number): boolean {
   const born = Date.parse(sig.ts);
   if (Number.isNaN(born)) return false;
   return nowMs - born <= sig.ttlSec * 1000;
+}
+
+/** Re-express a published signal as Q's YES forecast for held-position checks. */
+export function marketForecastFromSignal(sig: Signal): MarketForecast | null {
+  if (sig.prob === undefined) return null;
+  const probYes = sig.side === "YES" ? sig.prob : sig.side === "NO" ? 1 - sig.prob : undefined;
+  if (probYes === undefined) return null;
+  return {
+    id: sig.id,
+    ts: sig.ts,
+    venue: sig.venue,
+    marketRef: sig.marketRef,
+    probYes,
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -125,21 +147,32 @@ export async function checkLiveSignalAccess(
 export class LiveSignalSource implements SignalSource {
   /** condition_id → YES-token CLOB id (marketRef per the signal contract). */
   readonly #tokenCache = new Map<string, string>();
+  /** YES-token marketRef → Quotient's stable Polymarket marketKey. */
+  readonly #marketKeyCache = new Map<string, string>();
   readonly #cfg: Pick<SignalsConfig, "baseUrl" | "path" | "maxAgeSec">;
   readonly #token: string;
   readonly #fetchImpl: typeof fetch;
   readonly #clobBase: string;
+  readonly #gammaBase: string;
+  readonly #research: QuotientResearchClient;
 
   constructor(
     cfg: LiveSignalConfig,
     token: string,
     fetchImpl?: typeof fetch,
     clobBase = "https://clob.polymarket.com",
+    gammaBase = "https://gamma-api.polymarket.com",
   ) {
     this.#cfg = { ...cfg, maxAgeSec: cfg.maxAgeSec ?? DEFAULT_SIGNAL_MAX_AGE_SEC };
     this.#token = token;
     this.#fetchImpl = boundFetch(fetchImpl);
     this.#clobBase = clobBase;
+    this.#gammaBase = gammaBase;
+    this.#research = new QuotientResearchClient({
+      baseUrl: cfg.baseUrl,
+      token,
+      fetchImpl: this.#fetchImpl,
+    });
   }
 
   async latest(query: SignalQuery): Promise<Signal[]> {
@@ -159,6 +192,72 @@ export class LiveSignalSource implements SignalSource {
       out.push(sig);
     }
     return out;
+  }
+
+  /**
+   * Latest Q forecasts for held markets. This is deliberately independent of
+   * the published-signal feed: signal publication gates entries, never exits.
+   */
+  async forecasts(query: ForecastQuery): Promise<MarketForecast[]> {
+    const marketRefs = [...new Set(query.marketRefs.filter(Boolean))];
+    if (marketRefs.length === 0) return [];
+
+    if (query.venue === "polymarket") {
+      const resolved = await Promise.all(
+        marketRefs.map(async (marketRef) => ({
+          marketRef,
+          marketKey: await resolvePolymarketMarketKey(
+            marketRef,
+            this.#marketKeyCache,
+            this.#fetchImpl,
+            this.#gammaBase,
+          ),
+        })),
+      );
+      const byKey = new Map(
+        resolved
+          .filter((row): row is { marketRef: string; marketKey: string } => Boolean(row.marketKey))
+          .map((row) => [row.marketKey.toLowerCase(), row.marketRef]),
+      );
+      if (byKey.size === 0) return [];
+      const rows = await this.#research.lookup({
+        marketKeys: [...byKey.keys()],
+        venue: "polymarket",
+      });
+      return rows.flatMap((row) => {
+        const marketKey = row.marketKey?.toLowerCase();
+        const marketRef = marketKey ? byKey.get(marketKey) : undefined;
+        if (!marketRef || row.qProbability === undefined) return [];
+        return [{
+          id: row.marketKey ?? "forecast:" + marketRef,
+          ts: row.forecastAt ?? new Date(0).toISOString(),
+          venue: "polymarket" as const,
+          marketRef,
+          probYes: row.qProbability,
+        }];
+      });
+    }
+
+    if (query.venue === "kalshi") {
+      const wanted = new Set(marketRefs);
+      const rows = await this.#research.lookup({
+        marketKeys: marketRefs.map((marketRef) => "kalshi:" + marketRef),
+        venue: "kalshi",
+      });
+      return rows.flatMap((row) => {
+        const marketRef = row.nativeMarketId ?? row.marketKey?.replace(/^kalshi:/, "");
+        if (!marketRef || !wanted.has(marketRef) || row.qProbability === undefined) return [];
+        return [{
+          id: row.marketKey ?? "forecast:" + marketRef,
+          ts: row.forecastAt ?? new Date(0).toISOString(),
+          venue: "kalshi" as const,
+          marketRef,
+          probYes: row.qProbability,
+        }];
+      });
+    }
+
+    return [];
   }
 }
 
@@ -222,6 +321,35 @@ async function resolveYesToken(
   }
 }
 
+/** Resolve a YES-token marketRef to Quotient's Polymarket marketKey (cached). */
+async function resolvePolymarketMarketKey(
+  marketRef: string,
+  cache: Map<string, string>,
+  fetchImpl: typeof fetch,
+  gammaBase: string,
+): Promise<string | null> {
+  const cached = cache.get(marketRef);
+  if (cached) return cached;
+  try {
+    const url = new URL("/markets", gammaBase);
+    url.searchParams.set("clob_token_ids", marketRef);
+    const res = await fetchImpl(url, { headers: { accept: "application/json" } });
+    if (!res.ok) return null;
+    const body = await res.json();
+    const first = Array.isArray(body) ? body[0] : undefined;
+    const id =
+      typeof first === "object" && first !== null
+        ? (first as { id?: unknown }).id
+        : undefined;
+    if ((typeof id !== "string" && typeof id !== "number") || String(id).length === 0) return null;
+    const marketKey = "polymarket:" + String(id);
+    cache.set(marketRef, marketKey);
+    return marketKey;
+  } catch {
+    return null;
+  }
+}
+
 function mapVenue(v: string | null | undefined): VenueId | null {
   if (!v) return null;
   if (v.startsWith("polymarket")) return "polymarket";
@@ -278,5 +406,14 @@ export class FixtureSignalSource implements SignalSource {
       .filter((s) => !query.marketRef || s.marketRef === query.marketRef)
       // Fixture signals are always fresh relative to "now" so offline runs work:
       .map((s) => ({ ...s, ts: new Date().toISOString() }));
+  }
+
+  async forecasts(query: ForecastQuery): Promise<MarketForecast[]> {
+    const wanted = new Set(query.marketRefs);
+    const signals = await this.latest({ venue: query.venue });
+    return signals
+      .filter((signal) => wanted.has(signal.marketRef))
+      .map(marketForecastFromSignal)
+      .filter((forecast): forecast is MarketForecast => forecast !== null);
   }
 }

@@ -6,7 +6,14 @@
 // +EV to hold).
 
 import { describe, expect, it } from "vitest";
-import { silentLogger, type Position, type Signal, type SignalSource, type StrategyMemory } from "@quotient-forecasting/cassie-core";
+import {
+  silentLogger,
+  type MarketForecast,
+  type Position,
+  type Signal,
+  type SignalSource,
+  type StrategyMemory,
+} from "@quotient-forecasting/cassie-core";
 import { FlipFlatStrategy } from "../../../strategies/flip-flat/dist/index.js";
 
 const MARKET = "m-1";
@@ -41,11 +48,20 @@ function strategyMemory(): StrategyMemory {
 }
 
 /** `mid` is always the YES mid, as the venue reports it. */
-function ctxWith(signals: Signal[], positions: Position[], mid: number, config: Record<string, unknown> = {}) {
+function ctxWith(
+  signals: Signal[],
+  positions: Position[],
+  mid: number,
+  config: Record<string, unknown> = {},
+  forecasts?: MarketForecast[],
+) {
   return {
     venueId: "polymarket" as const,
     config,
-    signals: { latest: async () => signals } as SignalSource,
+    signals: {
+      latest: async () => signals,
+      ...(forecasts ? { forecasts: async () => forecasts } : {}),
+    } as SignalSource,
     positions,
     openOrders: [],
     equity: 1_000,
@@ -65,6 +81,24 @@ async function exits(ctx: unknown) {
 }
 
 describe("convergence exit", () => {
+  it("queries held-market forecasts and exits even when no entry signal is published", async () => {
+    const forecast: MarketForecast = {
+      id: "forecast-spider-man",
+      ts: "2026-08-24T22:06:19.902Z",
+      venue: "polymarket",
+      marketRef: MARKET,
+      probYes: 0.9184779613,
+    };
+    const got = await exits(ctxWith([], [position({ avgPrice: 0.62 })], 0.992, {}, [forecast]));
+    expect(got).toHaveLength(1);
+    expect(got[0]!.reason).toMatch(/converged: -7\.4pp edge left/);
+  });
+
+  it("does not apply entry-signal freshness to a held-position exit", async () => {
+    const stale = sig({ ts: "2026-08-01T00:00:00Z", ttlSec: 60 });
+    expect(await exits(ctxWith([stale], [position()], 0.78))).toHaveLength(1);
+  });
+
   it("sells once the market prices in the forecast at a profit", async () => {
     // Entered at 0.55, forecast 0.70, market now 0.69 → 1pp left, +25%.
     const got = await exits(ctxWith([sig()], [position()], 0.69));

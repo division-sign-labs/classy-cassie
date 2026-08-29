@@ -8,16 +8,19 @@ import { ask, confirm } from "../context.js";
 import { loadBotConfig, saveBotConfig } from "../paths.js";
 
 export const RECOMMENDED_STRATEGY = {
-  topN: 2,
+  topN: null,
   dailyBudgetUsd: 100,
   positionBudgetPct: 25,
   entrySpreadPp: 10,
   minEntryNotional: 1,
   universe: "from-signals",
-  tickIntervalMin: 5,
+  tickIntervalMin: 1,
+  signalPollIntervalMin: 5,
 } as const;
 
-export const RECOMMENDED_SUMMARY = "up to 2 positions, widest eligible edges first, $100 daily budget, $25 per entry, 10pp minimum edge";
+export const RECOMMENDED_SUMMARY =
+  "no position-count cap, widest eligible edges first, $100 daily budget, $25 per entry, " +
+  "10pp minimum edge, positions every 60s, signals every 5m";
 
 export async function elicitRecommendedStrategyConfig(
   current: Record<string, unknown> = {},
@@ -33,7 +36,11 @@ export async function elicitRecommendedStrategyConfig(
 
 export async function elicitStrategyConfig(current: Record<string, unknown> = {}): Promise<Record<string, unknown>> {
   const d = (k: string, fallback: string) => String(current[k] ?? fallback);
-  const topN = positiveInteger("top positions", await ask("Top N signal positions", { default: d("topN", "2") }));
+  const topN = positionLimit(
+    await ask("Maximum signal positions (number or unlimited)", {
+      default: current.topN === null ? "unlimited" : d("topN", "unlimited"),
+    }),
+  );
   const dailyBudgetUsd = positiveNumber(
     "daily entry budget",
     await ask("Daily entry budget ($, resets at 00:00 UTC)", { default: d("dailyBudgetUsd", "100") }),
@@ -47,7 +54,16 @@ export async function elicitStrategyConfig(current: Record<string, unknown> = {}
     "minimum entry",
     await ask("Minimum viable entry after risk caps ($)", { default: d("minEntryNotional", "1") }),
   );
-  const tickIntervalMin = positiveNumber("tick interval", await ask("Tick interval (min)", { default: d("tickIntervalMin", "5") }));
+  const positionCheckSeconds = positiveNumber(
+    "position check interval",
+    await ask("Position check interval (sec)", {
+      default: String(Number(d("tickIntervalMin", "1")) * 60),
+    }),
+  );
+  const signalPollIntervalMin = positiveNumber(
+    "signal check interval",
+    await ask("Signal check interval (min)", { default: d("signalPollIntervalMin", "5") }),
+  );
   const universeRaw = (await ask("Universe (from-signals or marketRefs)", { default: d("universe", "from-signals") })).trim();
   return {
     topN,
@@ -56,7 +72,8 @@ export async function elicitStrategyConfig(current: Record<string, unknown> = {}
     entrySpreadPp,
     minEntryNotional,
     universe: universeRaw === "from-signals" ? "from-signals" : universeRaw.split(",").map((s) => s.trim()),
-    tickIntervalMin,
+    tickIntervalMin: positionCheckSeconds / 60,
+    signalPollIntervalMin,
   };
 }
 
@@ -65,6 +82,8 @@ export interface StrategyOptions {
   dailyBudget?: string;
   positionBudgetPct?: string;
   minEntryNotional?: string;
+  positionCheckSeconds?: string;
+  signalCheckMinutes?: string;
   signalMaxAgeHours?: string;
   slippage?: string;
   maxOrderNotional?: string;
@@ -81,13 +100,21 @@ export async function runStrategy(botId: string, opts: StrategyOptions = {}): Pr
   const directUpdate = Object.values(opts).some((value) => value !== undefined);
   if (directUpdate) {
     const strategyConfig = normalizeStrategyConfig(cfg.strategy.config as Record<string, unknown>);
-    if (opts.top !== undefined) strategyConfig.topN = positiveInteger("top positions", opts.top);
+    let tickIntervalMin = cfg.tickIntervalMin;
+    if (opts.top !== undefined) strategyConfig.topN = positionLimit(opts.top);
     if (opts.dailyBudget !== undefined) strategyConfig.dailyBudgetUsd = positiveNumber("daily entry budget", opts.dailyBudget);
     if (opts.positionBudgetPct !== undefined) {
       strategyConfig.positionBudgetPct = percentage("budget per position", opts.positionBudgetPct);
     }
     if (opts.minEntryNotional !== undefined) {
       strategyConfig.minEntryNotional = nonnegativeNumber("minimum entry notional", opts.minEntryNotional);
+    }
+    if (opts.positionCheckSeconds !== undefined) {
+      tickIntervalMin = positiveNumber("position check interval", opts.positionCheckSeconds) / 60;
+      strategyConfig.tickIntervalMin = tickIntervalMin;
+    }
+    if (opts.signalCheckMinutes !== undefined) {
+      strategyConfig.signalPollIntervalMin = positiveNumber("signal check interval", opts.signalCheckMinutes);
     }
     const maxAgeSec =
       opts.signalMaxAgeHours === undefined
@@ -105,13 +132,14 @@ export async function runStrategy(botId: string, opts: StrategyOptions = {}): Pr
       strategy: { ...cfg.strategy, config: strategyConfig },
       signals: { ...cfg.signals, maxAgeSec },
       risk,
+      tickIntervalMin,
     });
     console.log(pc.green(`saved strategy settings for ${botId}`));
-    printStrategy(strategyConfig, maxAgeSec, risk);
+    printStrategy(strategyConfig, maxAgeSec, risk, tickIntervalMin);
     return;
   }
   console.log(pc.bold(`strategy: signals`));
-  printStrategy(cfg.strategy.config as Record<string, unknown>, cfg.signals.maxAgeSec, cfg.risk);
+  printStrategy(cfg.strategy.config as Record<string, unknown>, cfg.signals.maxAgeSec, cfg.risk, cfg.tickIntervalMin);
   if (await confirm(`Reset to recommended (${RECOMMENDED_SUMMARY})?`, false)) {
     saveStrategy(botId, await elicitRecommendedStrategyConfig(cfg.strategy.config as Record<string, unknown>));
     return;
@@ -138,6 +166,12 @@ function positiveInteger(label: string, raw: string): number {
   return value;
 }
 
+function positionLimit(raw: string): number | null {
+  const normalized = raw.trim().toLowerCase();
+  if (normalized === "unlimited" || normalized === "none" || normalized === "off") return null;
+  return positiveInteger("position limit", raw);
+}
+
 function percentage(label: string, raw: string): number {
   const value = positiveNumber(label, raw);
   if (value > 100) throw new Error(`${label} must be at most 100%`);
@@ -153,12 +187,14 @@ function printStrategy(
   config: Record<string, unknown>,
   maxAgeSec: number,
   risk: { maxOrderNotional: number; slippagePct: number },
+  tickIntervalMin: number,
 ): void {
   const current = { ...RECOMMENDED_STRATEGY, ...normalizeStrategyConfig(config) };
   const dailyBudgetUsd = Number(current.dailyBudgetUsd);
   const positionBudgetPct = Number(current.positionBudgetPct);
   const perEntryUsd = (dailyBudgetUsd * positionBudgetPct) / 100;
-  console.log(`  top N positions:      ${current.topN} (widest eligible edges first)`);
+  const positionLimit = current.topN === null ? "unlimited" : String(current.topN);
+  console.log(`  position limit:       ${positionLimit} (widest eligible edges first)`);
   console.log(`  daily entry budget:   $${dailyBudgetUsd.toFixed(2)} (resets 00:00 UTC)`);
   console.log(`  budget per entry:     ${positionBudgetPct}% = $${perEntryUsd.toFixed(2)} before liquidity/risk caps`);
   console.log(`  minimum entry edge:   ${current.entrySpreadPp}pp`);
@@ -166,18 +202,24 @@ function printStrategy(
   console.log(`  slippage:             ${risk.slippagePct}% from best executable price`);
   console.log(`  hard per-order cap:   $${risk.maxOrderNotional.toFixed(2)} (risk module)`);
   console.log(`  signal max age:       ${(maxAgeSec / 3600).toFixed(2)}h`);
-  console.log(`  tick interval:        ${current.tickIntervalMin} min`);
+  console.log(`  signal checks:        every ${compactNumber(Number(current.signalPollIntervalMin))} min`);
+  console.log(`  position checks:      every ${compactNumber(tickIntervalMin * 60)} sec`);
   console.log(`  universe:             ${Array.isArray(current.universe) ? current.universe.join(", ") : current.universe}`);
+}
+
+function compactNumber(value: number): string {
+  return String(Number(value.toFixed(4)));
 }
 
 function saveStrategy(botId: string, config: Record<string, unknown>): void {
   const cfg = loadBotConfig(botId);
   const normalized = normalizeStrategyConfig(config);
+  const tickIntervalMin = Number(normalized.tickIntervalMin ?? cfg.tickIntervalMin);
   saveBotConfig({
     ...cfg,
     strategy: { id: "signals", config: normalized },
-    tickIntervalMin: Number(normalized.tickIntervalMin ?? cfg.tickIntervalMin),
+    tickIntervalMin,
   });
   console.log(pc.green(`saved strategy settings for ${botId}`));
-  printStrategy(normalized, cfg.signals.maxAgeSec, cfg.risk);
+  printStrategy(normalized, cfg.signals.maxAgeSec, cfg.risk, tickIntervalMin);
 }

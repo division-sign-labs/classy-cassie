@@ -136,6 +136,17 @@ function row(label: string, value: string): void {
   console.log(`${pc.dim(label.padEnd(10))}${value}`);
 }
 
+function compactNumber(value: number): string {
+  return String(Number(value.toFixed(4)));
+}
+
+function cadence(cfg: BotConfig): string {
+  const signalMin = Number(
+    (cfg.strategy.config as Record<string, unknown>).signalPollIntervalMin ?? 5,
+  );
+  return `positions every ${compactNumber(cfg.tickIntervalMin * 60)}s, signals every ${compactNumber(signalMin)}m`;
+}
+
 export async function showStatus(botId: string): Promise<void> {
   const cfg = loadBotConfig(botId);
 
@@ -144,7 +155,7 @@ export async function showStatus(botId: string): Promise<void> {
   if (!isDeployed(cfg)) {
     console.log(pc.bold(`${botId}  ${cfg.venue}  not deployed`));
     console.log("");
-    row("strategy", `${cfg.strategy.id}, every ${cfg.tickIntervalMin}m`);
+    row("strategy", `${cfg.strategy.id}, ${cadence(cfg)}`);
     row("account", accountAddress(cfg) ?? "not provisioned — run cassie init");
     console.log("");
     console.log(pc.dim(`cassie run ${botId} runs it here. cassie deploy ${botId} puts it on a droplet.`));
@@ -198,7 +209,7 @@ export async function showStatus(botId: string): Promise<void> {
   row(
     "engine",
     runtime
-      ? `${runtime.paused ? "paused" : "live"}, last tick ${ago(runtime.lastTickAt)}, every ${cfg.tickIntervalMin}m`
+      ? `${runtime.paused ? "paused" : "live"}, last tick ${ago(runtime.lastTickAt)}, ${cadence(cfg)}`
       : "not answering on the control socket",
   );
 

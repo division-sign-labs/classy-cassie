@@ -115,12 +115,16 @@ Every step happens in the terminal; you only leave it to copy-paste dashboard va
    `signals`). The `agent` strategy is the monitoring agent — plain-language mandate,
    Quotient research, model-selected entries, quarter-Kelly sizing; see §13. `signals`: follow Quotient signals, hold until Q's
    forecast converges with the market price; positions with remaining edge are held
-   regardless of P&L). The recommended allocation holds up to 2 positions, prioritizes the widest
+   regardless of P&L). The recommended allocation has no position-count cap, prioritizes the widest
    eligible edges for new entries, with a $100 daily budget and $25 requested per entry;
    the wizard always asks for the
    dollar budget (default $100). The budget resets at 00:00 UTC, counts only entry notional
    actually placed after risk/capacity limits, and does not close positions when it resets.
-   Declining the recommendation asks for top N, daily budget, allocation percentage, entry
+   The engine re-reads venue odds for held positions every 60 seconds. Every 5 minutes it
+   separately refreshes entry signals and batches the latest Q forecasts for held markets,
+   so stale or unpublished entry signals never suppress convergence. Held-market forecast
+   lookups cost $0.005 per batch of up to 10 markets per refresh.
+   Declining the recommendation asks for an optional position cap, daily budget, allocation percentage, entry
    edge, minimum viable entry, tick interval, and universe. `cassie strategy <botId>`
    displays or changes the same settings at any time.
 8. **Signals** — live Quotient signals. The wizard reuses a key found from the quotient
@@ -186,8 +190,9 @@ cassie wallet register-splits <botId>        # register EOA only; grants no acco
 cassie fund <botId> [--from splits]          # run/re-run the venue funding flow
 cassie withdraw <botId> <amount|all> --to <address>   # send collateral out (signs locally)
 cassie run <botId> [--debug]
-cassie strategy <botId>                      # view/tune top N, daily budget, allocation, guardrails
+cassie strategy <botId>                      # view/tune position cap, daily budget, allocation, guardrails
 cassie strategy <botId> --top 3 --daily-budget 100 --position-budget-pct 33
+cassie strategy <botId> --position-check-seconds 60 --signal-check-minutes 5
 cassie deploy <botId> [--region <slug>] [--size <slug>] [-y]   # a droplet in YOUR DigitalOcean account
 cassie destroy <botId> [-y] [--force]        # cancel resting orders, delete the droplet
 cassie status <botId>                        # droplet + service + engine, one screen
@@ -350,15 +355,21 @@ logged in, the same key lives in `~/.config/quotient/config.json`. Give it to ca
 `QUOTIENT_API_TOKEN` / `QUOTIENT_API_KEY` in the environment or nearest `.local.env`,
 or let the wizard store it in the keystore by re-running `cassie init`.
 
-The quotient-api skill is a separate product surface (research, forecasts, briefs); cassie
-consumes exactly one read endpoint — the published-signals feed — and maps each row onto
-its internal contract: Polymarket `condition_id` resolves to the YES-token marketRef,
-`latest_q` becomes the side-adjusted model probability, `current_cost_cents` the reference
-price. Live forecasts older than three hours fail the freshness check by default and
-cause no action; `signals.maxAgeSec` can override that per bot.
+The quotient-api skill is a separate product surface (research, forecasts, briefs). For
+entries, cassie consumes the published-signals feed: Polymarket `condition_id` resolves
+to the YES-token marketRef, `latest_q` becomes the side-adjusted model probability, and
+`current_cost_cents` the reference price. Forecasts older than three hours fail entry
+freshness by default; `signals.maxAgeSec` can override that per bot. Freshness never
+suppresses an exit.
 
-Financial fields never flow toward the signal API — the client sends only the API key
-header, no query params, and its type surface has no method that accepts account state.
+For exits, held positions drive a batched market lookup independently of signal publication.
+The runtime caches both the entry-signal snapshot and held-market Q forecasts for
+`signalPollIntervalMin` (5 minutes by default), then re-reads venue odds on the faster
+engine cadence. Each held-market lookup costs $0.005 per batch of up to 10 markets.
+
+Financial fields never flow toward Quotient: no P&L, balances, position sizes, or account
+size. Exit lookups disclose only the held market identifiers needed to retrieve Q forecasts;
+the typed API accepts no account state.
 
 Contributors can run the deterministic offline engine case without creating a bot,
 keys, or funds:
