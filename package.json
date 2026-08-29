@@ -1,7 +1,7 @@
 {
   "name": "cassie-monorepo",
   "private": true,
-  "version": "0.2.1",
+  "version": "0.2.2",
   "packageManager": "pnpm@10.15.0",
   "engines": {
     "node": ">=24"
@@ -10,7 +10,9 @@
     "build": "pnpm -r build",
     "typecheck": "pnpm -r typecheck",
     "test": "pnpm build && vitest run",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "release:check": "pnpm typecheck && pnpm test && pnpm -r publish --dry-run --no-git-checks --access public",
+    "release:publish": "pnpm -r publish --access public --publish-branch main"
   },
   "devDependencies": {
     "typescript": "5.9.2",
