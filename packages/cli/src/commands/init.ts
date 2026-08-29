@@ -198,7 +198,7 @@ export async function runInit(): Promise<void> {
   }
   let wallet: BotConfig["wallet"];
   if (state.wallet?.address) {
-    const passphrase = await getPassphrase();
+    const passphrase = await getPassphrase(botId);
     const stored = ks.getEntry(botId, KeyRoles.master, passphrase);
     if (!stored || addressFromPk(stored).toLowerCase() !== state.wallet.address.toLowerCase()) {
       throw new Error("the init checkpoint's wallet does not match the encrypted local master key");
@@ -206,7 +206,7 @@ export async function runInit(): Promise<void> {
     wallet = state.wallet;
     console.log(pc.dim(`reusing verified local wallet ${wallet.address}`));
   } else if (ks.entryMeta(botId, KeyRoles.master)) {
-    const passphrase = await getPassphrase();
+    const passphrase = await getPassphrase(botId);
     const stored = ks.getEntry(botId, KeyRoles.master, passphrase);
     if (!stored) throw new Error(`master key metadata exists for ${botId}, but the key could not be loaded`);
     const storedAddress = addressFromPk(stored);
@@ -220,7 +220,7 @@ export async function runInit(): Promise<void> {
     checkpoint({ ...state, wallet });
     console.log(pc.dim(`reusing existing master key for ${botId} (${wallet.address})`));
   } else {
-    const passphrase = await getPassphrase(!ks.exists(botId));
+    const passphrase = await getPassphrase(botId, !ks.exists(botId));
     if (ks.exists(botId)) ks.verifyPassphrase(botId, passphrase);
     const eoa = generateEoa();
     ks.putEntry(botId, KeyRoles.master, eoa.privateKey, passphrase, {
@@ -246,7 +246,7 @@ export async function runInit(): Promise<void> {
       "the setup checkpoint contains a different venue account while an older deployed runtime is still attached to this bot id; use a new bot id or restore the matching checkpoint/config",
     );
   }
-  const pass = await getPassphrase();
+  const pass = await getPassphrase(botId);
 
   const existingAccount = existing?.account?.venue === venue ? existing.account : undefined;
   const existingAccountAddress = existingAccount ? accountWalletAddress(existingAccount) : undefined;

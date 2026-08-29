@@ -25,6 +25,13 @@ authenticated by the official Splits CLI. It is passkey-operated by default, app
 the org's other subaccounts, and gives the bot no authority over them. Bot wallets are
 generated directly into Cassie's encrypted local keystore.
 
+After the passphrase is confirmed, Cassie offers to save it per bot in macOS Keychain,
+Windows Credential Manager, or Linux Secret Service. This is the default for local
+agent-driven CLI commands. The passphrase stays on the operator's machine and is never
+sent to the droplet.
+Use `cassie passphrase remember <botId>` for an existing bot. Keep a recovery copy in a
+password manager; the system credential store is not a recovery service.
+
 For contributors working from this checkout:
 
 ```sh
@@ -79,6 +86,11 @@ socket at `/run/cassie/<botId>.sock`; `cassie status`, `cassie logs`, `cassie ss
 `cassie portfolio`, and `cassie trade` all go over SSH with a key generated at
 `~/.cassie/ssh/id_ed25519`. Host keys are pinned to `~/.cassie/ssh/known_hosts` on first
 contact, and every later connection runs with `StrictHostKeyChecking=yes`.
+
+Those deployed control commands need only the SSH key. Commands that decrypt local
+credentials, including deploy, local run, funding, and withdrawal, read the per-bot
+passphrase from the system credential store. `CASSIE_PASSPHRASE` remains an explicit
+override for headless environments.
 
 `cassie destroy <botId>` cancels resting orders, stops the service, and deletes the
 droplet. Keys and venue balances are untouched.

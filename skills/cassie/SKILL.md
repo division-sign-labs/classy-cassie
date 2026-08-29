@@ -51,8 +51,12 @@ API token with read and write scope; `cassie deploy` walks through creating one.
   Note the bare `cassie` npm name is taken by an unrelated package — the published names
   are the scoped `@quotient-forecasting/*` packages; the installed binary is still `cassie`.
 
-Environment: `CASSIE_HOME` overrides `~/.cassie`; `CASSIE_PASSPHRASE` supplies the
-keystore passphrase non-interactively (testing convenience — prefer the prompt);
+Environment: `CASSIE_HOME` overrides `~/.cassie`; `CASSIE_PASSPHRASE` supplies an
+explicit non-interactive keystore-passphrase override. Otherwise Cassie reads the per-bot
+passphrase from macOS Keychain, Windows Credential Manager, or Linux Secret Service, then
+prompts. A confirmed prompt offers to save there by default. The native store is the
+normal agent-driven path; keep a separate recovery copy because Cassie cannot recover a
+lost passphrase.
 `QUOTIENT_API_TOKEN` / `QUOTIENT_API_KEY`, `ARES_API_KEY`, `ARES_BUILDER_CODE`, and
 `SURPLUS_API_KEY` (the agent strategy's LLM credential) from
 the nearest `.local.env` (preferred and authoritative over stale exported values) or
@@ -68,8 +72,10 @@ Every step happens in the terminal; you only leave it to copy-paste dashboard va
 1. **Bot id** — lowercase, dashes, max 32 chars. Names the config, keystore, and state files.
 2. **Venue** — `polymarket`, `kalshi`, or `hyperliquid`.
 3. **Wallet** — generate directly into the encrypted local keystore.
-4. **Passphrase** — encrypts the keystore. There is no recovery; losing it means
-   re-importing or re-generating keys.
+4. **Passphrase** — encrypts the keystore. After confirmation, Cassie offers to save it
+   per bot in the native system credential store. This lets a local agent run commands
+   without a prompt; it does not send the passphrase to the droplet. There is no Cassie
+   recovery service, so keep a separate copy in a password manager.
 5. **Optional Splits Teams subaccount** — requires the official
    `@splits/splits-cli@0.2.11`. Its API key is bound to one organization; Cassie runs
    `splits auth whoami`, shows the exact org name/id, and asks for confirmation. You choose
@@ -187,6 +193,9 @@ cassie wallet import <botId>                 # import a private key via stdin
 cassie wallet export <botId> --yes-print-my-key   # print raw key (double confirmation)
 cassie wallet list                           # bots, key roles, runtime-eligibility
 cassie wallet register-splits <botId>        # register EOA only; grants no account authority
+cassie passphrase remember <botId>           # save a verified passphrase in the native credential store
+cassie passphrase forget <botId>             # remove the saved passphrase
+cassie passphrase status <botId>             # report whether a passphrase is saved
 cassie fund <botId> [--from splits]          # run/re-run the venue funding flow
 cassie withdraw <botId> <amount|all> --to <address>   # send collateral out (signs locally)
 cassie run <botId> [--debug]
@@ -231,10 +240,11 @@ Notes:
   depth-percentage cap by default. Skips
   raise alerts. There is no quoted-spread gate: a wide market with depth at the touch is
   tradable, because execution cost is bounded by the slippage band, not the quote.
-- For a deployed bot, `portfolio`, `trade`, `orders`, `status`, and `logs` reach the
-  droplet over SSH. No token is involved, and no passphrase prompt blocks an agent: the
-  SSH key at `~/.cassie/ssh/id_ed25519` is the whole credential. `cassie trade` and
-  `cassie withdraw` still unlock the keystore, because those sign.
+- For a deployed bot, `portfolio`, direct `trade`, `orders`, `status`, and `logs` reach
+  the droplet over SSH. The SSH key at `~/.cassie/ssh/id_ed25519` is the whole control
+  credential. `deploy`, local runs and trades, funding, withdrawals, and local thesis
+  sizing can unlock the keystore; the native credential store supplies that passphrase
+  to agent-driven commands.
 
 ## 5. Deploy
 
@@ -313,8 +323,8 @@ cassie ssh <botId>                         # a shell on the droplet
 `cassie status` reads the DigitalOcean API, `systemctl show`, and the control socket, then
 prints the droplet (region, size, address, monthly cost, uptime), the service (state,
 restart count, start time), the engine (live or paused, last tick), the book, and the last
-five journal lines. It does not unlock the keystore. `cassie portfolio` is the command that
-does, because it prices a book.
+five journal lines. It does not unlock the keystore. A deployed `cassie portfolio` also
+reads the runtime over SSH; a local portfolio unlocks the local venue credentials.
 
 Two log sources, and they answer different questions:
 
@@ -557,7 +567,8 @@ Never attach a Polymarket bot EOA to a Splits account.
   all resting orders ~10–15s later. That is the designed behavior (kill-safety), not a bug.
 - **"wrong passphrase (or corrupted keystore)"** — scrypt+AES-GCM authentication failed:
   wrong passphrase, or the keystore file was edited. There is no recovery without the
-  passphrase; re-import the key (`cassie wallet import`) if you have it elsewhere.
+  passphrase; re-import the key (`cassie wallet import`) if you have it elsewhere. Cassie
+  does not delete a saved system-credential-store entry on this ambiguous error.
 - **`cassie deploy` fails immediately** — the DigitalOcean token is missing or lacks write
   scope, the account is at its droplet limit, or the region does not offer the size. The
   error names which. Deploys run against your own DigitalOcean account.

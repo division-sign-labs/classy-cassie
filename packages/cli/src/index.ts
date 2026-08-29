@@ -18,6 +18,7 @@ import { runDestroy } from "./commands/destroy.js";
 import { agentDryRun, agentPersona, agentPrompt, agentStatus } from "./commands/agent.js";
 import { configureReporting } from "./commands/reporting.js";
 import { installSkill } from "./commands/skill.js";
+import { forgetPassphrase, passphraseStatus, rememberPassphrase } from "./commands/passphrase.js";
 import { cliVersion } from "./version.js";
 
 const program = new Command();
@@ -42,6 +43,17 @@ wallet
   .command("register-splits <botId>")
   .description("print the safe Splits EOA registration command (does not attach account authority)")
   .action(wrap(registerSplitsSigner));
+
+const passphrase = program.command("passphrase").description("keystore passphrase storage");
+passphrase
+  .command("remember <botId>")
+  .description("save a verified passphrase in the system credential store")
+  .action(wrap(rememberPassphrase));
+passphrase
+  .command("forget <botId>")
+  .description("remove a passphrase from the system credential store")
+  .action(wrap(forgetPassphrase));
+passphrase.command("status <botId>").description("show whether a passphrase is saved").action(wrap(passphraseStatus));
 
 program
   .command("fund <botId>")

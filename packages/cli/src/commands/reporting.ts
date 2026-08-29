@@ -36,7 +36,7 @@ export async function configureReporting(botId: string, opts: ReportingOpts): Pr
   if (!resolvedKey) {
     const apiKey = (await ask("Ares API key", { secret: true })).trim();
     if (!apiKey) throw new Error("Ares posting was enabled without an API key");
-    keystore().putEntry(botId, KeyRoles.aresApiKey, apiKey, await getPassphrase(), { runtimeEligible: true });
+    keystore().putEntry(botId, KeyRoles.aresApiKey, apiKey, await getPassphrase(botId), { runtimeEligible: true });
     resolvedKey = { value: apiKey, origin: `bot ${botId} keystore entry ${KeyRoles.aresApiKey}` };
   }
   console.log(pc.dim(`Ares authoring key: ${resolvedKey.origin}`));

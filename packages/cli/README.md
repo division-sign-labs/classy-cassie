@@ -35,7 +35,9 @@ cassie run bot-1     # the bot in this terminal
 
 `cassie init` asks for a keystore passphrase, generates an EOA into
 `~/.cassie/keys/bot-1.json`, provisions the venue account, sets the daily entry budget,
-and walks through funding. Everything happens in the terminal.
+and walks through funding. It offers to save the confirmed passphrase in the native system
+credential store so later agent-driven commands do not prompt. Everything happens in the
+terminal.
 
 Ctrl-C cancels resting orders before the process exits.
 
@@ -58,6 +60,9 @@ Ctrl-C cancels resting orders before the process exits.
 | `cassie trade <bot> --thesis` | Six questions to a sized, stopped, approvable order. |
 | `cassie strategy <bot>` | View or tune position count, budget, and guardrails. |
 | `cassie wallet list` | Bots and key roles. |
+| `cassie passphrase remember <bot>` | Save a verified passphrase in the system credential store. |
+| `cassie passphrase forget <bot>` | Remove a saved passphrase. |
+| `cassie passphrase status <bot>` | Show whether a passphrase is saved. |
 | `cassie alerts test <bot>` | Send a Telegram ping. |
 | `cassie venue status` | Adapters and when each was last verified. |
 
@@ -110,7 +115,7 @@ cassie destroy bot-1              # cancels resting orders, then deletes the dro
 
 ## Keys
 
-Everything lives under `~/.cassie`, mode 0600:
+Cassie's local files live under `~/.cassie`, mode 0600:
 
 | | |
 |---|---|
@@ -119,6 +124,11 @@ Everything lives under `~/.cassie`, mode 0600:
 | `state/<bot>.sqlite` | Tick state and recorded errors from local runs |
 | `ssh/id_ed25519` | The deploy key |
 | `digitalocean.token` | Your API token |
+
+Passphrases saved for unattended local commands live outside this directory: macOS
+Keychain, Windows Credential Manager, or Linux Secret Service. The entry is per bot and
+per `CASSIE_HOME`. `CASSIE_PASSPHRASE` and the nearest `.local.env` remain explicit
+automation overrides; Cassie does not add exports to shell startup files.
 
 A deployed bot needs a key that can sign orders, so `cassie deploy` copies that one
 credential to the droplet over SSH and writes it to `/etc/cassie/<bot>.env`, readable only

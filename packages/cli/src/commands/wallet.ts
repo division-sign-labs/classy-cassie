@@ -11,7 +11,7 @@ export async function walletCreate(botId: string): Promise<void> {
     console.error(pc.red(`bot "${botId}" already has a master key — refusing to overwrite`));
     process.exit(1);
   }
-  const pass = await getPassphrase(true);
+  const pass = await getPassphrase(botId, true);
   if (ks.exists(botId)) ks.verifyPassphrase(botId, pass);
   const eoa = generateEoa();
   ks.putEntry(botId, KeyRoles.master, eoa.privateKey, pass, { address: eoa.address, runtimeEligible: false });
@@ -38,7 +38,7 @@ export async function walletImport(botId: string): Promise<void> {
     process.exit(1);
   }
   const address = addressFromPk(pk);
-  const pass = await getPassphrase(true);
+  const pass = await getPassphrase(botId, true);
   if (ks.exists(botId)) ks.verifyPassphrase(botId, pass);
   ks.putEntry(botId, KeyRoles.master, pk, pass, { address, runtimeEligible: false });
   console.log(`imported master key for ${pc.bold(botId)} — address ${pc.green(address)}`);
@@ -51,7 +51,7 @@ export async function walletExport(botId: string, opts: { yesPrintMyKey?: boolea
   }
   const ok = await confirm(pc.yellow("This prints the RAW PRIVATE KEY to this terminal. Continue?"), false);
   if (!ok) process.exit(1);
-  const pass = await getPassphrase();
+  const pass = await getPassphrase(botId);
   const pk = keystore().getEntry(botId, KeyRoles.master, pass);
   if (!pk) {
     console.error(pc.red(`no master key for bot "${botId}"`));

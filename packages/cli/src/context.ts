@@ -9,6 +9,7 @@ import pc from "picocolors";
 import {
   Keystore,
   KeyRoles,
+  WrongPassphraseError,
   createAdapter,
   type BotConfig,
   type RuntimeCreds,
@@ -19,23 +20,60 @@ import { dirs } from "./paths.js";
 import { getOperatorDefault, setOperatorDefault } from "./defaults.js";
 import { ControlApiError, controlCall, type Target } from "./ssh.js";
 import { resolveLocalValue } from "./local-env.js";
+import { systemPassphraseStore } from "./passphrase-store.js";
 
-let cachedPassphrase: string | undefined;
+const cachedPassphrases = new Map<string, string>();
 
-export async function getPassphrase(confirmNew = false): Promise<string> {
-  if (cachedPassphrase !== undefined) return cachedPassphrase;
-  // The nearest .local.env, then the exported environment — the same order the
-  // Quotient, Ares, DigitalOcean, and RPC credentials resolve in. Without this
-  // an agent driving the CLI stalls on a prompt it cannot answer.
+export async function getPassphrase(botId: string, confirmNew = false): Promise<string> {
+  const cached = cachedPassphrases.get(botId);
+  if (cached !== undefined) return cached;
+  // A nearest .local.env or exported value is an explicit automation override.
+  // Otherwise use per-bot native storage before asking the operator.
   const supplied = resolveLocalValue(["CASSIE_PASSPHRASE"]);
   if (supplied) {
-    cachedPassphrase = supplied.value;
-    return cachedPassphrase;
+    cachedPassphrases.set(botId, supplied.value);
+    return supplied.value;
+  }
+
+  let storeError: Error | undefined;
+  if (systemPassphraseStore.isSupported()) {
+    try {
+      const remembered = await systemPassphraseStore.get(botId);
+      if (remembered !== undefined) {
+        const ks = keystore();
+        let valid = true;
+        if (ks.exists(botId)) {
+          try {
+            ks.verifyPassphrase(botId, remembered);
+          } catch (error) {
+            if (!(error instanceof WrongPassphraseError)) throw error;
+            valid = false;
+            storeError = new Error(`the saved passphrase for ${botId} did not unlock the keystore`);
+            console.error(pc.yellow(`The saved passphrase for ${botId} did not unlock the keystore.`));
+          }
+        }
+        if (valid) {
+          cachedPassphrases.set(botId, remembered);
+          return remembered;
+        }
+      }
+    } catch (error) {
+      storeError = error as Error;
+    }
+  }
+
+  if (!process.stdin.isTTY) {
+    const detail = storeError ? ` ${systemPassphraseStore.label()}: ${storeError.message}.` : "";
+    throw new Error(
+      `no non-interactive keystore passphrase for bot "${botId}". ` +
+        `Run \`cassie passphrase remember ${botId}\` once, or set CASSIE_PASSPHRASE.${detail}`,
+    );
   }
   const { pass } = await prompts(
     { type: "password", name: "pass", message: "Keystore passphrase" },
     { onCancel: () => process.exit(130) },
   );
+  if (typeof pass !== "string" || pass.length === 0) throw new Error("keystore passphrase is required");
   if (confirmNew) {
     const { again } = await prompts(
       { type: "password", name: "again", message: "Confirm passphrase" },
@@ -46,8 +84,36 @@ export async function getPassphrase(confirmNew = false): Promise<string> {
       process.exit(1);
     }
   }
-  cachedPassphrase = pass as string;
-  return cachedPassphrase;
+  const ks = keystore();
+  if (ks.exists(botId)) ks.verifyPassphrase(botId, pass);
+  cachedPassphrases.set(botId, pass);
+  await offerToRememberPassphrase(botId, pass);
+  return pass;
+}
+
+export function clearCachedPassphrase(botId?: string): void {
+  if (botId === undefined) cachedPassphrases.clear();
+  else cachedPassphrases.delete(botId);
+}
+
+async function offerToRememberPassphrase(botId: string, passphrase: string): Promise<void> {
+  if (!(await systemPassphraseStore.isAvailable(botId))) return;
+  const { remember } = await prompts(
+    {
+      type: "confirm",
+      name: "remember",
+      message: `Save in ${systemPassphraseStore.label()} for later non-interactive commands?`,
+      initial: true,
+    },
+    { onCancel: () => process.exit(130) },
+  );
+  if (!remember) return;
+  try {
+    await systemPassphraseStore.set(botId, passphrase);
+    console.log(pc.dim(`Saved in ${systemPassphraseStore.label()}.`));
+  } catch (error) {
+    console.error(pc.yellow(`Could not save in ${systemPassphraseStore.label()}: ${(error as Error).message}`));
+  }
 }
 
 export function keystore(): Keystore {
@@ -113,11 +179,11 @@ export function makeSetupContext(botId: string): SetupContext {
       }
     },
     async getSecret(role) {
-      const pass = await getPassphrase();
+      const pass = await getPassphrase(botId);
       return ks.getEntry(botId, role, pass);
     },
     async putSecret(role, value, meta = {}) {
-      const pass = await getPassphrase();
+      const pass = await getPassphrase(botId);
       ks.putEntry(botId, role, value, pass, meta);
     },
     async getOperatorDefault(name) {
@@ -133,7 +199,7 @@ export function makeSetupContext(botId: string): SetupContext {
 /** Assemble the runtime-eligible credential blob (§11) from the keystore. */
 export async function buildRuntimeCreds(cfg: BotConfig): Promise<RuntimeCreds> {
   const ks = keystore();
-  const pass = await getPassphrase();
+  const pass = await getPassphrase(cfg.id);
   const acct = requireAccount(cfg);
   switch (acct.venue) {
     case "polymarket": {
@@ -198,7 +264,7 @@ export async function adapterFor(cfg: BotConfig, opts: { needCreds?: boolean; fi
 }
 
 export async function getKeystoreSecret(botId: string, role: string): Promise<string | null> {
-  const pass = await getPassphrase();
+  const pass = await getPassphrase(botId);
   return keystore().getEntry(botId, role, pass);
 }
 
