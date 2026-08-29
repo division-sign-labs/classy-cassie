@@ -1,6 +1,6 @@
 {
   "name": "@quotient-forecasting/cassie-runtime-node",
-  "version": "0.2.2",
+  "version": "0.2.3",
   "type": "module",
   "license": "Apache-2.0",
   "description": "Node runtime for Cassie trading bots: engine loop, SQLite state, and a unix-socket control API",
