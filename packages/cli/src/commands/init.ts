@@ -6,6 +6,7 @@ import pc from "picocolors";
 import { existsSync } from "node:fs";
 import {
   addressFromPk,
+  DEFAULT_TICK_INTERVAL_MIN,
   KeyRoles,
   TelegramAlerter,
   createAdapter,
@@ -404,9 +405,12 @@ export async function runInit(): Promise<void> {
     console.log(pc.dim(`Recommended: ${RECOMMENDED_SUMMARY}.`));
     const { tickIntervalMin: elicitedTickIntervalMin, ...config } = (await confirm("Use recommended allocation rules?", true))
       ? await elicitRecommendedStrategyConfig(existingStrategy)
-      : await elicitStrategyConfig(existingStrategy);
+      : await elicitStrategyConfig({
+          ...existingStrategy,
+          tickIntervalMin: existing?.tickIntervalMin ?? DEFAULT_TICK_INTERVAL_MIN,
+        });
     strategyConfig = config;
-    tickIntervalMin = Number(elicitedTickIntervalMin ?? 1);
+    tickIntervalMin = Number(elicitedTickIntervalMin ?? DEFAULT_TICK_INTERVAL_MIN);
   }
 
   // Alerts: Telegram only in MVP.

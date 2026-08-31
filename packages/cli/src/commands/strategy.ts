@@ -143,7 +143,10 @@ export async function runStrategy(botId: string, opts: StrategyOptions = {}): Pr
     saveStrategy(botId, await elicitRecommendedStrategyConfig(cfg.strategy.config as Record<string, unknown>));
     return;
   }
-  const config = await elicitStrategyConfig(cfg.strategy.config as Record<string, unknown>);
+  const config = await elicitStrategyConfig({
+    ...(cfg.strategy.config as Record<string, unknown>),
+    tickIntervalMin: cfg.tickIntervalMin,
+  });
   saveStrategy(botId, config);
 }
 
