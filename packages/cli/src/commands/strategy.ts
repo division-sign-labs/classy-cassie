@@ -111,7 +111,6 @@ export async function runStrategy(botId: string, opts: StrategyOptions = {}): Pr
     }
     if (opts.positionCheckSeconds !== undefined) {
       tickIntervalMin = positiveNumber("position check interval", opts.positionCheckSeconds) / 60;
-      strategyConfig.tickIntervalMin = tickIntervalMin;
     }
     if (opts.signalCheckMinutes !== undefined) {
       strategyConfig.signalPollIntervalMin = positiveNumber("signal check interval", opts.signalCheckMinutes);
@@ -179,7 +178,14 @@ function percentage(label: string, raw: string): number {
 }
 
 function normalizeStrategyConfig(config: Record<string, unknown>): Record<string, unknown> {
-  const { sizing: _sizing, maxPositionNotional: _maxPositionNotional, maxOpenPositions: _maxOpenPositions, ...current } = config;
+  // tickIntervalMin is saved at the top of the bot config, not here.
+  const {
+    sizing: _sizing,
+    maxPositionNotional: _maxPositionNotional,
+    maxOpenPositions: _maxOpenPositions,
+    tickIntervalMin: _tickIntervalMin,
+    ...current
+  } = config;
   return current;
 }
 
@@ -213,8 +219,8 @@ function compactNumber(value: number): string {
 
 function saveStrategy(botId: string, config: Record<string, unknown>): void {
   const cfg = loadBotConfig(botId);
+  const tickIntervalMin = Number(config.tickIntervalMin ?? cfg.tickIntervalMin);
   const normalized = normalizeStrategyConfig(config);
-  const tickIntervalMin = Number(normalized.tickIntervalMin ?? cfg.tickIntervalMin);
   saveBotConfig({
     ...cfg,
     strategy: { id: "signals", config: normalized },

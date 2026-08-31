@@ -13,6 +13,15 @@ describe("durable tick scheduling", () => {
     expect(tickIntervalSeconds(JSON.stringify({ tickIntervalMin: 0.01 }))).toBe(1);
   });
 
+  it("reads the cadence from the top level, not from strategy.config", () => {
+    const config = JSON.stringify({
+      tickIntervalMin: 5,
+      strategy: { id: "signals", config: { tickIntervalMin: 60 } },
+    });
+    expect(tickIntervalSeconds(config)).toBe(300);
+    expect(() => tickIntervalSeconds(JSON.stringify({ strategy: { config: { tickIntervalMin: 5 } } }))).toThrow();
+  });
+
   it.each(["not json", "[]", "{}", '{"tickIntervalMin":0}', '{"tickIntervalMin":"5"}'])(
     "rejects an invalid runtime config: %s",
     (config) => expect(() => tickIntervalSeconds(config)).toThrow(),

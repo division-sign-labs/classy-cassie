@@ -402,10 +402,11 @@ export async function runInit(): Promise<void> {
   } else {
     console.log(pc.bold("\nStrategy: signals — follow Quotient signals, hold until the forecast converges with the price."));
     console.log(pc.dim(`Recommended: ${RECOMMENDED_SUMMARY}.`));
-    strategyConfig = (await confirm("Use recommended allocation rules?", true))
+    const { tickIntervalMin: elicitedTickIntervalMin, ...config } = (await confirm("Use recommended allocation rules?", true))
       ? await elicitRecommendedStrategyConfig(existingStrategy)
       : await elicitStrategyConfig(existingStrategy);
-    tickIntervalMin = Number(strategyConfig.tickIntervalMin ?? 1);
+    strategyConfig = config;
+    tickIntervalMin = Number(elicitedTickIntervalMin ?? 1);
   }
 
   // Alerts: Telegram only in MVP.
