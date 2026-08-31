@@ -28,8 +28,6 @@ export const FlipFlatConfigSchema = z.object({
   minEntryNotional: z.number().nonnegative().default(1),
   /** Explicit marketRefs, or "from-signals" to trade whatever is signaled. */
   universe: z.union([z.literal("from-signals"), z.array(z.string())]).default("from-signals"),
-  /** Reconcile positions and evaluate exits every minute by default. */
-  tickIntervalMin: z.number().positive().default(1),
   /** Refresh the complete signal snapshot independently of the engine cadence. */
   signalPollIntervalMin: z.number().positive().default(5),
   /** Perps entry sanity bound: skip if mid drifted more than this % from refPrice. */

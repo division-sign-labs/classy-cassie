@@ -62,11 +62,15 @@ function ctxWith(signals: Signal[], config: Record<string, unknown>, memory = st
 }
 
 describe("signal ranking by edge", () => {
-  it("defaults to unlimited positions with 60-second position and 5-minute signal checks", () => {
+  it("defaults to unlimited positions with 5-minute signal checks", () => {
     const config = FlipFlatConfigSchema.parse({});
     expect(config.topN).toBeNull();
-    expect(config.tickIntervalMin).toBe(1);
     expect(config.signalPollIntervalMin).toBe(5);
+  });
+
+  // The engine cadence is bot-level; a copy here would be read by nothing.
+  it("drops a tickIntervalMin left in the strategy config", () => {
+    expect(FlipFlatConfigSchema.parse({ tickIntervalMin: 60 })).not.toHaveProperty("tickIntervalMin");
   });
 
   it("does not impose a position-count cap by default", async () => {

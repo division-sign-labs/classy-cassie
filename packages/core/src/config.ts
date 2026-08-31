@@ -7,6 +7,9 @@ import { z } from "zod";
 /** Live signals older than three hours are stale unless a bot overrides this. */
 export const DEFAULT_SIGNAL_MAX_AGE_SEC = 3 * 60 * 60;
 
+/** Reconcile positions and evaluate exits every minute unless a bot overrides this. */
+export const DEFAULT_TICK_INTERVAL_MIN = 1;
+
 export const RiskConfigSchema = z.preprocess(
   // Migrate earlier execution controls onto the single percentage setting.
   (raw) => {
@@ -258,7 +261,7 @@ export const BotConfigSchema = z
     reporting: ReportingConfigSchema.optional(),
     venueUrls: VenueUrlsSchema.prefault({}),
     /** Engine/position reconciliation cadence. Signal fetching has its own cadence. */
-    tickIntervalMin: z.number().positive().default(1),
+    tickIntervalMin: z.number().positive().default(DEFAULT_TICK_INTERVAL_MIN),
     /** Set by `cassie deploy`: the droplet this bot runs on. */
     deployment: DeploymentSchema.optional(),
     createdAt: z.string().optional(),
