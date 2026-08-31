@@ -178,7 +178,6 @@ function percentage(label: string, raw: string): number {
 }
 
 function normalizeStrategyConfig(config: Record<string, unknown>): Record<string, unknown> {
-  // tickIntervalMin is saved at the top of the bot config, not here.
   const {
     sizing: _sizing,
     maxPositionNotional: _maxPositionNotional,
