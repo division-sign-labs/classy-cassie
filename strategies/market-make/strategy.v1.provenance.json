@@ -1,0 +1,26 @@
+{
+  "source_repository": "quotient-analytics-pipelines",
+  "source_path": "research/polymarket_mm_strategy/2026-08-31/strategy.v1.json",
+  "source_schema_version": "q-directed-polymarket-mm/1",
+  "copied_at": "2026-08-31",
+  "sha256": "27feab003ab5d22f85387fb778653f748c1f50e1104edd9457cfbdfa09e85c32",
+  "cassie_resolution": {
+    "bankroll": {
+      "mode": "live",
+      "maximum_sizing_bankroll_usd": null
+    },
+    "renewal_min_edge_pp": {
+      "NO": 10.0,
+      "YES": 20.0
+    },
+    "liquidity": {
+      "minimum_exit_bid_depth_1c_usd": 1000.0,
+      "minimum_exit_bid_depth_2c_usd": 2500.0,
+      "max_order_fraction_of_exit_bid_depth_1c": 0.02,
+      "max_order_fraction_of_exit_bid_depth_2c": 0.008,
+      "max_market_fraction_of_exit_bid_depth_1c": 0.04,
+      "max_market_fraction_of_exit_bid_depth_2c": 0.016
+    }
+  },
+  "note": "The source JSON is vendored byte-for-byte. Cassie-only decisions are added by the typed preset loader, never written into the source artifact."
+}

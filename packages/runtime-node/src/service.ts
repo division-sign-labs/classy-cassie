@@ -10,6 +10,8 @@ import {
   FanoutAlerter,
   FixtureSignalSource,
   LiveSignalSource,
+  MarketMakeQuotientClient,
+  PolymarketCatalogClient,
   SafeAlerter,
   TelegramAlerter,
   buildReporter,
@@ -25,7 +27,6 @@ import {
   type RuntimeCreds,
   type SignalSource,
   type Strategy,
-  type TickResult,
   type VenueAccount,
   type VenueAdapter,
 } from "@quotient-forecasting/cassie-core";
@@ -43,6 +44,15 @@ import {
   type PreviewableStrategy,
 } from "@quotient-forecasting/strategy-agent";
 import { SqliteStateStore } from "./state.js";
+import { MarketMakeStateStore } from "./market-make-state.js";
+import {
+  MarketMakeController,
+  type MarketMakeControllerStatus,
+  type MarketMakeDryRunResult,
+  type MarketMakeReconcileResult,
+  type MarketMakeTickResult,
+} from "./market-make-controller.js";
+import { MarketMakeConfigSchema } from "@quotient-forecasting/strategy-market-make";
 import { nextTickAtMs, tickIdAt } from "./tick-schedule.js";
 import {
   DEFAULT_SIGNAL_POLL_INTERVAL_MIN,
@@ -61,6 +71,8 @@ export interface RuntimeIdentity {
   requiredRegion?: string;
   /** Region the host reports for itself. Must equal requiredRegion to trade. */
   region?: string;
+  /** Non-secret identity of the exact deployment/config activation boundary. */
+  deploymentId?: string;
 }
 
 export interface BotRuntimeOptions {
@@ -72,6 +84,7 @@ export interface BotRuntimeOptions {
   runtime: RuntimeIdentity["runtime"];
   requiredRegion?: string;
   region?: string;
+  deploymentId?: string;
   version?: string;
   quotientToken?: string;
   telegramToken?: string;
@@ -83,6 +96,60 @@ export interface BotRuntimeOptions {
   /** Contributor-test hook for a deterministic signal file. */
   signalsFixturePath?: string;
   fixtureBooksPath?: string;
+}
+
+export interface ShutdownCancellationResult {
+  method: "none" | "engine" | "market-make-venue";
+  requested: boolean;
+  completed: boolean;
+  /** True only after an authoritative venue open-orders read returned empty. */
+  verifiedOpenOrders: boolean;
+  remainingOpenOrders: number | null;
+}
+
+export interface ShutdownResult {
+  stopped: true;
+  /** Never inferred: true means the selected cancellation path completed. */
+  restingOrdersCanceled: boolean;
+  cancellation: ShutdownCancellationResult;
+}
+
+/**
+ * Market making gets a second, controller-independent venue cancellation at
+ * process shutdown. A cancel acknowledgement alone is not enough: the venue's
+ * authoritative open-orders read must also be empty.
+ */
+export async function cancelAndVerifyMarketMakeOrders(
+  adapter: Pick<VenueAdapter, "cancelAll" | "openOrders">,
+  account: VenueAccount,
+): Promise<ShutdownCancellationResult> {
+  const failures: string[] = [];
+  try {
+    await adapter.cancelAll(account);
+  } catch (error) {
+    failures.push(`cancelAll failed: ${error instanceof Error ? error.message : String(error)}`);
+  }
+
+  let remainingOpenOrders: number | null = null;
+  try {
+    remainingOpenOrders = (await adapter.openOrders(account)).length;
+    if (remainingOpenOrders > 0) {
+      failures.push(`authoritative open-orders check found ${remainingOpenOrders} resting order(s)`);
+    }
+  } catch (error) {
+    failures.push(`authoritative open-orders check failed: ${error instanceof Error ? error.message : String(error)}`);
+  }
+
+  if (failures.length > 0) {
+    throw new Error(`market-make shutdown cancellation failed: ${failures.join("; ")}`);
+  }
+  return {
+    method: "market-make-venue",
+    requested: true,
+    completed: true,
+    verifiedOpenOrders: true,
+    remainingOpenOrders: 0,
+  };
 }
 
 export function buildStrategy(opts: BotRuntimeOptions): Strategy {
@@ -108,7 +175,10 @@ export function buildStrategy(opts: BotRuntimeOptions): Strategy {
       lister: createMarketLister(opts.config.venue, opts.config.venueUrls),
     });
   }
-  throw new Error(`unknown strategy "${id}" — supported strategies are "signals" and "agent"`);
+  if (id === "market-make") {
+    throw new Error("market-make is event-driven and must be built through BotService's dedicated controller");
+  }
+  throw new Error(`unknown strategy "${id}" — supported strategies are "signals", "agent", and "market-make"`);
 }
 
 export function configuredSignalPollIntervalMin(config: BotConfig): number {
@@ -163,8 +233,10 @@ export class BotService {
   readonly log: Logger;
 
   private readonly adapter: VenueAdapter;
-  private readonly strategy: Strategy;
-  private readonly engine: Engine;
+  private readonly strategy?: Strategy;
+  private readonly engine?: Engine;
+  private readonly marketMaker?: MarketMakeController;
+  private readonly marketMakeState?: MarketMakeStateStore;
   private readonly state: SqliteStateStore;
   private readonly opts: BotRuntimeOptions;
   private readonly intervalSeconds: number;
@@ -174,6 +246,7 @@ export class BotService {
   private tickTimer?: NodeJS.Timeout;
   private active = false;
   private terminating = false;
+  private shutdownPromise?: Promise<ShutdownResult>;
   private lastTickAt?: number;
 
   constructor(opts: BotRuntimeOptions) {
@@ -189,18 +262,53 @@ export class BotService {
       fixtureBooks: opts.fixtureBooksPath ? readFileSync(opts.fixtureBooksPath, "utf8") : undefined,
       builderCode: opts.config.reporting?.builderCode,
     });
-    this.strategy = buildStrategy(opts);
-    this.engine = new Engine({
-      botId: opts.config.id,
-      config: opts.config,
-      adapter: this.adapter,
-      account: opts.account,
-      strategy: this.strategy,
-      signals: buildSignalSource(opts, this.log),
-      alerter: buildAlerter(opts, this.log),
-      state: this.state,
-      log: this.log,
-    });
+    const alerter = buildAlerter(opts, this.log);
+    if (opts.config.strategy.id === "market-make") {
+      if (opts.config.venue !== "polymarket" || opts.account.venue !== "polymarket") {
+        throw new Error("the market-make controller requires a Polymarket bot and account");
+      }
+      if (!opts.quotientToken) {
+        throw new Error("the market-make strategy needs a Quotient API key");
+      }
+      const config = MarketMakeConfigSchema.parse(opts.config.strategy.config);
+      this.marketMakeState = new MarketMakeStateStore(opts.statePath);
+      this.marketMaker = new MarketMakeController(
+        {
+          config,
+          stateStore: this.marketMakeState,
+          snapshotStore: this.state,
+          venue: this.adapter,
+          account: opts.account,
+          quotient: new MarketMakeQuotientClient({
+            baseUrl: opts.config.signals.baseUrl,
+            signalsPath: opts.config.signals.path,
+            token: opts.quotientToken,
+          }),
+          catalog: new PolymarketCatalogClient({ gammaBaseUrl: opts.config.venueUrls.polymarket.gamma }),
+          botId: opts.config.id,
+          alerter,
+          log: this.log,
+        },
+        {
+          deploymentId: opts.deploymentId ?? `${opts.runtime}:${opts.config.id}`,
+          autoSchedule: false,
+          enableSubscriptions: true,
+        },
+      );
+    } else {
+      this.strategy = buildStrategy(opts);
+      this.engine = new Engine({
+        botId: opts.config.id,
+        config: opts.config,
+        adapter: this.adapter,
+        account: opts.account,
+        strategy: this.strategy,
+        signals: buildSignalSource(opts, this.log),
+        alerter,
+        state: this.state,
+        log: this.log,
+      });
+    }
     this.identity = {
       runtime: opts.runtime,
       protocol: 2,
@@ -208,6 +316,7 @@ export class BotService {
       version: opts.version ?? "unknown",
       requiredRegion: opts.requiredRegion,
       region: opts.region,
+      deploymentId: opts.deploymentId,
     };
   }
 
@@ -215,12 +324,18 @@ export class BotService {
     return this.active;
   }
 
-  status(): RuntimeIdentity & { active: boolean; lastTickAt?: number; tickIntervalMin: number } {
+  status(): RuntimeIdentity & {
+    active: boolean;
+    lastTickAt?: number;
+    tickIntervalMin: number;
+    marketMake?: MarketMakeControllerStatus;
+  } {
     return {
       ...this.identity,
       active: this.active,
       lastTickAt: this.lastTickAt,
       tickIntervalMin: this.config.tickIntervalMin,
+      ...(this.marketMaker ? { marketMake: this.marketMaker.status() } : {}),
     };
   }
 
@@ -237,15 +352,21 @@ export class BotService {
   async start(): Promise<void> {
     if (this.active || this.terminating) return;
     try {
-      await this.exclusive(async () => this.syncFastLoops());
+      await this.exclusive(async () => {
+        if (this.marketMaker) await this.marketMaker.start();
+        else await this.syncFastLoops();
+      });
       this.active = true;
       // Tick the current slot right away rather than idling to the next
       // boundary. The slot-derived id makes that a no-op when a restart lands
       // inside a slot the engine already completed.
       this.scheduleTick(0);
       this.log.info(
-        `loop started; position checks every ${compactNumber(this.intervalSeconds)}s; ` +
-          `signals every ${compactNumber(configuredSignalPollIntervalMin(this.config))}m`,
+        this.marketMaker
+          ? `market-make loop started ${this.marketMaker.status().halted ? "halted" : "active"}; ` +
+              `reconciliation every ${compactNumber(this.intervalSeconds)}s`
+          : `loop started; position checks every ${compactNumber(this.intervalSeconds)}s; ` +
+              `signals every ${compactNumber(configuredSignalPollIntervalMin(this.config))}m`,
       );
     } catch (error) {
       this.stopTimers();
@@ -278,14 +399,16 @@ export class BotService {
   }
 
   private async syncFastLoops(): Promise<void> {
-    const resting = await this.engine.heartbeatIfResting().catch((error) => {
+    if (!this.engine) return;
+    const engine = this.engine;
+    const resting = await engine.heartbeatIfResting().catch((error) => {
       this.log.warn(`heartbeat probe failed: ${(error as Error).message}`);
       return false;
     });
     if (resting && !this.heartbeatTimer) {
       this.heartbeatTimer = setInterval(() => {
         void this.exclusive(async () => {
-          const stillResting = await this.engine.heartbeatIfResting();
+          const stillResting = await engine.heartbeatIfResting();
           if (!stillResting && this.heartbeatTimer) {
             clearInterval(this.heartbeatTimer);
             this.heartbeatTimer = undefined;
@@ -297,15 +420,15 @@ export class BotService {
       this.heartbeatTimer = undefined;
     }
 
-    const armed = await this.engine.hasArmedTriggers().catch((error) => {
+    const armed = await engine.hasArmedTriggers().catch((error) => {
       this.log.warn(`trigger probe failed: ${(error as Error).message}`);
       return false;
     });
     if (armed && !this.triggerTimer) {
       this.triggerTimer = setInterval(() => {
         void this.exclusive(async () => {
-          await this.engine.checkTriggers();
-          if (!(await this.engine.hasArmedTriggers()) && this.triggerTimer) {
+          await engine.checkTriggers();
+          if (!(await engine.hasArmedTriggers()) && this.triggerTimer) {
             clearInterval(this.triggerTimer);
             this.triggerTimer = undefined;
           }
@@ -317,25 +440,113 @@ export class BotService {
     }
   }
 
-  async shutdown(cancelResting = true): Promise<void> {
-    if (this.terminating) return this.operation;
+  shutdown(cancelResting = true): Promise<ShutdownResult> {
+    if (this.shutdownPromise) return this.shutdownPromise;
     this.terminating = true;
     this.active = false;
     this.stopTimers();
-    await this.exclusive(async () => {
-      if (cancelResting) {
-        this.log.info("shutdown: canceling resting orders");
-        await this.engine.cancelAllResting();
+
+    const shutdown = (async (): Promise<ShutdownResult> => {
+      let primaryFailure: unknown;
+      try {
+        return await this.exclusive(async () => {
+          if (this.marketMaker) {
+            let controllerFailure: unknown;
+            try {
+              await this.marketMaker.shutdown();
+            } catch (error) {
+              controllerFailure = error;
+            }
+
+            let cancellation: ShutdownCancellationResult = {
+              method: "none",
+              requested: false,
+              completed: true,
+              verifiedOpenOrders: false,
+              remainingOpenOrders: null,
+            };
+            let cancellationFailure: unknown;
+            if (cancelResting) {
+              this.log.info("shutdown: independently canceling and verifying market-make venue orders");
+              try {
+                cancellation = await cancelAndVerifyMarketMakeOrders(this.adapter, this.account);
+              } catch (error) {
+                cancellationFailure = error;
+              }
+            }
+
+            const failures = [controllerFailure, cancellationFailure].filter(
+              (failure): failure is NonNullable<typeof failure> => failure !== undefined,
+            );
+            if (failures.length > 0) {
+              throw new AggregateError(
+                failures,
+                failures.map((failure) => failure instanceof Error ? failure.message : String(failure)).join("; "),
+              );
+            }
+            return {
+              stopped: true,
+              restingOrdersCanceled: cancelResting && cancellation.completed && cancellation.verifiedOpenOrders,
+              cancellation,
+            };
+          }
+
+          if (cancelResting) {
+            this.log.info("shutdown: canceling resting orders");
+            await this.engine!.cancelAllResting();
+          }
+          return {
+            stopped: true,
+            restingOrdersCanceled: cancelResting,
+            cancellation: {
+              method: cancelResting ? "engine" : "none",
+              requested: cancelResting,
+              completed: true,
+              verifiedOpenOrders: false,
+              remainingOpenOrders: null,
+            },
+          };
+        });
+      } catch (error) {
+        primaryFailure = error;
+        throw error;
+      } finally {
+        const closeFailures: unknown[] = [];
+        try {
+          this.marketMakeState?.close();
+        } catch (error) {
+          closeFailures.push(error);
+        }
+        try {
+          this.state.close();
+        } catch (error) {
+          closeFailures.push(error);
+        }
+        if (closeFailures.length > 0) {
+          const message = closeFailures
+            .map((error) => error instanceof Error ? error.message : String(error))
+            .join("; ");
+          if (primaryFailure !== undefined) {
+            this.log.error(`shutdown state close also failed: ${message}`);
+          } else {
+            throw new AggregateError(closeFailures, `shutdown state close failed: ${message}`);
+          }
+        }
       }
-    });
-    this.state.close();
+    })();
+    // Keep the exact promise, including rejection, so a concurrent or later
+    // retry cannot report success after the stores have already been closed.
+    this.shutdownPromise = shutdown;
+    return shutdown;
   }
 
-  tick(tickId?: number): Promise<TickResult> {
+  tick(tickId?: number): Promise<MarketMakeTickResult | import("@quotient-forecasting/cassie-core").TickResult> {
     return this.exclusive(async () => {
-      const result = await this.engine.tick(tickId === undefined ? {} : { tickId });
+      const result = this.marketMaker
+        ? await this.marketMaker.tick()
+        : await this.engine!.tick(tickId === undefined ? {} : { tickId });
       this.lastTickAt = Date.now();
-      await this.syncFastLoops();
+      if (!this.marketMaker) await this.syncFastLoops();
       return result;
     });
   }
@@ -349,10 +560,22 @@ export class BotService {
   }
 
   cancelOrder(id: string): Promise<void> {
-    return this.exclusive(() => this.adapter.cancelOrder(this.account, id));
+    if (this.marketMaker) {
+      return Promise.reject(new Error(
+        "generic order cancellation is disabled for market-make bots; use market-make halt and hash-bound reconciliation",
+      ));
+    }
+    return this.exclusive(async () => {
+      await this.adapter.cancelOrder(this.account, id);
+    });
   }
 
   cancelAll(): Promise<void> {
+    if (this.marketMaker) {
+      return Promise.reject(new Error(
+        "generic cancel-all is disabled for market-make bots; use market-make halt and hash-bound reconciliation",
+      ));
+    }
     return this.exclusive(async () => {
       await this.adapter.cancelAll(this.account);
       await this.syncFastLoops();
@@ -361,6 +584,11 @@ export class BotService {
 
   manualOrder(params: ManualOrderParams) {
     return this.exclusive(async () => {
+      if (!this.engine) {
+        throw new Error(
+          "manual orders are disabled for a market-make bot because they bypass durable inventory reservations",
+        );
+      }
       const result = await this.engine.manualOrder(params);
       await this.syncFastLoops();
       return result;
@@ -368,14 +596,22 @@ export class BotService {
   }
 
   async pause(): Promise<void> {
+    if (this.marketMaker) {
+      await this.exclusive(async () => this.marketMaker!.halt());
+      return;
+    }
     await this.state.set("engine:paused", "true");
   }
 
   async resume(): Promise<void> {
+    if (this.marketMaker) {
+      throw new Error("use /market-make/resume after reviewing reconciliation and activation state");
+    }
     await this.state.delete("engine:paused");
   }
 
   async paused(): Promise<boolean> {
+    if (this.marketMaker) return this.marketMaker.status().halted;
     return (await this.state.get("engine:paused")) === "true";
   }
 
@@ -455,11 +691,50 @@ export class BotService {
    */
   agentDryRun(): Promise<AgentRunReport> {
     return this.exclusive(async () => {
+      if (!this.strategy || !this.engine) throw new Error(`strategy "${this.config.strategy.id}" has no agent preview`);
       const preview = (this.strategy as Partial<PreviewableStrategy>).preview;
       if (!preview) throw new Error(`strategy "${this.config.strategy.id}" has no dry-run preview`);
       const ctx = await this.engine.strategyContext();
       return preview.call(this.strategy, ctx);
     });
+  }
+
+  marketMakeStatus(): MarketMakeControllerStatus {
+    if (!this.marketMaker) throw new Error(`strategy "${this.config.strategy.id}" is not market-make`);
+    return this.marketMaker.status();
+  }
+
+  marketMakeDryRun(): Promise<MarketMakeDryRunResult> {
+    if (!this.marketMaker) return Promise.reject(new Error(`strategy "${this.config.strategy.id}" is not market-make`));
+    return this.exclusive(() => this.marketMaker!.dryRun());
+  }
+
+  marketMakeHalt(options: { liquidate?: boolean } = {}): Promise<MarketMakeControllerStatus> {
+    if (!this.marketMaker) return Promise.reject(new Error(`strategy "${this.config.strategy.id}" is not market-make`));
+    return this.exclusive(() => this.marketMaker!.halt(options));
+  }
+
+  marketMakeResume(options: { acknowledgeLossReset?: boolean } = {}): Promise<MarketMakeControllerStatus> {
+    if (!this.marketMaker) return Promise.reject(new Error(`strategy "${this.config.strategy.id}" is not market-make`));
+    return this.exclusive(() => this.marketMaker!.resume(options));
+  }
+
+  marketMakeReconcile(
+    options: { apply?: boolean; expectedProposalHash?: string } = {},
+  ): Promise<MarketMakeReconcileResult> {
+    if (!this.marketMaker) return Promise.reject(new Error(`strategy "${this.config.strategy.id}" is not market-make`));
+    if (options.apply === true && !options.expectedProposalHash) {
+      return Promise.reject(new Error("applying reconciliation requires the exact proposal hash from a report-only preview"));
+    }
+    return this.exclusive(() => this.marketMaker!.reconcile(options));
+  }
+
+  marketMakeSnapshot() {
+    if (!this.marketMaker) throw new Error(`strategy "${this.config.strategy.id}" is not market-make`);
+    return {
+      strategy: this.marketMaker.stateSnapshot(),
+      persistence: this.marketMakeState?.exportSnapshot(),
+    };
   }
 
   /**

@@ -193,6 +193,51 @@ export class Keystore {
     return this.load(botId)?.entries[name] ?? null;
   }
 
+  /**
+   * Re-encrypt every entry under a new passphrase in one atomic file replace.
+   * All entries are authenticated with the old passphrase before any new
+   * ciphertext is constructed or the keystore file is mutated.
+   */
+  changePassphrase(botId: string, oldPassphrase: string, newPassphrase: string): void {
+    if (newPassphrase.length === 0) throw new Error("new keystore passphrase is required");
+
+    const file = this.load(botId);
+    if (!file) throw new Error(`no keystore for bot "${botId}"`);
+    if (file.botId !== botId) throw new Error(`keystore bot id does not match "${botId}"`);
+
+    const entries = Object.entries(file.entries);
+    if (entries.length === 0) throw new Error(`keystore for bot "${botId}" has no entries`);
+
+    // Keep this as a separate pass: if any entry fails authentication, no
+    // encryption work has started and save() is never reached.
+    const plaintexts = entries.map(([name, entry]) => ({
+      name,
+      plaintext: decryptSecret(entry.enc, oldPassphrase),
+    }));
+
+    const rotatedEntries: Record<string, KeystoreEntry> = {};
+    for (const { name, plaintext } of plaintexts) {
+      rotatedEntries[name] = {
+        ...file.entries[name]!,
+        enc: encryptSecret(plaintext, newPassphrase),
+      };
+    }
+
+    // Verify the complete candidate file in memory before the atomic commit.
+    // This makes an encryption defect a no-write failure, just like a bad old
+    // passphrase or a corrupt entry.
+    for (const { name, plaintext } of plaintexts) {
+      if (decryptSecret(rotatedEntries[name]!.enc, newPassphrase) !== plaintext) {
+        throw new Error("keystore passphrase change verification failed");
+      }
+    }
+
+    this.save({
+      ...file,
+      entries: rotatedEntries,
+    });
+  }
+
   /** Fail before adding entries under a passphrase different from the file. */
   verifyPassphrase(botId: string, passphrase: string): boolean {
     const file = this.load(botId);

@@ -178,6 +178,9 @@ export function makeSetupContext(botId: string): SetupContext {
         await new Promise((r) => setTimeout(r, interval));
       }
     },
+    async pollSkippable(waitingMsg, check, opts = {}) {
+      return pollWithSkip(waitingMsg, check, opts);
+    },
     async getSecret(role) {
       const pass = await getPassphrase(botId);
       return ks.getEntry(botId, role, pass);
@@ -194,6 +197,88 @@ export function makeSetupContext(botId: string): SetupContext {
     },
     openUrl,
   };
+}
+
+async function pollWithSkip<T>(
+  waitingMsg: string,
+  check: () => Promise<T | null>,
+  opts: { intervalMs?: number; timeoutMs?: number },
+): Promise<T | null> {
+  const interval = opts.intervalMs ?? 15_000;
+  const deadline = Date.now() + (opts.timeoutMs ?? 60 * 60_000);
+  const input = process.stdin;
+  const canReadSkip = Boolean(input.isTTY && typeof input.setRawMode === "function");
+  const wasRaw = canReadSkip ? Boolean(input.isRaw) : false;
+  const wasPaused = canReadSkip ? input.isPaused() : false;
+  let skipped = false;
+  let lineOpen = false;
+  let wakeForSkip: (() => void) | undefined;
+
+  const finishLine = (): void => {
+    if (!lineOpen) return;
+    process.stdout.write("\n");
+    lineOpen = false;
+  };
+  const restoreInput = (): void => {
+    if (!canReadSkip) return;
+    input.off("data", onData);
+    input.setRawMode?.(wasRaw);
+    if (wasPaused) input.pause();
+  };
+  const onData = (chunk: Buffer | string): void => {
+    const key = chunk.toString();
+    if (key.includes("\u0003")) {
+      restoreInput();
+      finishLine();
+      process.kill(process.pid, "SIGINT");
+      return;
+    }
+    if (key.toLowerCase().includes("s")) {
+      skipped = true;
+      wakeForSkip?.();
+    }
+  };
+
+  if (canReadSkip) {
+    input.setRawMode?.(true);
+    input.resume();
+    input.on("data", onData);
+  }
+  const controls = canReadSkip ? "press s to skip; Ctrl-C aborts" : "Ctrl-C aborts";
+  process.stdout.write(pc.dim(`${waitingMsg} (${controls}; polling every ${Math.round(interval / 1000)}s)\n`));
+
+  try {
+    for (;;) {
+      if (skipped) return null;
+      const result = await check();
+      if (result !== null) return result;
+      if (skipped) return null;
+      if (Date.now() > deadline) throw new Error(`timed out: ${waitingMsg}`);
+      process.stdout.write(pc.dim("."));
+      lineOpen = true;
+      if (canReadSkip) {
+        await new Promise<void>((resolve) => {
+          let settled = false;
+          let timer: NodeJS.Timeout;
+          const finish = (): void => {
+            if (settled) return;
+            settled = true;
+            clearTimeout(timer);
+            if (wakeForSkip === finish) wakeForSkip = undefined;
+            resolve();
+          };
+          timer = setTimeout(finish, interval);
+          wakeForSkip = finish;
+          if (skipped) finish();
+        });
+      } else {
+        await new Promise((resolve) => setTimeout(resolve, interval));
+      }
+    }
+  } finally {
+    restoreInput();
+    finishLine();
+  }
 }
 
 /** Assemble the runtime-eligible credential blob (§11) from the keystore. */

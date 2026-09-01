@@ -91,6 +91,11 @@ async function localEngine(botId: string): Promise<{ engine: Engine; close: () =
 
 async function placeManual(botId: string, params: ManualOrderParams): Promise<ManualOrderResult> {
   const cfg = loadBotConfig(botId);
+  if (cfg.strategy.id === "market-make") {
+    throw new Error(
+      "manual orders are disabled for a market-make bot because they bypass its inventory reservations; use a separate bot id",
+    );
+  }
   if (isDeployed(cfg)) {
     return (await controlFetch(cfg, "/trade", { method: "POST", body: JSON.stringify(params) })) as ManualOrderResult;
   }
@@ -103,9 +108,14 @@ async function placeManual(botId: string, params: ManualOrderParams): Promise<Ma
 }
 
 export async function runTrade(botId: string, sideArg: string | undefined, marketRef: string | undefined, opts: TradeOpts): Promise<void> {
+  const configuredBot = loadBotConfig(botId);
+  if (configuredBot.strategy.id === "market-make") {
+    throw new Error(
+      "manual orders are disabled for a market-make bot because they bypass its inventory reservations; use a separate bot id",
+    );
+  }
   if (opts.thesis) {
-    const cfg = loadBotConfig(botId);
-    const thesis = await elicitTicket({ venue: cfg.venue });
+    const thesis = await elicitTicket({ venue: configuredBot.venue });
     if (opts.save) saveThesis(thesis, opts.save, opts.mappings);
     await tradeFromThesis(botId, thesis, opts);
     return;
@@ -116,7 +126,7 @@ export async function runTrade(botId: string, sideArg: string | undefined, marke
     return;
   }
   if (!sideArg || !marketRef) throw new Error("usage: cassie trade <botId> buy|sell <marketRef> --size <n> [...]  (or --thesis, or --from-thesis <file>)");
-  const cfg = loadBotConfig(botId);
+  const cfg = configuredBot;
   const side = sideArg.toUpperCase() === "SELL" ? "SELL" : "BUY";
   const size = Number(opts.size);
   if (!Number.isFinite(size) || size <= 0) throw new Error("--size <n> required (base units: shares/contracts)");

@@ -129,6 +129,10 @@ export class FixtureVenue implements VenueAdapter {
     };
   }
 
+  async eventRef(marketRef: string): Promise<string> {
+    return `fixture:${marketRef}`;
+  }
+
   async candles(marketRef: string, _interval: CandleInterval, lookback: number): Promise<Candle[]> {
     const m = this.market(marketRef);
     if (m.candles) return m.candles;
@@ -263,9 +267,10 @@ export class FixtureVenue implements VenueAdapter {
     return this.fillLog.filter((f) => f.ts >= sinceTs);
   }
 
-  async redeem(_acct: VenueAccount, position: Position): Promise<void> {
+  async redeem(_acct: VenueAccount, position: Position): Promise<undefined> {
     // Fixture resolution: winner redeems at 1.0.
     this.collateral += position.size * 1.0;
     this.positionsByRef.delete(position.marketRef);
+    return undefined;
   }
 }

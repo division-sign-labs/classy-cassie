@@ -21,7 +21,7 @@ function sig(marketRef: string, spreadPp: number): Signal {
     venue: "polymarket",
     marketRef,
     side: "YES",
-    prob: 0.5 + spreadPp / 200,
+    prob: 0.5 + spreadPp / 100,
     refPrice: 0.5,
     spreadPp,
     ttlSec: 7 * 86_400,
@@ -56,7 +56,14 @@ function ctxWith(signals: Signal[], config: Record<string, unknown>, memory = st
     memory,
     venue: {
       quote: async () => ({ marketRef: "x", bid: 0.49, ask: 0.51, mid: 0.5, volume24h: 1e6, spreadBps: 40, ts: Date.now() }),
+      book: async (marketRef: string) => ({
+        marketRef,
+        bids: [{ price: 0.49, size: 6_000 }],
+        asks: [{ price: 0.51, size: 6_000 }],
+        ts: Date.now(),
+      }),
       balances: async () => [{ asset: "pUSD", total: 1_000, available: 1_000 }],
+      eventRef: async (marketRef: string) => `event:${marketRef}`,
     },
   } as never;
 }
@@ -64,15 +71,47 @@ function ctxWith(signals: Signal[], config: Record<string, unknown>, memory = st
 describe("signal ranking by edge", () => {
   it("defaults to unlimited positions with 60-second position and 5-minute signal checks", () => {
     const config = FlipFlatConfigSchema.parse({});
+    expect(config.allocationMode).toBe("portfolio-kelly");
+    expect(config.kellyFraction).toBe(0.25);
+    expect(config.marketCapPct).toBe(5);
+    expect(config.eventCapPct).toBe(7.5);
     expect(config.topN).toBeNull();
+    expect(config.maxEntrySpreadPp).toBe(30);
     expect(config.tickIntervalMin).toBe(1);
     expect(config.signalPollIntervalMin).toBe(5);
   });
 
   it("does not impose a position-count cap by default", async () => {
     const signals = [sig("a", 40), sig("b", 35), sig("c", 30), sig("d", 25)];
-    const actions = await new FlipFlatStrategy().tick(ctxWith(signals, {}));
+    const actions = await new FlipFlatStrategy().tick(ctxWith(signals, { maxEntrySpreadPp: null }));
     expect(actions.filter((action) => action.kind === "enter")).toHaveLength(4);
+  });
+
+  it("includes the default 30pp ceiling and skips larger apparent edges", async () => {
+    const actions = await new FlipFlatStrategy().tick(ctxWith([sig("at-cap", 30), sig("over-cap", 30.1)], {}));
+    expect(actions.filter((action) => action.kind === "enter").map((action) => action.marketRef)).toEqual(["at-cap"]);
+  });
+
+  it("allows the maximum entry-edge ceiling to be removed", async () => {
+    const actions = await new FlipFlatStrategy().tick(
+      ctxWith([sig("large-edge", 40)], { maxEntrySpreadPp: null }),
+    );
+    expect(actions.filter((action) => action.kind === "enter").map((action) => action.marketRef)).toEqual(["large-edge"]);
+  });
+
+  it("honours a custom maximum entry edge", async () => {
+    const actions = await new FlipFlatStrategy().tick(
+      ctxWith([sig("at-custom-cap", 20), sig("over-custom-cap", 20.1)], { maxEntrySpreadPp: 20 }),
+    );
+    expect(actions.filter((action) => action.kind === "enter").map((action) => action.marketRef)).toEqual([
+      "at-custom-cap",
+    ]);
+  });
+
+  it("rejects a maximum entry edge below the minimum", () => {
+    expect(() => FlipFlatConfigSchema.parse({ entrySpreadPp: 10, maxEntrySpreadPp: 9 })).toThrow(
+      /maximum entry edge must be at least the minimum entry edge/,
+    );
   });
 
   it("funds the widest edges when slots are scarce", async () => {
@@ -110,13 +149,19 @@ describe("signal ranking by edge", () => {
   it("orders by edge even when every signal qualifies", async () => {
     const signals = [sig("a", 12), sig("b", 40), sig("c", 25)];
     const actions = await new FlipFlatStrategy().tick(
-      ctxWith(signals, { entrySpreadPp: 10, topN: 5, dailyBudgetUsd: 150, positionBudgetPct: 20 }),
+      ctxWith(signals, {
+        entrySpreadPp: 10,
+        maxEntrySpreadPp: null,
+        topN: 5,
+        dailyBudgetUsd: 150,
+        positionBudgetPct: 20,
+      }),
     );
     expect(actions.filter((a) => a.kind === "enter").map((a) => a.marketRef)).toEqual(["b", "c", "a"]);
   });
 
   it("allocates the configured share of the daily budget to the widest edge", async () => {
-    const signals = [sig("m-thin", 11), sig("m-wide", 35)];
+    const signals = [sig("m-thin", 11), sig("m-wide", 30)];
     const actions = await new FlipFlatStrategy().tick(
       ctxWith(signals, { entrySpreadPp: 10, topN: 1, dailyBudgetUsd: 100, positionBudgetPct: 50 }),
     );

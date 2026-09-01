@@ -1,0 +1,47 @@
+{
+  "name": "@quotient-forecasting/strategy-market-make",
+  "version": "0.2.3",
+  "type": "module",
+  "license": "Apache-2.0",
+  "description": "Q-directed passive inventory strategy for Polymarket",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Quotient-Solutions-Inc/classy-cassie.git",
+    "directory": "strategies/market-make"
+  },
+  "engines": {
+    "node": ">=24"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    },
+    "./strategy.v1.json": "./strategy.v1.json"
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "strategy.v1.json",
+    "strategy.v1.provenance.json"
+  ],
+  "scripts": {
+    "build": "rm -rf dist && tsc -p tsconfig.json",
+    "prepack": "pnpm build",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "zod": "4.4.3"
+  },
+  "devDependencies": {
+    "@types/node": "24.2.1",
+    "typescript": "5.9.2"
+  },
+  "homepage": "https://github.com/Quotient-Solutions-Inc/classy-cassie#readme",
+  "bugs": {
+    "url": "https://github.com/Quotient-Solutions-Inc/classy-cassie/issues"
+  }
+}

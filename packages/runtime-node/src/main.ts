@@ -57,6 +57,7 @@ async function main(): Promise<void> {
     runtime: "droplet",
     requiredRegion,
     region,
+    deploymentId: process.env.CASSIE_DEPLOYMENT_ID,
     version: VERSION,
     quotientToken: required("QUOTIENT_API_TOKEN"),
     telegramToken: process.env.TELEGRAM_BOT_TOKEN,

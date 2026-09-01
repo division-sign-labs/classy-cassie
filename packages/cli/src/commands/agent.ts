@@ -25,7 +25,10 @@ export const AGENT_STRATEGY_SUMMARY =
 
 function requireAgentBot(cfg: BotConfig): void {
   if (cfg.strategy.id !== "agent") {
-    throw new Error(`bot "${cfg.id}" runs the "${cfg.strategy.id}" strategy — re-run \`cassie init\` and choose the agent strategy`);
+    const guidance = cfg.strategy.id === "market-make"
+      ? "market-make durable state is bound to this bot id; create a separate bot id with `cassie init` and choose the agent strategy"
+      : "re-run `cassie init` and choose the agent strategy";
+    throw new Error(`bot "${cfg.id}" runs the "${cfg.strategy.id}" strategy — ${guidance}`);
   }
 }
 

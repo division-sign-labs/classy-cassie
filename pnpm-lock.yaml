@@ -35,6 +35,9 @@ importers:
       '@quotient-forecasting/strategy-agent':
         specifier: workspace:*
         version: link:../../strategies/agent
+      '@quotient-forecasting/strategy-market-make':
+        specifier: workspace:*
+        version: link:../../strategies/market-make
       commander:
         specifier: 15.0.0
         version: 15.0.0
@@ -91,6 +94,9 @@ importers:
       '@quotient-forecasting/strategy-flip-flat':
         specifier: workspace:*
         version: link:../../strategies/flip-flat
+      '@quotient-forecasting/strategy-market-make':
+        specifier: workspace:*
+        version: link:../../strategies/market-make
       better-sqlite3:
         specifier: 13.0.3
         version: 13.0.3
@@ -128,6 +134,19 @@ importers:
       '@quotient-forecasting/cassie-core':
         specifier: workspace:*
         version: link:../../packages/core
+      zod:
+        specifier: 4.4.3
+        version: 4.4.3
+    devDependencies:
+      '@types/node':
+        specifier: 24.2.1
+        version: 24.2.1
+      typescript:
+        specifier: 5.9.2
+        version: 5.9.2
+
+  strategies/market-make:
+    dependencies:
       zod:
         specifier: 4.4.3
         version: 4.4.3

@@ -20,10 +20,27 @@ import { botConfigPath, loadBotConfig, saveBotConfig } from "../paths.js";
 import { createSplitsTreasury } from "../splits-init.js";
 import { discoverQuotientToken } from "../quotient-token.js";
 import { discoverAresApiKey, discoverAresBuilderCode, verifyAresApiKey } from "../ares-config.js";
-import { RECOMMENDED_SUMMARY, elicitRecommendedStrategyConfig, elicitStrategyConfig } from "./strategy.js";
+import { recommendedStrategySummary, elicitRecommendedStrategyConfig, elicitStrategyConfig } from "./strategy.js";
 import { AGENT_STRATEGY_SUMMARY, elicitAgentConfig, fetchAndStorePersona } from "./agent.js";
 import { discoverSurplusApiKey, verifySurplusApiKey } from "../surplus-config.js";
 import { runFund } from "./fund.js";
+import {
+  MARKET_MAKE_PRESET,
+  MarketMakeConfigSchema,
+} from "@quotient-forecasting/strategy-market-make";
+
+/**
+ * An in-place switch would orphan the market-maker's durable reservations and
+ * can also remove the CLI surface needed to halt its still-running runtime.
+ * V1 therefore requires a separate bot id for a different strategy.
+ */
+export function requireSafeStrategyTransition(existingStrategyId: string | undefined, nextStrategyId: string): void {
+  if (existingStrategyId === "market-make" && nextStrategyId !== "market-make") {
+    throw new Error(
+      "cannot switch an existing market-make bot to another strategy in place; keep this bot id for halt/status/reconciliation and create a separate bot id",
+    );
+  }
+}
 
 /**
  * Describe an already-provisioned venue account in the operator's terms, so the
@@ -347,29 +364,43 @@ export async function runInit(): Promise<void> {
     : (await ask("Quotient API key", { secret: true })).trim();
   if (token) ks.putEntry(botId, KeyRoles.quotientToken, token, pass, { runtimeEligible: true });
 
-  // Strategy choice: hand-tuned signal following, or the prompt-driven agent.
+  // Strategy choice. Market making is intentionally Polymarket-only because
+  // its identity, outcome-token, and passive-order contracts are venue-specific.
   const existingStrategy = (existing?.strategy.config ?? {}) as Record<string, unknown>;
-  const strategyId =
-    isPredictionVenue(venue)
-      ? await select("Strategy", [
-          {
-            value: existing?.strategy.id === "agent" ? "agent" : "signals",
-            title: existing?.strategy.id === "agent" ? "agent (current)" : "signals",
-            description:
-              existing?.strategy.id === "agent"
-                ? AGENT_STRATEGY_SUMMARY
-                : "follow Quotient signals, hold until the forecast converges with the price",
-          },
-          {
-            value: existing?.strategy.id === "agent" ? "signals" : "agent",
-            title: existing?.strategy.id === "agent" ? "signals" : "agent",
-            description:
-              existing?.strategy.id === "agent"
-                ? "follow Quotient signals, hold until the forecast converges with the price"
-                : AGENT_STRATEGY_SUMMARY,
-          },
-        ])
-      : "signals";
+  const strategyChoices = [
+    {
+      value: "signals",
+      title: existing?.strategy.id === "signals" || existing?.strategy.id === "flip-flat" ? "signals (current)" : "signals",
+      description: "follow Quotient signals, hold until the forecast converges with the price",
+    },
+    {
+      value: "agent",
+      title: existing?.strategy.id === "agent" ? "agent (current)" : "agent",
+      description: AGENT_STRATEGY_SUMMARY,
+    },
+    ...(venue === "polymarket"
+      ? [{
+          value: "market-make",
+          title: existing?.strategy.id === "market-make" ? "market-make (current)" : "market-make",
+          description: "Q-directed passive inventory: maker entry, convergence/risk/time exits",
+        }]
+      : []),
+  ];
+  if (existing?.strategy.id === "market-make") {
+    const marketMake = strategyChoices.find((choice) => choice.value === "market-make");
+    if (!marketMake) throw new Error("an existing market-make bot must remain on Polymarket");
+    strategyChoices.splice(0, strategyChoices.length, marketMake);
+    console.log(pc.dim("This bot id remains bound to market-make durable state; use a new bot id for another strategy."));
+  }
+  const currentStrategy = strategyChoices.findIndex((choice) =>
+    choice.value === (existing?.strategy.id === "flip-flat" ? "signals" : existing?.strategy.id),
+  );
+  if (currentStrategy > 0) {
+    const [current] = strategyChoices.splice(currentStrategy, 1);
+    strategyChoices.unshift(current!);
+  }
+  const strategyId = isPredictionVenue(venue) ? await select("Strategy", strategyChoices) : "signals";
+  requireSafeStrategyTransition(existing?.strategy.id, strategyId);
 
   let strategyConfig: Record<string, unknown>;
   let tickIntervalMin: number;
@@ -399,12 +430,25 @@ export async function runInit(): Promise<void> {
     }
     // Engine ticks stay cheap housekeeping between paid wakes.
     tickIntervalMin = 15;
+  } else if (strategyId === "market-make") {
+    console.log(pc.bold("\nStrategy: market-make — Q-directed passive inventory on Polymarket."));
+    console.log(
+      pc.dim(
+        "Sizing follows funded strategy capital automatically. At the $500 reference: $350 deployed, 6 markets; $1k bid depth within 1¢ and $2.5k within 2¢.",
+      ),
+    );
+    strategyConfig = structuredClone(
+      existing?.strategy.id === "market-make"
+        ? MarketMakeConfigSchema.parse(existingStrategy)
+        : MARKET_MAKE_PRESET,
+    ) as unknown as Record<string, unknown>;
+    tickIntervalMin = MarketMakeConfigSchema.parse(strategyConfig).reconciliation.rest_reconcile_seconds / 60;
   } else {
     console.log(pc.bold("\nStrategy: signals — follow Quotient signals, hold until the forecast converges with the price."));
-    console.log(pc.dim(`Recommended: ${RECOMMENDED_SUMMARY}.`));
+    console.log(pc.dim(`Recommended: ${recommendedStrategySummary(venue)}.`));
     strategyConfig = (await confirm("Use recommended allocation rules?", true))
-      ? await elicitRecommendedStrategyConfig(existingStrategy)
-      : await elicitStrategyConfig(existingStrategy);
+      ? await elicitRecommendedStrategyConfig(existingStrategy, venue)
+      : await elicitStrategyConfig(existingStrategy, venue);
     tickIntervalMin = Number(strategyConfig.tickIntervalMin ?? 1);
   }
 

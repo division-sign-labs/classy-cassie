@@ -19,7 +19,7 @@ export type PositionSide = "YES" | "NO" | "LONG" | "SHORT";
 /** Side of an order at the adapter level. */
 export type OrderSide = "BUY" | "SELL";
 
-export type Tif = "GTC" | "GTD" | "FOK" | "IOC";
+export type Tif = "GTC" | "GTD" | "FOK" | "IOC" | "FAK";
 
 export interface Balance {
   asset: string;
@@ -31,16 +31,30 @@ export interface Balance {
 
 export interface Position {
   marketRef: string;
+  /** Venue-native outcome token actually held, when available. */
+  tokenId?: string;
+  /** Prediction-market condition identity, when available. */
+  conditionId?: string;
+  /** Explicit binary outcome for adapters that expose it. */
+  outcome?: "YES" | "NO";
   side: PositionSide;
   /** Base units: outcome shares (prediction markets) or contracts (perps). */
   size: number;
   avgPrice: number;
+  /** Venue-reported current price in this position's own side/token space. */
+  currentPrice?: number;
   unrealizedPnl?: number;
   realizedPnl?: number;
   /** Prediction markets: market has resolved and the position is redeemable. */
   redeemable?: boolean;
   /** Human-readable market/instrument name when the venue provides one. */
   label?: string;
+}
+
+/** Public identifiers returned after a venue redemption settles. */
+export interface RedemptionReceipt {
+  transactionHash?: string;
+  transactionId?: string;
 }
 
 export interface BookLevel {
@@ -68,6 +82,13 @@ export interface Quote {
 
 export interface OrderIntent {
   marketRef: string;
+  /**
+   * Exact venue token selected by an identity-validated strategy. Adapters
+   * must verify that it belongs to marketRef's condition before using it.
+   */
+  tokenId?: string;
+  /** Prediction-market condition identity carried for reconciliation. */
+  conditionId?: string;
   side: OrderSide;
   /**
    * Prediction venues only: which outcome token this order trades. marketRef
@@ -80,6 +101,12 @@ export interface OrderIntent {
   /** Limit price. Market-style execution is a limit priced to cross the spread. */
   limitPrice: number;
   tif: Tif;
+  /** Reject a limit order that would immediately take liquidity. */
+  postOnly?: boolean;
+  /** Optional venue expiry in Unix seconds. Local TTL remains authoritative. */
+  expiration?: number;
+  /** Non-authoritative lifecycle label. Risk derives exposure from balances. */
+  purpose?: "entry" | "normal-exit" | "urgent-exit";
   clientId: string;
   /** Perps only: reduce-only flag for exits. */
   reduceOnly?: boolean;
@@ -113,12 +140,17 @@ export interface OrderAck {
   funder?: string;
   /** Builder code the order carried, if any. */
   builderCode?: string;
+  /** Local, non-secret digest of the SDK-created signed order. */
+  preparedHash?: string;
 }
 
 export interface Order {
   id: string;
   clientId?: string;
   marketRef: string;
+  tokenId?: string;
+  conditionId?: string;
+  outcome?: "YES" | "NO";
   side: OrderSide;
   size: number;
   filledSize: number;
@@ -132,6 +164,13 @@ export interface Fill {
   id: string;
   orderId?: string;
   marketRef: string;
+  tokenId?: string;
+  conditionId?: string;
+  outcome?: "YES" | "NO";
+  /** Maker order associated with an account-side maker fill. */
+  makerOrderId?: string;
+  /** Incremental matched quantity represented by this event. */
+  matchedAmountDelta?: number;
   side: OrderSide;
   size: number;
   price: number;
@@ -313,6 +352,28 @@ export type Action =
       kind: "redeem";
       marketRef: string;
       reason?: string;
+    }
+  | {
+      /** Explicit passive/exit order emitted by an event-driven strategy. */
+      kind: "place";
+      marketRef: string;
+      conditionId: string;
+      tokenId: string;
+      outcome: "YES" | "NO";
+      side: OrderSide;
+      /** Requested shares. The executor may only reduce this. */
+      size: number;
+      limitPrice: number;
+      tif: Extract<Tif, "GTC" | "FAK">;
+      postOnly: boolean;
+      purpose: "entry" | "normal-exit" | "urgent-exit";
+      reason: string;
+    }
+  | {
+      kind: "cancel";
+      orderId: string;
+      marketRef: string;
+      reason: string;
     };
 
 export interface StrategyContext {
@@ -349,7 +410,26 @@ export interface StrategyActionResult {
   placed: boolean;
   /** Final order notional after engine risk/capacity caps. Present for placed entries. */
   placedNotional?: number;
+  orderId?: string;
+  status?: OrderStatus;
 }
+
+/** Metadata persisted after SDK signing and before the venue POST. */
+export interface PreparedOrderMeta {
+  preparedHash: string;
+  tokenId: string;
+  conditionId?: string;
+  outcome?: "YES" | "NO";
+}
+
+export interface OrderLifecycleHooks {
+  onPrepared(meta: PreparedOrderMeta): Promise<void>;
+}
+
+/** Async-iterable venue stream with an explicit, idempotent close. */
+export type RealtimeSubscription<T = unknown> = AsyncIterable<T> & {
+  close(): Promise<void>;
+};
 
 // ---------------------------------------------------------------------------
 // Venue adapter contract (§3)
@@ -363,6 +443,8 @@ export interface VenueReadApi {
   quote(marketRef: string): Promise<Quote>;
   openOrders(): Promise<Order[]>;
   fills(sinceTs: number): Promise<Fill[]>;
+  /** Canonical parent event for cross-market exposure caps. */
+  eventRef?(marketRef: string): Promise<string | undefined>;
   candles?(marketRef: string, interval: CandleInterval, lookback: number): Promise<Candle[]>;
 }
 
@@ -382,6 +464,15 @@ export interface SetupContext {
   print(message: string): void;
   /** Poll until `check` resolves non-null. Prints `waitingMsg` while polling. */
   poll<T>(waitingMsg: string, check: () => Promise<T | null>, opts?: { intervalMs?: number; timeoutMs?: number }): Promise<T>;
+  /**
+   * Poll immediately while allowing an interactive operator to skip the wait.
+   * Returns null only when skipped; headless hosts may omit this capability.
+   */
+  pollSkippable?<T>(
+    waitingMsg: string,
+    check: () => Promise<T | null>,
+    opts?: { intervalMs?: number; timeoutMs?: number },
+  ): Promise<T | null>;
   /** Read a decrypted secret from the local keystore. */
   getSecret(role: string): Promise<string | null>;
   /** Persist a secret into the local keystore. */
@@ -420,15 +511,31 @@ export interface VenueAdapter {
   book(marketRef: string): Promise<OrderBook>;
   quote(marketRef: string): Promise<Quote>;
   placeOrder(acct: VenueAccount, order: OrderIntent): Promise<OrderAck>;
+  /**
+   * Crash-safe order path used by market making. The adapter signs through its
+   * pinned SDK, invokes onPrepared before POST, then submits the same order.
+   */
+  placeOrderWithLifecycle?(
+    acct: VenueAccount,
+    order: OrderIntent,
+    hooks: OrderLifecycleHooks,
+  ): Promise<OrderAck>;
   cancelOrder(acct: VenueAccount, id: string): Promise<void>;
   cancelAll(acct: VenueAccount): Promise<void>;
   openOrders(acct: VenueAccount): Promise<Order[]>;
   fills(acct: VenueAccount, sinceTs: number): Promise<Fill[]>;
+  /** Canonical parent event for cross-market exposure caps. */
+  eventRef?(marketRef: string): Promise<string | undefined>;
   candles?(marketRef: string, interval: CandleInterval, lookback: number): Promise<Candle[]>;
+  /** Exact outcome-token book; avoids manufacturing NO from YES. */
+  tokenBook?(tokenId: string): Promise<OrderBook>;
+  /** Venue-native realtime feeds. Payload normalization belongs to the runtime adapter. */
+  subscribeMarketData?(tokenIds: string[]): Promise<RealtimeSubscription>;
+  subscribeUserData?(): Promise<RealtimeSubscription>;
   /** Dead man's switch keep-alive, where the venue supports one. */
   heartbeat?(acct: VenueAccount): Promise<void>;
   /** Resolution redemption (Polymarket). */
-  redeem?(acct: VenueAccount, position: Position): Promise<void>;
+  redeem?(acct: VenueAccount, position: Position): Promise<RedemptionReceipt | undefined>;
   /**
    * Withdraw collateral to an external address. Runs locally through the
    * wizard context because it signs with the master/L1 key, which stays in

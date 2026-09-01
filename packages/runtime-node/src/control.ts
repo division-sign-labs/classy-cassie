@@ -84,6 +84,61 @@ export async function handle(service: BotService, request: IncomingMessage, resp
     send(response, await service.agentDryRun());
     return;
   }
+  if (method === "GET" && action === "market-make/status") {
+    send(response, service.marketMakeStatus());
+    return;
+  }
+  if (method === "GET" && action === "market-make/snapshot") {
+    send(response, service.marketMakeSnapshot());
+    return;
+  }
+  if (method === "POST" && action === "market-make/dry-run") {
+    send(response, await service.marketMakeDryRun());
+    return;
+  }
+  if (method === "POST" && action === "market-make/halt") {
+    const body = await bodyJson<{ liquidate?: unknown }>(request);
+    if (body.liquidate !== undefined && typeof body.liquidate !== "boolean") {
+      send(response, { error: "liquidate must be boolean" }, 400);
+      return;
+    }
+    send(response, await service.marketMakeHalt({ liquidate: body.liquidate === true }));
+    return;
+  }
+  if (method === "POST" && action === "market-make/resume") {
+    const body = await bodyJson<{ acknowledgeLossReset?: unknown }>(request);
+    if (body.acknowledgeLossReset !== undefined && typeof body.acknowledgeLossReset !== "boolean") {
+      send(response, { error: "acknowledgeLossReset must be boolean" }, 400);
+      return;
+    }
+    send(response, await service.marketMakeResume({ acknowledgeLossReset: body.acknowledgeLossReset === true }));
+    return;
+  }
+  if (method === "POST" && action === "market-make/reconcile") {
+    const body = await bodyJson<{ apply?: unknown; expectedProposalHash?: unknown }>(request);
+    if (body.apply !== undefined && typeof body.apply !== "boolean") {
+      send(response, { error: "apply must be boolean" }, 400);
+      return;
+    }
+    if (
+      body.expectedProposalHash !== undefined &&
+      (typeof body.expectedProposalHash !== "string" || !/^[0-9a-f]{64}$/.test(body.expectedProposalHash))
+    ) {
+      send(response, { error: "expectedProposalHash must be a lowercase 64-character SHA-256 hex digest" }, 400);
+      return;
+    }
+    if (body.apply === true && body.expectedProposalHash === undefined) {
+      send(response, { error: "apply requires expectedProposalHash from an exact report-only preview" }, 400);
+      return;
+    }
+    send(response, await service.marketMakeReconcile({
+      apply: body.apply === true,
+      ...(typeof body.expectedProposalHash === "string"
+        ? { expectedProposalHash: body.expectedProposalHash }
+        : {}),
+    }));
+    return;
+  }
   if (method === "GET" && action === "logs") {
     const level = url.searchParams.get("level") as LogLevel | null;
     const rawTail = Number(url.searchParams.get("tail") ?? 100);
@@ -91,6 +146,14 @@ export async function handle(service: BotService, request: IncomingMessage, resp
     return;
   }
   if (method === "POST" && action === "orders/cancel") {
+    if (service.config.strategy.id === "market-make") {
+      send(
+        response,
+        { error: "generic order cancellation is disabled for market-make bots; use market-make halt and reconcile" },
+        409,
+      );
+      return;
+    }
     const body = await bodyJson<{ id?: string }>(request);
     if (!body.id) {
       send(response, { error: "body must include order id" }, 400);
@@ -101,11 +164,27 @@ export async function handle(service: BotService, request: IncomingMessage, resp
     return;
   }
   if (method === "POST" && action === "orders/cancel-all") {
+    if (service.config.strategy.id === "market-make") {
+      send(
+        response,
+        { error: "generic cancel-all is disabled for market-make bots; use market-make halt and reconcile" },
+        409,
+      );
+      return;
+    }
     await service.cancelAll();
     send(response, { ok: true, canceled: "all" });
     return;
   }
   if (method === "POST" && action === "trade") {
+    if (service.config.strategy.id === "market-make") {
+      send(
+        response,
+        { error: "manual orders are disabled for market-make bots; use a separate bot id" },
+        409,
+      );
+      return;
+    }
     const params = await bodyJson<ManualOrderParams>(request);
     if (!params.marketRef || !params.side || !params.size) {
       send(response, { error: "trade requires marketRef, side, size" }, 400);
@@ -149,8 +228,11 @@ export async function handle(service: BotService, request: IncomingMessage, resp
     return;
   }
   if (method === "POST" && action === "shutdown") {
-    await service.shutdown(true);
-    send(response, { ok: true, stopped: true, restingOrdersCanceled: true });
+    const result = await service.shutdown(true);
+    if (!result.stopped || !result.restingOrdersCanceled) {
+      throw new Error("shutdown did not verify that resting orders were canceled");
+    }
+    send(response, { ok: true, ...result });
     return;
   }
   send(response, { error: `unknown route ${method} ${url.pathname}` }, 404);

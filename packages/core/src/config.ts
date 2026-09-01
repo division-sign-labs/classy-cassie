@@ -32,7 +32,7 @@ export const RiskConfigSchema = z.preprocess(
     /** Cap order size at this % of executable depth within the band. Defaults to no extra cap. */
     depthCapPct: z.number().positive().max(100).default(100),
     /** Market eligibility floor: 24h volume in USD. */
-    minDailyVolume: z.number().nonnegative().default(10_000),
+    minDailyVolume: z.number().nonnegative().default(1_000),
     /** Skip rather than dribble below this notional. */
     minViableNotional: z.number().nonnegative().default(1),
     /** Hard cap per order, USD notional. */
@@ -264,6 +264,13 @@ export const BotConfigSchema = z
     createdAt: z.string().optional(),
   })
   .superRefine((config, ctx) => {
+    if (config.strategy.id === "market-make" && config.venue !== "polymarket") {
+      ctx.addIssue({
+        code: "custom",
+        path: ["strategy", "id"],
+        message: "the market-make strategy is supported only on Polymarket",
+      });
+    }
     const treasurySigner = config.treasury?.signers.eoa;
     if (
       treasurySigner &&

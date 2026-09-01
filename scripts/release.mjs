@@ -3,7 +3,7 @@
 // become visible through npm's consumer read path before any dependent is
 // published, making interrupted or partially propagated releases resumable.
 
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { spawnSync } from "node:child_process";
@@ -170,6 +170,47 @@ function smokeInstall(cliPackage) {
   }
 }
 
+function packAndSmokeInstall(packages) {
+  const packDirectory = mkdtempSync(join(tmpdir(), "cassie-release-pack-"));
+  const installDirectory = mkdtempSync(join(tmpdir(), "cassie-release-install-"));
+  writeFileSync(
+    join(installDirectory, "package.json"),
+    `${JSON.stringify({ name: "cassie-release-install-check", private: true }, null, 2)}\n`,
+  );
+  try {
+    for (const pkg of packages) {
+      inherit("pnpm", ["pack", "--pack-destination", packDirectory], { cwd: pkg.path });
+    }
+    const tarballs = readdirSync(packDirectory)
+      .filter((name) => name.endsWith(".tgz"))
+      .sort()
+      .map((name) => join(packDirectory, name));
+    if (tarballs.length !== packages.length) {
+      fail(`packed ${tarballs.length} tarballs; expected ${packages.length}`);
+    }
+    inherit("npm", ["install", ...tarballs, "--prefer-offline", "--no-audit", "--no-fund"], {
+      cwd: installDirectory,
+      env: { ...process.env, CASSIE_SKILLS_DIR: join(installDirectory, "skills") },
+    });
+    const cliPackage = packages.find((pkg) => pkg.name === "@quotient-forecasting/cassie");
+    if (!cliPackage) fail("release set does not contain @quotient-forecasting/cassie");
+    const executable = join(
+      installDirectory,
+      "node_modules",
+      ".bin",
+      process.platform === "win32" ? "cassie.cmd" : "cassie",
+    );
+    const installedVersion = capture(executable, ["--version"], { cwd: installDirectory });
+    if (installedVersion !== cliPackage.version) {
+      fail(`packed cassie reported ${installedVersion}; expected ${cliPackage.version}`);
+    }
+    console.log(`local package install passed: cassie ${installedVersion}`);
+  } finally {
+    rmSync(packDirectory, { recursive: true, force: true });
+    rmSync(installDirectory, { recursive: true, force: true });
+  }
+}
+
 async function main() {
   const args = process.argv.slice(2);
   const dryRun = args.includes("--dry-run");
@@ -179,10 +220,8 @@ async function main() {
   console.log(packages.map((pkg, index) => `${index + 1}. ${pkg.name}@${pkg.version}`).join("\n"));
 
   if (dryRun) {
-    for (const pkg of packages) {
-      inherit("pnpm", ["publish", "--dry-run", "--no-git-checks", "--access", "public"], { cwd: pkg.path });
-    }
-    console.log(`release dry-run passed for ${packages.length} packages`);
+    packAndSmokeInstall(packages);
+    console.log(`release package check passed for ${packages.length} packages`);
     return;
   }
 

@@ -1,0 +1,341 @@
+{
+  "schema_version": "q-directed-polymarket-mm/1",
+  "strategy_id": "q-directed-passive-inventory-v1",
+  "venue": "polymarket",
+  "mode": "passive_entry_passive_inventory_exit",
+  "decision_probability": "latest canonical served Q probability",
+  "external_news_or_x_enabled": false,
+  "capital": {
+    "initial_bankroll_usd": 500.0,
+    "sizing_bankroll_usd": 500.0,
+    "auto_compound": false,
+    "max_total_inventory_and_pending_entry_cost_usd": 350.0,
+    "minimum_free_collateral_usd": 100.0,
+    "operational_reserve_usd": 50.0,
+    "base_order_notional_usd": 12.5,
+    "max_order_notional_usd": 20.0,
+    "hard_market_cost_usd": 50.0,
+    "max_active_markets": 6,
+    "max_live_orders": 12
+  },
+  "quotient_feed": {
+    "discovery_command": [
+      "quotient",
+      "signals",
+      "--venue",
+      "polymarket",
+      "--status",
+      "active",
+      "--json",
+      "--quiet",
+      "--limit",
+      "500"
+    ],
+    "exact_forecast_command_template": [
+      "quotient",
+      "forecast",
+      "{market_keys_up_to_10}",
+      "--json",
+      "--quiet"
+    ],
+    "idle_poll_seconds": 1800,
+    "active_poll_seconds": 900,
+    "daily_api_cost_cap_usd": 1.0,
+    "require_published_signal_for_new_entry": true,
+    "require_is_active": true,
+    "require_live_priced": true,
+    "require_suppression_reason_null": true,
+    "new_entry_max_forecast_age_seconds": 21600,
+    "no_add_forecast_age_seconds": 21600,
+    "stale_forecast_exit_seconds": 64800,
+    "missing_row_policy": "freeze_entries_then_exact_forecast_lookup",
+    "missing_row_is_not_retirement": true,
+    "units": {
+      "entry_q": "0_to_100_yes_scale",
+      "entry_pm": "0_to_100_yes_scale",
+      "latest_q": "0_to_1_yes_scale",
+      "market.market_odds": "0_to_1_yes_scale",
+      "venue_quote.selected_probability": "0_to_1_yes_scale"
+    }
+  },
+  "market_catalog": {
+    "gamma_refresh_seconds": 900,
+    "require_active": true,
+    "require_closed_false": true,
+    "require_archived_false": true,
+    "require_accepting_orders": true,
+    "require_orderbook_enabled": true,
+    "require_condition_id": true,
+    "require_yes_and_no_token_ids": true,
+    "minimum_seconds_to_end_at_entry": 129600,
+    "allow_neg_risk_children": true,
+    "net_risk_across_neg_risk_children": false,
+    "identity_key": "market.marketKey",
+    "clob_identity_key": "market.condition_id"
+  },
+  "market_data": {
+    "clob_sdk_generation": "v2",
+    "public_market_websocket": true,
+    "authenticated_user_websocket": true,
+    "rest_snapshot_on_connect_and_gap": true,
+    "market_ws_ping_seconds": 10,
+    "market_data_stale_seconds": 20,
+    "venue_quote_max_age_seconds": 5,
+    "book_sequence_gap_action": "cancel_market_orders_and_resnapshot",
+    "subscribe_both_outcome_tokens": true,
+    "max_yes_no_midpoint_complement_error_pp": 2.0
+  },
+  "eligibility": {
+    "q_market_edge_min_pp": 10.0,
+    "q_market_edge_max_pp": 30.0,
+    "q_market_edge_bounds_inclusive": true,
+    "apply_30pp_cap_to_q_market_gap": true,
+    "hard_max_selected_token_book_spread_pp": 30.0,
+    "max_selected_token_book_spread_pp": 4.0,
+    "book_spread_policy": "hard reject above 30pp; operationally reject new inventory above 4pp",
+    "historical_bbo_filter_backtested": false,
+    "min_selected_side_price": 0.125,
+    "max_selected_side_price": 0.875,
+    "min_q_probability_on_selected_side": 0.55,
+    "min_live_depth_usd_within_2c": 100.0,
+    "min_volume_24h_usd": 2500.0,
+    "entry_stability_seconds": 30,
+    "max_move_away_from_q_during_entry_stability_pp": 2.0,
+    "reject_crossed_or_empty_book": true,
+    "reject_unknown_tick_or_min_order_size": true,
+    "reject_drawdown_risk_elevated": true
+  },
+  "direction_policy": {
+    "NO": {
+      "minimum_edge_pp": 10.0,
+      "maximum_edge_pp": 30.0,
+      "size_multiplier": 1.0,
+      "target_market_cost_usd": 40.0,
+      "maximum_center_shift_pp": 3.0
+    },
+    "YES": {
+      "minimum_edge_pp": 20.0,
+      "maximum_edge_pp": 30.0,
+      "size_multiplier": 0.5,
+      "target_market_cost_usd": 20.0,
+      "maximum_center_shift_pp": 1.5
+    },
+    "bearish_inventory_order": [
+      "sell_free_yes_inventory",
+      "buy_no"
+    ],
+    "bullish_inventory_order": [
+      "sell_free_no_inventory",
+      "buy_yes"
+    ],
+    "never_sell_more_than_free_token_inventory": true
+  },
+  "volatility": {
+    "definition": "sqrt_sum_squared_hourly_midpoint_changes_over_trailing_24h_in_pp",
+    "acceleration_definition": "rv24_divided_by_mean_daily_rv_of_prior_6_days",
+    "dead_rv24_upper_pp": 1.5,
+    "normal_rv24_upper_pp": 9.0,
+    "high_rv24_upper_pp": 20.0,
+    "extreme_acceleration_lower": 3.0,
+    "regimes": {
+      "dead": {
+        "new_entry_enabled": false,
+        "size_multiplier": 0.0,
+        "extra_quote_ticks": 0
+      },
+      "normal": {
+        "new_entry_enabled": true,
+        "size_multiplier": 1.0,
+        "extra_quote_ticks": 0
+      },
+      "high": {
+        "new_entry_enabled": true,
+        "size_multiplier": 0.6,
+        "extra_quote_ticks": 1
+      },
+      "extreme": {
+        "new_entry_enabled": false,
+        "size_multiplier": 0.0,
+        "extra_quote_ticks": 2
+      }
+    }
+  },
+  "candidate_priority": [
+    "existing_inventory_reduction_first",
+    "first_pass_adds_new_category_family",
+    "NO_before_YES",
+    "larger_live_edge_within_bounds",
+    "newer_forecast",
+    "tighter_book_spread",
+    "greater_depth_within_2c"
+  ],
+  "diversification": {
+    "category_families": {
+      "international": [
+        "Geopolitics",
+        "Global Elections"
+      ],
+      "domestic": [
+        "Politics",
+        "Legal"
+      ],
+      "macro_business": [
+        "Economics",
+        "Business",
+        "Equities",
+        "Commodities",
+        "Crypto"
+      ],
+      "culture_tech": [
+        "Entertainment",
+        "Science & Tech",
+        "Sports"
+      ]
+    },
+    "allocation_method": "one_best_candidate_per_available_family_first_then_fill_remaining_slots_by_candidate_priority",
+    "target_distinct_families_when_available": 3,
+    "may_relax_entry_or_risk_gate_for_diversification": false
+  },
+  "quote_model": {
+    "order_type": "GTC",
+    "post_only": true,
+    "fair_value_beta": 0.1,
+    "minimum_remaining_edge_at_entry_policy": "direction_policy.minimum_edge_pp",
+    "maximum_ticks_behind_best_bid": 2,
+    "quote_ttl_seconds": 60,
+    "minimum_ordinary_rest_seconds": 5,
+    "reprice_on_bbo_move_ticks": 2,
+    "reprice_on_q_move_pp": 1.0,
+    "cancel_entry_when_edge_below_direction_minimum": true,
+    "edge_size_multiplier_enabled": false,
+    "size_cap_fraction_of_depth_within_2c": 0.1,
+    "size_cap_fraction_of_best_level": 0.25,
+    "cancel_remaining_entry_after_any_fill": true,
+    "post_fill_add_pause_seconds": 30,
+    "max_inventory_increasing_fills_per_market_per_day": 3
+  },
+  "portfolio_risk": {
+    "max_event_cost_usd": 60.0,
+    "max_category_family_cost_usd": 120.0,
+    "max_manual_correlation_group_cost_usd": 80.0,
+    "max_open_markets_per_event": 1,
+    "count_pending_entries_as_filled": true,
+    "reserve_cancel_pending_and_replacement_simultaneously": true,
+    "same_event_source": "Gamma event id or explicit canonical event relationship",
+    "category_family_source": "diversification.category_families",
+    "title_similarity_may_not_net_risk": true
+  },
+  "inventory": {
+    "track_yes_and_no_quantities_separately": true,
+    "track_free_and_reserved_sell_quantity": true,
+    "track_average_cost_by_token": true,
+    "track_worst_case_resolution_pnl": true,
+    "allow_averaging_down_after_adverse_shock": false,
+    "allow_same_side_add_after_favorable_q_refresh": true,
+    "merge_verified_complete_sets": true,
+    "net_unrelated_markets": false
+  },
+  "exit_policy": {
+    "primary_style": "convergence_or_forecast_change_with_time_ceiling",
+    "remaining_live_q_edge_exit_pp": 5.0,
+    "captured_initial_gap_fraction_exit": 0.75,
+    "early_fixed_take_profit_enabled": false,
+    "partial_scale_out_enabled": false,
+    "soft_review_after_seconds": 21600,
+    "default_hard_hold_seconds": 86400,
+    "absolute_max_hold_seconds": 129600,
+    "forecast_refresh_can_extend_once": true,
+    "maximum_extension_seconds": 43200,
+    "same_side_refresh_min_edge_to_hold_pp": 10.0,
+    "same_side_refresh_edge_below_pp_to_exit": 5.0,
+    "retired_reasons_to_urgent_exit": [
+      "flipped",
+      "fading_q"
+    ],
+    "expired_signal_policy": "normal_exit_unless_a_newer_same-side_forecast_qualifies_the_single_extension",
+    "extension_requires_forecast_newer_than_first_fill": true,
+    "forecast_status_actions": {
+      "converged": "exit_remaining_inventory",
+      "converging": "hold_unless_other_exit_trigger",
+      "sideways": "hold_until_next_q_or_time_limit",
+      "diverging": "cancel_adds_and_wait_for_q_refresh",
+      "caution": "cancel_adds_and_reduce_if_liquid",
+      "warning": "urgent_exit"
+    },
+    "normal_exit_order": "post_only_sell_selected_token_at_or_one_tick_inside_best_ask",
+    "normal_exit_reprice_seconds": 60,
+    "normal_exit_max_rest_seconds": 900,
+    "normal_exit_then_fak_max_concession_pp": 1.0,
+    "urgent_exit_order": "FAK_sell_selected_token_against_bids",
+    "urgent_exit_max_concession_pp": 2.0,
+    "urgent_exit_max_attempts": 3
+  },
+  "market_shock": {
+    "adverse_move_5m_pp": 3.0,
+    "adverse_move_15m_pp": 5.0,
+    "absolute_move_60s_pp": 5.0,
+    "spread_multiple_vs_trailing_5m": 3.0,
+    "depth_drop_fraction_60s": 0.7,
+    "entry_freeze_seconds": 900,
+    "require_new_q_version_after_adverse_shock": true,
+    "favorable_shock_action": "cancel_entries_and_evaluate_convergence_exit",
+    "adverse_shock_action": "cancel_entries_do_not_add_wait_for_new_q_or_risk_exit",
+    "correlated_shocks_for_global_pause": 3,
+    "correlated_shock_window_seconds": 60,
+    "global_shock_pause_seconds": 600
+  },
+  "loss_limits": {
+    "max_marked_loss_per_market_usd": 8.0,
+    "max_rolling_24h_loss_usd": 20.0,
+    "max_strategy_drawdown_usd": 40.0,
+    "three_consecutive_order_rejections_global_pause_seconds": 600
+  },
+  "liquidity_rewards": {
+    "mode": "observe_and_account_only",
+    "poll_market_reward_configuration": true,
+    "reward_may_bypass_entry_or_risk_gate": false,
+    "reward_may_increase_order_size": false,
+    "assumed_reward_in_backtest_usd": 0.0,
+    "record_only_actual_paid_rewards": true
+  },
+  "reconciliation": {
+    "rest_reconcile_seconds": 15,
+    "reconcile_on_startup": true,
+    "reconcile_after_websocket_reconnect": true,
+    "deduplicate_fills_by": [
+      "trade_id",
+      "maker_order_id",
+      "matched_amount_delta"
+    ],
+    "unknown_order_state_action": "reserve_risk_cancel_and_reconcile",
+    "cancel_all_on_shutdown": true
+  },
+  "global_kill_switches": {
+    "manual_halt": true,
+    "market_websocket_stale_seconds": 20,
+    "user_websocket_stale_seconds": 10,
+    "max_clock_skew_seconds": 2,
+    "unresolved_inventory_mismatch_cycles": 2,
+    "cancel_only_or_venue_incident": true,
+    "insufficient_collateral_or_allowance": true,
+    "loss_limit_breach": true,
+    "venue_access_preflight_failure": true
+  },
+  "telemetry": {
+    "markout_horizons_seconds": [
+      300,
+      3600,
+      21600,
+      86400
+    ],
+    "record_every_gate_decision": true,
+    "record_q_version_and_units": true,
+    "record_book_and_quote_inputs": true,
+    "record_order_and_fill_lifecycle": true,
+    "record_inventory_and_resolution_scenarios": true,
+    "record_forecast_change_and_exit_reason": true,
+    "record_realized_rewards_and_fees": true,
+    "record_api_cost": true,
+    "redact_credentials_signatures_and_private_keys": true
+  }
+}

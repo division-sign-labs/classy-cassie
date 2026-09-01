@@ -28,6 +28,7 @@ import {
   type EnvironmentContracts,
   type MarketInfo,
 } from "@polymarket/client";
+import { createHash } from "node:crypto";
 
 // AssetType is exported as a type but not as a runtime value from the SDK's
 // ESM entry (verified 2026-08-13); use the literal values.
@@ -103,8 +104,11 @@ import type {
   OrderAck,
   OrderBook,
   OrderIntent,
+  OrderLifecycleHooks,
   Position,
   Quote,
+  RedemptionReceipt,
+  RealtimeSubscription,
   RuntimeCreds,
   SetupContext,
   VenueAccount,
@@ -114,6 +118,7 @@ import { registerAdapter, type AdapterOpts } from "./registry.js";
 
 type PmSecureClient = Awaited<ReturnType<typeof createSecureClient>>;
 type PmPublicClient = ReturnType<typeof createPmPublicClient>;
+type PmSignedOrder = Awaited<ReturnType<PmSecureClient["createLimitOrder"]>>;
 type PmCreds = Extract<RuntimeCreds, { venue: "polymarket" }>;
 type PmAccount = Extract<VenueAccount, { venue: "polymarket" }>;
 
@@ -149,6 +154,7 @@ export class PolymarketAdapter implements VenueAdapter {
   private readonly conditionInfo = new Map<string, MarketInfo>();
   private readonly conditionalAllowanceSynced = new Set<string>();
   private volumeCache = new Map<string, { v: number; at: number }>();
+  private readonly eventRefCache = new Map<string, string>();
 
   constructor(private readonly opts: AdapterOpts) {
     if (opts.creds && opts.creds.venue === "polymarket") this.creds = opts.creds;
@@ -387,19 +393,22 @@ export class PolymarketAdapter implements VenueAdapter {
     ctx.print(`(Small amounts can also go as USDC directly on Polygon to the same address.)`);
     ctx.print(`Deposits over $50k: use a third-party bridge direct to Polygon USDC instead.`);
 
-    // An already-funded bot re-running this flow is usually here to repair or
-    // re-verify approvals (the documented fix for allowance errors), not to
-    // deposit — waiting on a credit that never comes would hang that repair.
-    const depositWanted =
-      before <= 0.01 || !(await ctx.confirm(`Balance is ${before.toFixed(2)} pUSD — skip the deposit and just re-verify trading approvals?`, true));
-    if (depositWanted) {
-      await ctx.poll("waiting for bridge credit", async () => {
-        const bal = await this.collateralBalance().catch(() => 0);
-        return bal > before + 0.01 ? bal : null;
-      });
+    const checkForCredit = async (): Promise<number | null> => {
+      const bal = await this.collateralBalance().catch(() => 0);
+      return bal > before + 0.01 ? bal : null;
+    };
+    // Interactive hosts expose a Skip action while polling. Keep the existing
+    // poll as a compatibility fallback for headless/test SetupContext hosts.
+    const after = ctx.pollSkippable
+      ? await ctx.pollSkippable("waiting for bridge credit", checkForCredit)
+      : await ctx.poll("waiting for bridge credit", checkForCredit);
+    if (after === null) {
+      const current = await this.collateralBalance().catch(() => before);
+      ctx.print(`Deposit polling skipped. Balance: ${current.toFixed(2)} pUSD; continuing to trading approvals.`);
+    } else {
+      ctx.print(`Deposit credited: ${(after - before).toFixed(2)} pUSD.`);
+      ctx.print(`Balance: ${after.toFixed(2)} pUSD.`);
     }
-    const bal = await this.collateralBalance();
-    ctx.print(`Credited: ${bal.toFixed(2)} pUSD.`);
 
     const client = await this.gaslessClient(ctx, a);
     ctx.print("Setting up trading approvals (one-time, gasless via relayer)…");
@@ -643,8 +652,8 @@ export class PolymarketAdapter implements VenueAdapter {
   }
 
   private yesTokenOf(info: MarketInfo): string {
-    const yes = info.tokens.find((t) => t.outcome.toLowerCase() === "yes") ?? info.tokens[0];
-    if (!yes) throw new Error("market has no tokens");
+    const yes = info.tokens.find((t) => t.outcome.trim().toLowerCase() === "yes");
+    if (!yes) throw new Error("market has no explicitly labeled YES token");
     return String(yes.tokenId);
   }
 
@@ -652,9 +661,29 @@ export class PolymarketAdapter implements VenueAdapter {
   private async tokenFor(marketRef: string, outcome: "YES" | "NO" | undefined): Promise<string> {
     if (outcome !== "NO") return marketRef;
     const { info } = await this.marketInfoForToken(marketRef);
-    const no = info.tokens.find((t) => String(t.tokenId) !== marketRef);
-    if (!no) throw new Error(`cannot resolve NO token for ${marketRef}`);
+    const no = info.tokens.find((t) => t.outcome.trim().toLowerCase() === "no");
+    if (!no) throw new Error(`cannot resolve explicitly labeled NO token for ${marketRef}`);
     return String(no.tokenId);
+  }
+
+  /** Validate an explicit token against the market's condition and outcome. */
+  private async tokenForIntent(intent: OrderIntent): Promise<{ tokenId: string; conditionId: string; info: MarketInfo }> {
+    const tokenId = intent.tokenId ?? (await this.tokenFor(intent.marketRef, intent.outcome));
+    const { conditionId, info } = await this.marketInfoForToken(tokenId);
+    const yesRef = this.yesTokenOf(info);
+    if (yesRef !== intent.marketRef) {
+      throw new Error(`token ${tokenId} does not belong to YES marketRef ${intent.marketRef}`);
+    }
+    if (intent.conditionId && intent.conditionId.toLowerCase() !== conditionId.toLowerCase()) {
+      throw new Error(`token ${tokenId} condition ${conditionId} does not match ${intent.conditionId}`);
+    }
+    if (intent.outcome) {
+      const token = info.tokens.find((candidate) => String(candidate.tokenId) === tokenId);
+      if (token?.outcome.trim().toUpperCase() !== intent.outcome) {
+        throw new Error(`token ${tokenId} is not labeled ${intent.outcome}`);
+      }
+    }
+    return { tokenId, conditionId, info };
   }
 
   /** Map any outcome token back to its market's YES-token marketRef. */
@@ -666,22 +695,35 @@ export class PolymarketAdapter implements VenueAdapter {
 
   async positions(_acct: VenueAccount): Promise<Position[]> {
     const client = await this.secure();
-    const page = await client.listPositions({}).firstPage();
     const out: Position[] = [];
-    for (const p of page.items) {
-      const size = Number(p.size ?? 0);
-      if (!p.tokenId || size <= 0) continue;
-      const isYes = (p.outcome ?? "").toLowerCase() !== "no";
-      const marketRef = isYes ? String(p.tokenId) : String(p.oppositeTokenId ?? p.tokenId);
-      out.push({
-        marketRef,
-        side: isYes ? "YES" : "NO",
-        size,
-        avgPrice: Number(p.avgPrice ?? 0),
-        unrealizedPnl: p.curPrice != null ? (Number(p.curPrice) - Number(p.avgPrice ?? 0)) * size : undefined,
-        redeemable: p.redeemable ?? undefined,
-        label: (p as { title?: string | null }).title ?? undefined,
-      });
+    for await (const page of client.listPositions({})) {
+      for (const p of page.items) {
+        const size = Number(p.size ?? 0);
+        if (!p.tokenId || size <= 0) continue;
+        const tokenId = String(p.tokenId);
+        const { conditionId, info } = await this.marketInfoForToken(tokenId);
+        const explicit = info.tokens.find((token) => String(token.tokenId) === tokenId)?.outcome.trim().toUpperCase();
+        if (explicit !== "YES" && explicit !== "NO") continue;
+        const outcome = explicit;
+        const marketRef = this.yesTokenOf(info);
+        const reportedCurrentPrice = p.curPrice == null ? undefined : Number(p.curPrice);
+        const currentPrice = reportedCurrentPrice !== undefined && Number.isFinite(reportedCurrentPrice)
+          ? reportedCurrentPrice
+          : undefined;
+        out.push({
+          marketRef,
+          tokenId,
+          conditionId,
+          outcome,
+          side: outcome,
+          size,
+          avgPrice: Number(p.avgPrice ?? 0),
+          currentPrice,
+          unrealizedPnl: currentPrice === undefined ? undefined : (currentPrice - Number(p.avgPrice ?? 0)) * size,
+          redeemable: p.redeemable ?? undefined,
+          label: (p as { title?: string | null }).title ?? undefined,
+        });
+      }
     }
     return out;
   }
@@ -696,6 +738,19 @@ export class PolymarketAdapter implements VenueAdapter {
       asks: ob.asks.map(toNum).sort((x, y) => x.price - y.price),
       ts: Number(ob.timestamp ?? Date.now()),
     };
+  }
+
+  async tokenBook(tokenId: string): Promise<OrderBook> {
+    return this.book(tokenId);
+  }
+
+  async subscribeMarketData(tokenIds: string[]): Promise<RealtimeSubscription> {
+    if (tokenIds.length === 0) throw new Error("market subscription requires at least one token id");
+    return this.pub().subscribe([{ topic: "market", tokenIds: [...new Set(tokenIds)] }]);
+  }
+
+  async subscribeUserData(): Promise<RealtimeSubscription> {
+    return (await this.secure()).subscribe([{ topic: "user" }]);
   }
 
   async quote(marketRef: string): Promise<Quote> {
@@ -735,14 +790,52 @@ export class PolymarketAdapter implements VenueAdapter {
     return v;
   }
 
+  /** Resolve the direct Gamma parent event for portfolio-level exposure caps. */
+  async eventRef(marketRef: string): Promise<string | undefined> {
+    const cached = this.eventRefCache.get(marketRef);
+    if (cached) return cached;
+    try {
+      const url = new URL("/markets", this.urls.gamma);
+      url.searchParams.set("clob_token_ids", marketRef);
+      const res = await fetch(url, { headers: { accept: "application/json" } });
+      if (!res.ok) return undefined;
+      const body = (await res.json()) as unknown;
+      const first = Array.isArray(body) ? body[0] : undefined;
+      if (!first || typeof first !== "object") return undefined;
+      const events = (first as { events?: unknown }).events;
+      const event = Array.isArray(events) ? events[0] : undefined;
+      if (!event || typeof event !== "object") return undefined;
+      const rawId = (event as { id?: unknown }).id;
+      if (typeof rawId !== "string" && typeof rawId !== "number") return undefined;
+      const id = String(rawId).trim();
+      if (!id) return undefined;
+      const ref = `polymarket:${id}`;
+      this.eventRefCache.set(marketRef, ref);
+      return ref;
+    } catch {
+      return undefined;
+    }
+  }
+
   // -------------------------------------------------------------------------
   // Trading
   // -------------------------------------------------------------------------
 
   async placeOrder(_acct: VenueAccount, intent: OrderIntent): Promise<OrderAck> {
+    return this.placePrepared(intent);
+  }
+
+  async placeOrderWithLifecycle(
+    _acct: VenueAccount,
+    intent: OrderIntent,
+    hooks: OrderLifecycleHooks,
+  ): Promise<OrderAck> {
+    return this.placePrepared(intent, hooks);
+  }
+
+  private async placePrepared(intent: OrderIntent, hooks?: OrderLifecycleHooks): Promise<OrderAck> {
     const client = await this.secure();
-    const tokenId = await this.tokenFor(intent.marketRef, intent.outcome);
-    const { info } = await this.marketInfoForToken(tokenId);
+    const { tokenId, conditionId, info } = await this.tokenForIntent(intent);
     const tick = Number(info.tickSize);
     const price = clampTick(intent.limitPrice, tick);
     const size = Math.floor(intent.size * 100) / 100; // CLOB sizes: 2dp shares
@@ -762,17 +855,25 @@ export class PolymarketAdapter implements VenueAdapter {
     const attribution = builderCode ? { builderCode: builderCode as `0x${string}` } : {};
 
     const side = intent.side === "BUY" ? PmOrderSide.BUY : PmOrderSide.SELL;
-    let res;
+    let signed: PmSignedOrder;
     try {
-      if (intent.tif === "FOK" || intent.tif === "IOC") {
+      if (intent.tif === "FOK" || intent.tif === "IOC" || intent.tif === "FAK") {
+        if (intent.postOnly) throw new Error(`${intent.tif} orders cannot be post-only`);
         const orderType = intent.tif === "FOK" ? PmOrderType.FOK : PmOrderType.FAK;
-        res =
+        signed =
           intent.side === "BUY"
-            ? await client.placeMarketOrder({ tokenId, side: PmOrderSide.BUY, amount: round2(size * price), maxPrice: price, orderType, ...attribution })
-            : await client.placeMarketOrder({ tokenId, side: PmOrderSide.SELL, shares: size, minPrice: price, orderType, ...attribution });
+            ? await client.createMarketOrder({ tokenId, side: PmOrderSide.BUY, amount: round2(size * price), maxPrice: price, orderType, ...attribution })
+            : await client.createMarketOrder({ tokenId, side: PmOrderSide.SELL, shares: size, minPrice: price, orderType, ...attribution });
       } else {
-        // GTD without an expiry field degrades to GTC (documented).
-        res = await client.placeLimitOrder({ tokenId, price, size, side, ...attribution });
+        signed = await client.createLimitOrder({
+          tokenId,
+          price,
+          size,
+          side,
+          postOnly: intent.postOnly ?? false,
+          ...(intent.expiration ? { expiration: intent.expiration } : {}),
+          ...attribution,
+        });
       }
     } catch (err) {
       // A SELL bouncing on allowance means the CTF operator approval is
@@ -788,6 +889,12 @@ export class PolymarketAdapter implements VenueAdapter {
       }
       throw err;
     }
+
+    // Hash the SDK-created payload in memory. Only this digest crosses the
+    // adapter boundary; the signature itself is never persisted or logged.
+    const preparedHash = createHash("sha256").update(JSON.stringify(signed)).digest("hex");
+    await hooks?.onPrepared({ preparedHash, tokenId, conditionId, outcome: intent.outcome });
+    const res = await client.postOrder(signed);
 
     const r = res as {
       ok?: boolean;
@@ -816,6 +923,7 @@ export class PolymarketAdapter implements VenueAdapter {
       tokenId,
       funder: this.creds?.funder,
       builderCode,
+      preparedHash,
     };
   }
 
@@ -831,44 +939,62 @@ export class PolymarketAdapter implements VenueAdapter {
 
   async openOrders(_acct: VenueAccount): Promise<Order[]> {
     const client = await this.secure();
-    const page = await client.listOpenOrders({}).firstPage();
     const out: Order[] = [];
-    for (const o of page.items) {
-      const { marketRef } = await this.yesRefOf(String(o.tokenId));
-      const size = Number(o.originalSize);
-      const filled = Number(o.sizeMatched);
-      out.push({
-        id: o.id,
-        marketRef,
-        side: o.side.toUpperCase() === "SELL" ? "SELL" : "BUY",
-        size,
-        filledSize: filled,
-        price: Number(o.price),
-        status: filled > 0 ? "partial" : "open",
-        createdAt: Date.parse(o.createdAt) || undefined,
-      });
+    for await (const page of client.listOpenOrders({})) {
+      for (const o of page.items) {
+        const tokenId = String(o.tokenId);
+        const { marketRef, isYes } = await this.yesRefOf(tokenId);
+        const { conditionId } = await this.marketInfoForToken(tokenId);
+        const size = Number(o.originalSize);
+        const filled = Number(o.sizeMatched);
+        out.push({
+          id: o.id,
+          marketRef,
+          tokenId,
+          conditionId,
+          outcome: isYes ? "YES" : "NO",
+          side: o.side.toUpperCase() === "SELL" ? "SELL" : "BUY",
+          size,
+          filledSize: filled,
+          price: Number(o.price),
+          status: filled > 0 ? "partial" : "open",
+          createdAt: Date.parse(o.createdAt) || undefined,
+        });
+      }
     }
     return out;
   }
 
   async fills(_acct: VenueAccount, sinceTs: number): Promise<Fill[]> {
     const client = await this.secure();
-    const page = await client.listAccountTrades({}).firstPage();
     const out: Fill[] = [];
-    for (const t of page.items) {
-      const ts = Date.parse(t.matchedAt);
-      if (!Number.isFinite(ts) || ts < sinceTs) continue;
-      const { marketRef } = await this.yesRefOf(String(t.tokenId));
-      out.push({
-        id: t.id,
-        orderId: t.takerOrderId,
-        marketRef,
-        side: t.side.toUpperCase() === "SELL" ? "SELL" : "BUY",
-        size: Number(t.size),
-        price: Number(t.price),
-        ts,
-        fee: Number(t.feeRateBps) ? (Number(t.feeRateBps) / 10_000) * Number(t.size) * Number(t.price) : undefined,
-      });
+    for await (const page of client.listAccountTrades({})) {
+      for (const t of page.items) {
+        const ts = Date.parse(t.matchedAt);
+        if (!Number.isFinite(ts) || ts < sinceTs) continue;
+        const tokenId = String(t.tokenId);
+        const { marketRef, isYes } = await this.yesRefOf(tokenId);
+        const conditionId = String(t.conditionId);
+        const accountMaker = t.traderSide === "MAKER" ? t.makerOrders.find((maker) => String(maker.tokenId) === tokenId) : undefined;
+        const size = Number(accountMaker?.matchedAmount ?? t.size);
+        const price = Number(accountMaker?.price ?? t.price);
+        const feeRateBps = Number(accountMaker?.feeRateBps ?? t.feeRateBps);
+        out.push({
+          id: t.id,
+          orderId: accountMaker?.orderId ?? t.takerOrderId,
+          makerOrderId: accountMaker?.orderId,
+          marketRef,
+          tokenId,
+          conditionId,
+          outcome: isYes ? "YES" : "NO",
+          side: String(accountMaker?.side ?? t.side).toUpperCase() === "SELL" ? "SELL" : "BUY",
+          size,
+          matchedAmountDelta: size,
+          price,
+          ts,
+          fee: feeRateBps ? (feeRateBps / 10_000) * size * price : undefined,
+        });
+      }
     }
     return out.sort((a, b) => a.ts - b.ts);
   }
@@ -913,11 +1039,15 @@ export class PolymarketAdapter implements VenueAdapter {
   // Resolution redemption (gasless via SDK position lifecycle)
   // -------------------------------------------------------------------------
 
-  async redeem(_acct: VenueAccount, position: Position): Promise<void> {
+  async redeem(_acct: VenueAccount, position: Position): Promise<RedemptionReceipt> {
     const client = await this.secure();
     const { conditionId } = await this.marketInfoForToken(position.marketRef);
     const handle = await client.redeemPositions({ conditionId });
-    await handle.wait();
+    const outcome = await handle.wait();
+    return {
+      transactionHash: String(outcome.transactionHash),
+      ...(outcome.transactionId === null ? {} : { transactionId: String(outcome.transactionId) }),
+    };
   }
 }
 

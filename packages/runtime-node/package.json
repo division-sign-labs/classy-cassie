@@ -42,6 +42,7 @@
     "@quotient-forecasting/cassie-core": "workspace:*",
     "@quotient-forecasting/strategy-agent": "workspace:*",
     "@quotient-forecasting/strategy-flip-flat": "workspace:*",
+    "@quotient-forecasting/strategy-market-make": "workspace:*",
     "better-sqlite3": "13.0.3"
   },
   "devDependencies": {

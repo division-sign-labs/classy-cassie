@@ -240,6 +240,7 @@ export class KalshiAdapter implements VenueAdapter {
   private keyCache?: KeyObject;
   private actionChain: Promise<unknown> = Promise.resolve();
   private lastActionAt = 0;
+  private readonly eventRefCache = new Map<string, string>();
 
   constructor(opts: AdapterOpts, fetchImpl?: typeof fetch) {
     this.opts = opts;
@@ -468,6 +469,27 @@ export class KalshiAdapter implements VenueAdapter {
       spreadBps: mid > 0 ? ((ask - bid) / mid) * 10_000 : 0,
       ts: Date.now(),
     };
+  }
+
+  /** Resolve the canonical Kalshi event ticker; never infer it from market ticker syntax. */
+  async eventRef(marketRef: string): Promise<string | undefined> {
+    const cached = this.eventRefCache.get(marketRef);
+    if (cached) return cached;
+    try {
+      const res = await this.request<{ market?: { event_ticker?: unknown } }>(
+        "GET",
+        `/markets/${encodeURIComponent(marketRef)}`,
+      );
+      const rawTicker = res.market?.event_ticker;
+      if (typeof rawTicker !== "string") return undefined;
+      const ticker = rawTicker.trim();
+      if (!ticker) return undefined;
+      const ref = `kalshi:${ticker}`;
+      this.eventRefCache.set(marketRef, ref);
+      return ref;
+    } catch {
+      return undefined;
+    }
   }
 
   async openOrders(_acct: VenueAccount): Promise<Order[]> {

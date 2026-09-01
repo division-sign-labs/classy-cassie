@@ -31,6 +31,10 @@ agent-driven CLI commands. The passphrase stays on the operator's machine and is
 sent to the droplet.
 Use `cassie passphrase remember <botId>` for an existing bot. Keep a recovery copy in a
 password manager; the system credential store is not a recovery service.
+Use `cassie passphrase change <botId>` to re-encrypt every entry in that bot's local
+keystore in one atomic replacement. An existing system-credential-store copy is updated;
+the command never changes or restarts a deployed bot. If `CASSIE_PASSPHRASE` is set in a
+`.local.env` or the shell, update or remove that override after the change as instructed.
 
 For contributors working from this checkout:
 
@@ -40,7 +44,7 @@ pnpm install && pnpm build
 # create a bot: wallet, venue account, strategy, Telegram, funding — all in the terminal
 node packages/cli/dist/index.js init
 
-# deterministic offline engine test: entry → capacity cap → convergence → exit
+# deterministic offline engine test: entry → capacity cap → hold a losing convergence
 pnpm exec vitest run packages/core/test/engine-e2e.test.ts
 
 # live, locally
@@ -72,10 +76,12 @@ the adapter and is pinned by known-vector tests.
 `s-1vcpu-1gb`, $6/mo, `sgp1` by default — and runs the bot there under systemd. Orders
 leave from that droplet, which is what the region choice decides.
 
-Deploy refuses to start trading unless four things hold: the droplet confirms its region
-to DigitalOcean's metadata service, the venue accepts orders from there, the signal
-credential works from the droplet, and Ares reporting matches local configuration. Any
-failure stops the deploy with the reason and leaves the bot idle.
+Deploy refuses to start or authorize trading unless four things hold: the droplet confirms
+its region to DigitalOcean's metadata service, the venue accepts orders from there, the
+signal credential works from the droplet, and Ares reporting matches local configuration.
+Even after those checks, a newly deployed market-maker remains `HALTED` pending the
+hash-bound operator review below. Any failure stops the deploy with the reason and leaves
+the bot idle.
 
 Credentials reach the droplet over SSH on stdin and land in `/etc/cassie/<botId>.env`,
 mode 0600, owned by the service user. Droplet user-data carries none, since the metadata
@@ -102,7 +108,7 @@ droplet. Keys and venue balances are untouched.
 | `packages/core`        | venue adapters, wallet/keystore, strategy engine, risk module, signal client, alerts, thesis sizing |
 | `packages/cli`         | the `cassie` binary: wizard, wallet, fund, run, deploy, status, logs, portfolio, trade, orders, ticket |
 | `packages/runtime-node` | the bot process: engine loop, SQLite state, unix-socket control API. Same code for `cassie run` and a droplet |
-| `strategies/flip-flat` | the `signals` strategy: follow Quotient signals, hold until the forecast converges with the price |
+| `strategies/flip-flat` | the `signals` strategy: follow Quotient signals; prediction positions exit on positive convergence or the seven-day maximum hold |
 | `skills/cassie`        | agent-facing operator manual ([SKILL.md](skills/cassie/SKILL.md)) + thesis policy (`thesis/mappings.json`) |
 | `fixtures/`            | signal + order-book fixtures for the offline e2e                     |
 
@@ -141,35 +147,119 @@ latest Q forecasts.
 
 The runtime separates the two cadences: every five minutes it refreshes the entry-signal
 snapshot and batches Q forecast lookups for held markets; every 60 seconds it re-reads
-venue odds and checks convergence. Entry-signal freshness never gates an exit. Held-market
-lookups cost $0.005 per batch of up to 10 markets per refresh. Configure the cadences with
+venue odds and checks convergence and hold deadlines. Entry-signal freshness never gates
+an exit. Held-market lookups cost $0.005 per batch of up to 10 markets per refresh.
+Configure the cadences with
 `cassie strategy <botId> --signal-check-minutes 5 --position-check-seconds 60`.
 
 ### Signal allocation
 
 The signal strategy has no position-count cap by default and evaluates competing new
-signals from widest to narrowest edge. Set an explicit cap with `--top N`; restore the
-default with `--top unlimited`. Its daily entry budget caps cumulative entry
-notional placed from 00:00–23:59 UTC;
-rejected entries do not count, and liquidity/risk-capped entries consume only their final
-order notional. The default allocation is 25% of the $100 daily budget per entry, while
-`cassie init` asks for the dollar budget (default $100).
+signals from widest to narrowest eligible edge. Prediction-market entries default to a
+10–30 percentage-point forecast-edge range: 30pp is eligible, while anything larger is
+skipped as a likely stale or mismapped signal. Change the ceiling with
+`--max-entry-edge <pp>` or remove it with `--max-entry-edge unlimited`. This is distinct
+from quoted bid/ask spread, which is controlled through executable-book slippage and
+depth. Set an explicit position cap with `--top N`; restore the default with
+`--top unlimited`.
+
+Prediction markets use portfolio-relative sizing by default. Each signal gets a
+quarter-Kelly target based on current portfolio equity, capped at 5% of equity in one
+market and 7.5% across one parent event. A repeat signal on the same side may top the
+position up only by the remaining target and cap headroom. Deposits therefore affect the
+next sizing decision automatically; there is no fixed daily allowance in this mode. An
+existing position above a target or cap is grandfathered: it cannot be topped up, but the
+allocator never sells merely to trim it back to the cap.
+
+An entry or top-up also requires at least $2,500 of held-outcome bid notional within 2¢
+of the best bid, so the strategy checks its ability to unwind before buying. Set
+`--min-exit-depth-2c-usd 0` to remove that entry-only eligibility gate. Actual orders are
+still sized against live entry-side depth and a slippage band.
+
+An early convergence exit requires both no more than 2pp of forecast edge remaining and
+at least a +2% gain at the executable held-outcome bid. Otherwise the position remains
+open until the default seven-day deadline (or resolution). Low 24-hour volume never blocks
+an exit; executable depth and slippage still bound it.
 
 ```sh
-cassie strategy <botId> --top unlimited --daily-budget 100 --position-budget-pct 33
+cassie strategy <botId> --allocation-mode portfolio-kelly \
+  --kelly-fraction 0.25 --market-cap-pct 5 --event-cap-pct 7.5
 ```
 
-The UTC reset replenishes entry capacity; it does not close positions. Every entry remains
-subject to the engine's per-order, liquidity, spread, and volume guardrails.
+The legacy fixed-budget allocator remains available. Supplying either legacy budget flag
+selects it explicitly:
+
+```sh
+cassie strategy <botId> --daily-budget 100 --position-budget-pct 25
+```
+
+Its UTC reset replenishes entry capacity; it does not close positions. Every entry in
+either mode remains subject to the engine's per-order, liquidity, slippage, and volume
+guardrails.
+
+## Q-directed Polymarket market making
+
+`market-make` is a separate, deterministic strategy selected during `cassie init`. It
+passively buys only the outcome favored by the latest Q forecast, then sells held
+inventory on convergence, a forecast change, risk, staleness, or time. It is not a
+symmetric always-on dealer and does not poll X or news.
+
+```sh
+cassie market-make configure <botId>
+cassie market-make reconcile <botId>          # exact report only; no venue writes
+# Review exact sanitized cancellations and each residual mismatch/reason, plus the SHA-256.
+cassie market-make reconcile <botId> --apply  # confirm and submit that exact proposal hash
+cassie market-make dry-run <botId>
+cassie market-make status <botId>
+# If still HALTED, repeat reconcile/status review after authorized reconciliation ticks.
+cassie market-make resume <botId>
+```
+
+The $500 preset is a ratio template applied automatically to the bot's funded strategy
+capital (collateral balance plus open inventory at average cost; pending buys remain
+separately reserved). There is no required
+bankroll setting; use `--bankroll-ceiling-usd 10000` only when you want a ceiling, or the
+legacy `--bankroll-usd 10000` form for fixed sizing. The strategy requires at least
+$1,000 of exit-side bids within 1¢ and $2,500 within 2¢. Orders are additionally capped
+at 2%/0.8% of those depth bands, while total market inventory is capped at 4%/1.6%. A
+$10,000 effective bankroll scales the complete dollar risk budget by 20× but leaves
+those absolute floors unchanged. The hard
+per-order cap becomes $400, while the normal base requests become $250 NO and $125 YES;
+bankroll scaling alone does not request $400. A custom $400 NO request, such as one from a
+`--base-order-usd` override, still requires $20,000/$50,000 of displayed exit depth. YES
+remains half the configured base unless its direction configuration changes. Resting
+entries are canceled when refreshed depth participation no longer supports their
+remaining size.
+
+A first local run and every new deployment start `HALTED` and do **not** apply venue
+reconciliation. The report-only command prints the exact sanitized cancellations plus
+only actual residual-inventory mismatches, each with a `reason` and
+`application: 'observe-and-authorize-repeated-reconciliation'`, plus the
+`inventoryApplication` policy and a proposal SHA-256. `--apply` requires confirmation and
+submits only that exact hash. It authorizes the exact cancellations and observation of
+those mismatches; it does not immediately adopt or correct all residual inventory.
+Inventory changes wait for the configured repeated-snapshot and late-fill gates. Any
+venue-snapshot change makes apply fail closed and requires a fresh report and review.
+Then run `dry-run` and check `status`; the bot may remain halted, requiring a later
+reconcile/status review before it is clean enough to explicitly `resume`. Once that
+deployment is authorized and active, ordinary ticks may auto-reconcile; a new deployment
+must repeat the review.
+Ordinary `cassie trade` is disabled for these bots so it cannot bypass durable
+reservations. See [the operator guide](docs/market-make.md) for the lifecycle, replay,
+residual-inventory procedure, and all controls.
+
+The prompt-driven monitor is still the separate `agent` strategy. Configure its mandate
+with `cassie agent prompt <botId> --set "..."`; v1 does not layer an LLM agent over the
+deterministic market-maker.
 
 ## Risk module
 
 Engine-enforced on every order, whether it came from the strategy, a manual `trade`, or a
 thesis ticket:
 
-- Executable size within a slippage band of mid, 100bps by default.
-- Order size capped at 25% of in-band depth, and at a per-order notional cap.
-- Market eligibility: a 24-hour volume floor, $10k by default, and a spread ceiling.
+- Executable size within a slippage band from the best executable price, 3% by default.
+- Order size capped at available in-band depth and at a per-order notional cap.
+- Entry eligibility: a 24-hour volume floor, $1k by default. Exits ignore this volume floor.
 - A minimum viable notional, so a capped order is skipped rather than dribbled out.
 - A TTL that re-prices or cancels a resting remainder.
 

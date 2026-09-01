@@ -2,7 +2,7 @@
 // packages/cli/src/index.ts
 // The `cassie` binary.
 
-import { Command } from "commander";
+import { Command, InvalidArgumentError } from "commander";
 import pc from "picocolors";
 import { runInit } from "./commands/init.js";
 import { walletCreate, walletExport, walletImport, walletList } from "./commands/wallet.js";
@@ -18,10 +18,19 @@ import { runDestroy } from "./commands/destroy.js";
 import { agentDryRun, agentPersona, agentPrompt, agentStatus } from "./commands/agent.js";
 import { configureReporting } from "./commands/reporting.js";
 import { installSkill } from "./commands/skill.js";
-import { forgetPassphrase, passphraseStatus, rememberPassphrase } from "./commands/passphrase.js";
+import { changePassphrase, forgetPassphrase, passphraseStatus, rememberPassphrase } from "./commands/passphrase.js";
+import {
+  configureMarketMake,
+  marketMakeDryRun,
+  marketMakeHalt,
+  marketMakeReconcile,
+  marketMakeReplay,
+  marketMakeResume,
+  marketMakeStatus,
+} from "./commands/market-make.js";
 import { cliVersion } from "./version.js";
 
-const program = new Command();
+export const program = new Command();
 
 program
   .name("cassie")
@@ -44,7 +53,11 @@ wallet
   .description("print the safe Splits EOA registration command (does not attach account authority)")
   .action(wrap(registerSplitsSigner));
 
-const passphrase = program.command("passphrase").description("keystore passphrase storage");
+const passphrase = program.command("passphrase").description("local keystore passphrase management");
+passphrase
+  .command("change <botId>")
+  .description("re-encrypt every local keystore entry under a new passphrase")
+  .action(wrap(changePassphrase));
 passphrase
   .command("remember <botId>")
   .description("save a verified passphrase in the system credential store")
@@ -149,11 +162,19 @@ alerts.command("test <botId>").description("send a Telegram test ping").action(w
 
 program
   .command("strategy <botId>")
-  .description("view/tune ranked positions, daily entry budget, allocation, and signal guardrails")
+  .description("view/tune ranked positions, portfolio or daily-budget allocation, and signal guardrails")
   .option("--top <n|unlimited>", "optional signal-position cap; widest eligible edges enter first")
-  .option("--daily-budget <usd>", "maximum entry notional placed per UTC day")
-  .option("--position-budget-pct <pct>", "percentage of the daily budget requested per entry")
+  .option("--allocation-mode <mode>", "portfolio-kelly or daily-budget")
+  .option("--kelly-fraction <fraction>", "fraction of full Kelly, from 0 to 1 (0.25 = quarter Kelly)")
+  .option("--market-cap-pct <pct>", "maximum portfolio equity allocated to one prediction market")
+  .option("--event-cap-pct <pct>", "maximum portfolio equity allocated across one parent event")
+  .option("--min-exit-depth-2c-usd <usd>", "minimum held-side bid depth within 2¢ for an entry; 0 disables")
+  .option("--daily-budget <usd>", "legacy mode: maximum entry notional placed per UTC day")
+  .option("--position-budget-pct <pct>", "legacy mode: percentage of the daily budget requested per entry")
+  .option("--max-entry-edge <pp|unlimited>", "maximum forecast entry edge; unlimited removes the guardrail")
   .option("--min-entry-notional <usd>", "entry-only floor after sizing and capacity caps")
+  .option("--min-convergence-profit-pct <pct>", "minimum executable gain for an early convergence exit")
+  .option("--max-hold-days <days|unlimited>", "unconditional maximum holding period")
   .option("--position-check-seconds <seconds>", "reconcile and evaluate held positions on this cadence")
   .option("--signal-check-minutes <minutes>", "refresh the Quotient signal snapshot on this cadence")
   .option("--signal-max-age-hours <hours>", "maximum age of a live signal")
@@ -179,13 +200,101 @@ agent
   .description("one full scan+decide cycle — candidates, model reasoning, sizing arithmetic — placing nothing")
   .action(wrap(agentDryRun));
 
+const marketMake = program
+  .command("market-make")
+  .description("Q-directed Polymarket passive-inventory strategy");
+export function addMarketMakeConfigureOptions(command: Command): Command {
+  return command
+    .option("--config <file>", "replace with a complete strategy JSON document")
+    .option("--bankroll-usd <usd>", "legacy fixed sizing bankroll (disables automatic live sizing)")
+    .option("--bankroll-ceiling-usd <usd|unlimited>", "cap automatic live-funded sizing (default: unlimited)")
+    .option("--live-bankroll", "size automatically from funded strategy capital with no ceiling")
+    .option("--max-deployed-usd <usd>", "inventory plus pending-entry cost ceiling")
+    .option("--max-markets <n>", "maximum active markets")
+    .option("--base-order-usd <usd>", "base passive ticket")
+    .option("--max-order-usd <usd>", "hard order notional cap")
+    .option("--target-no-usd <usd>", "NO inventory target per market")
+    .option("--yes-target-usd <usd>", "YES inventory target per market")
+    .option("--min-no-edge-pp <pp>", "minimum live Q edge for NO")
+    .option("--yes-min-edge-pp <pp>", "minimum live Q edge for YES")
+    .option(
+      "--max-edge-pp <pp>",
+      "Q-market edge ceiling (cannot exceed the hard 30pp sanity bound)",
+      parseMaxEdgePp,
+    )
+    .option("--max-book-spread-pp <pp>", "operational selected-token spread ceiling")
+    .option("--convergence-edge-pp <pp>", "remaining edge that triggers an exit")
+    .option("--gap-capture-pct <pct>", "percentage of the first-fill gap captured at exit (75 = 75%)")
+    .option("--review-hours <hours>", "review-only age")
+    .option("--max-hold-hours <hours>", "normal hold ceiling")
+    .option("--absolute-max-hold-hours <hours>", "one-renewal absolute ceiling")
+    .option("--renewal-no-edge-pp <pp>", "minimum NO edge for the one renewal")
+    .option("--yes-renewal-edge-pp <pp>", "minimum YES edge for the one renewal")
+    .option("--min-depth-1c-usd <usd>", "minimum exit-side bid depth within 1¢")
+    .option("--min-depth-2c-usd <usd>", "minimum exit-side bid depth within 2¢")
+    .option("--max-order-depth-1c-pct <pct>", "maximum single-order share of exit-bid depth within 1¢")
+    .option("--max-order-depth-2c-pct <pct>", "maximum single-order share of exit-bid depth within 2¢")
+    .option("--max-market-depth-1c-pct <pct>", "maximum per-market inventory share of exit-bid depth within 1¢")
+    .option("--max-market-depth-2c-pct <pct>", "maximum per-market inventory share of exit-bid depth within 2¢");
+}
+
+addMarketMakeConfigureOptions(
+  marketMake
+    .command("configure <botId>")
+    .description("view or change market-make parameters"),
+)
+  .action(wrap(configureMarketMake));
+marketMake
+  .command("status <botId>")
+  .description("configuration identity, lifecycle, inventory, orders, and loss stops")
+  .option("--json", "machine-readable output")
+  .action(wrap(marketMakeStatus));
+marketMake
+  .command("dry-run <botId>")
+  .description("read live Q/Gamma/CLOB and propose actions without placing orders; API spend is still metered")
+  .action(wrap(marketMakeDryRun));
+marketMake
+  .command("halt <botId>")
+  .description("cancel adds; continue mandatory exits")
+  .option("--liquidate", "also start bounded urgent exits for all inventory")
+  .action(wrap(marketMakeHalt));
+marketMake
+  .command("resume <botId>")
+  .description("resume only the reconciled current configuration/deployment")
+  .option("--acknowledge-loss-reset", "reset reviewed loss state (also required after an intentional withdrawal)")
+  .action(wrap(marketMakeResume));
+marketMake
+  .command("reconcile <botId>")
+  .description("compare durable state with venue balances, orders, and fills")
+  .option("--apply", "apply the report after confirmation")
+  .action(wrap(marketMakeReconcile));
+marketMake
+  .command("replay")
+  .description("chronologically replay a normalized event bundle")
+  .requiredOption("--input <bundle.json>", "normalized replay bundle")
+  .option("--config <strategy.json>", "strategy config; defaults to the bundled v1 preset")
+  .option("--fill-model <model>", "queue|trade-through|touch|all", "all")
+  .option("--output <path>", "JSON report file or directory")
+  .action(wrap(marketMakeReplay));
+
 const venue = program.command("venue").description("venue adapters");
 venue.command("status").description("adapters and when they were last verified against venue docs").action(wrap(venueStatus));
 
 const skill = program.command("skill").description("agent operator skill");
 skill.command("install").description("install or refresh the Cassie skill for Codex and Claude Code").action(wrap(installSkill));
 
-program.parseAsync().catch(fail);
+if (import.meta.main) program.parseAsync().catch(fail);
+
+function parseMaxEdgePp(raw: string): string {
+  const value = Number(raw);
+  if (!Number.isFinite(value) || value <= 0) {
+    throw new InvalidArgumentError("must be a positive number of percentage points");
+  }
+  if (value > 30) {
+    throw new InvalidArgumentError("cannot exceed the hard 30pp sanity bound");
+  }
+  return raw;
+}
 
 function wrap<A extends unknown[]>(fn: (...args: A) => unknown | Promise<unknown>): (...args: A) => Promise<void> {
   return async (...args: A) => {

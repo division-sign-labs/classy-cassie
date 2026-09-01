@@ -3,10 +3,12 @@
 // own account and run the bot on it under systemd. Credentials travel over SSH
 // on stdin — never in argv, never in droplet user-data.
 
+import { createHash } from "node:crypto";
+import { join } from "node:path";
 import pc from "picocolors";
 import { KeyRoles, type BotConfig } from "@quotient-forecasting/cassie-core";
 import { buildRuntimeCreds, confirm, getKeystoreSecret } from "../context.js";
-import { loadBotConfig, saveBotConfig } from "../paths.js";
+import { atomicWritePrivateFile, dirs, loadBotConfig, saveBotConfig } from "../paths.js";
 import { resolveQuotientToken } from "../quotient-token.js";
 import { discoverAresBuilderCode, resolveAresApiKey, verifyAresApiKey } from "../ares-config.js";
 import { resolveSurplusApiKey, verifySurplusApiKey } from "../surplus-config.js";
@@ -36,6 +38,64 @@ export interface DeployOpts {
   region?: string;
   size?: string;
   yes?: boolean;
+}
+
+type Deployment = NonNullable<BotConfig["deployment"]>;
+
+/**
+ * Stable identity for one exact saved deployment. A redeploy updates
+ * `deployedAt`, so even reuse of the same droplet receives a new identity and
+ * must pass the market-maker activation gates again.
+ */
+export function deploymentIdFor(deployment: Deployment): string {
+  const canonical = JSON.stringify({
+    provider: deployment.provider,
+    dropletId: deployment.dropletId,
+    host: deployment.host,
+    region: deployment.region,
+    size: deployment.size,
+    user: deployment.user,
+    deployedAt: deployment.deployedAt ?? null,
+  });
+  const digest = createHash("sha256").update(canonical).digest("hex").slice(0, 24);
+  return `do-${deployment.dropletId}-${digest}`;
+}
+
+export interface RuntimeStartResult {
+  started: Record<string, unknown>;
+  marketMakeStatus?: Record<string, unknown>;
+}
+
+/**
+ * Complete activation only after the caller has run every live preflight.
+ * Market making deliberately has no automatic resume or reconciliation apply:
+ * its controller restores durable state and starts HALTED. The operator later
+ * reviews an exact preview and applies that hash through the dedicated CLI.
+ */
+export function startRuntimeAfterPreflights(
+  cfg: BotConfig,
+  call: (method: "GET" | "POST", path: string, body?: string) => unknown,
+): RuntimeStartResult {
+  if (cfg.strategy.id !== "market-make") {
+    call("POST", "/resume");
+    return { started: asRecord(call("POST", "/init"), "/init") };
+  }
+
+  const started = asRecord(call("POST", "/init"), "/init");
+  const status = asRecord(call("GET", "/market-make/status"), "/market-make/status");
+  if (status.lifecycle !== "HALTED") {
+    throw new Error(
+      `refusing market-make deployment: expected HALTED after startup, got ${String(status.lifecycle ?? "unknown")}`,
+    );
+  }
+  return { started, marketMakeStatus: status };
+}
+
+function asRecord(value: unknown, route: string): Record<string, unknown> {
+  if (value === null || typeof value !== "object" || Array.isArray(value)) {
+    throw new Error(`runtime ${route} returned a non-object response`);
+  }
+  return value as Record<string, unknown>;
 }
 
 export function dropletName(botId: string): string {
@@ -106,21 +166,154 @@ async function waitForProvisioning(target: Target): Promise<true> {
   });
 }
 
+interface QuiesceDeps {
+  exec: typeof sshExec;
+  control: typeof controlCall;
+}
+
 /** Stop the running bot and cancel its resting orders before replacing it. */
-function quiesce(cfg: BotConfig): void {
+export function quiesce(
+  cfg: BotConfig,
+  strict = false,
+  deps: QuiesceDeps = { exec: sshExec, control: controlCall },
+): void {
   if (!cfg.deployment) return;
   const target: Target = { host: cfg.deployment.host, user: cfg.deployment.user };
-  if (!sshExec(target, "true").ok) {
+  if (!deps.exec(target, "true").ok) {
+    if (strict) {
+      throw new Error(
+        "refusing to replace the market-make droplet: the existing host is unreachable, so its durable state cannot be preserved",
+      );
+    }
     console.log(pc.yellow("the existing droplet is unreachable; continuing without a clean stop"));
     return;
   }
   try {
-    controlCall(target, cfg.id, "POST", "/shutdown");
+    const shutdown = asRecord(deps.control(target, cfg.id, "POST", "/shutdown"), "/shutdown");
+    if (shutdown.stopped !== true || shutdown.restingOrdersCanceled !== true) {
+      throw new Error("runtime did not confirm a stopped process with resting orders canceled");
+    }
+    if (strict) {
+      // Also defend upgrades from an older runtime whose /shutdown response did
+      // not yet include authoritative venue verification.
+      const remaining = deps.control(target, cfg.id, "GET", "/orders");
+      if (!Array.isArray(remaining)) {
+        throw new Error("authoritative /orders check returned a non-array response");
+      }
+      if (remaining.length > 0) {
+        throw new Error(`authoritative /orders check found ${remaining.length} resting order(s)`);
+      }
+    }
     console.log(pc.green("running bot stopped, resting orders canceled"));
   } catch (error) {
+    if (strict) {
+      throw new Error(
+        `refusing to replace the market-make runtime: shutdown cancellation was not verified (${(error as Error).message.slice(0, 220)})`,
+      );
+    }
     console.log(pc.yellow(`could not reach the running bot (${(error as Error).message.slice(0, 120)})`));
   }
-  sshExec(target, `systemctl stop cassie@${cfg.id} || true`);
+  const stopped = deps.exec(target, `systemctl stop cassie@${cfg.id}`);
+  if (strict && !stopped.ok) {
+    throw new Error(
+      `refusing to replace the market-make droplet: could not stop its runtime cleanly (${(stopped.stderr || stopped.stdout).trim().slice(0, 160)})`,
+    );
+  }
+}
+
+interface PreservedMarketMakeState {
+  /** Local mode-0600 recovery artifact retained even after a successful move. */
+  path: string;
+  /** gzip-compressed SQLite main/WAL archive encoded for stdin-safe transport. */
+  payload: string;
+}
+
+/**
+ * Capture the closed SQLite database before deleting a market-maker droplet.
+ * WAL/SHM are included defensively even though a clean close normally removes
+ * them, so a recoverable inventory event cannot be stranded in a sidecar.
+ */
+function preserveMarketMakeState(cfg: BotConfig): PreservedMarketMakeState | null {
+  if (!cfg.deployment) return null;
+  const target: Target = { host: cfg.deployment.host, user: cfg.deployment.user };
+  const remotePath = `/var/lib/cassie/${cfg.id}.sqlite`;
+  const missing = "__CASSIE_NO_MARKET_MAKE_STATE__";
+  const captured = sshExec(
+    target,
+    `set -o pipefail && if test -f '${remotePath}'; then tar -C /var/lib/cassie -czf - '${cfg.id}.sqlite'* | base64 -w0; else printf '${missing}'; fi`,
+  );
+  if (!captured.ok) {
+    throw new Error(
+      `refusing to replace the market-make droplet: could not snapshot ${remotePath} (${(captured.stderr || captured.stdout).trim().slice(0, 160)})`,
+    );
+  }
+  const payload = captured.stdout.trim();
+  if (payload === missing) {
+    console.log(pc.dim("existing droplet has no market-make SQLite state to preserve"));
+    return null;
+  }
+  if (!payload) {
+    throw new Error(`refusing to replace the market-make droplet: ${remotePath} produced an empty snapshot`);
+  }
+  const path = join(
+    dirs.state(),
+    "deployment-snapshots",
+    `${cfg.id}-${deploymentIdFor(cfg.deployment)}.sqlite.tar.gz.b64`,
+  );
+  atomicWritePrivateFile(path, `${payload}\n`);
+  console.log(pc.green(`market-make state preserved at ${path}`));
+  return { path, payload };
+}
+
+/** Restore a preserved DB before systemd is allowed to start the new runtime. */
+function restoreMarketMakeState(target: Target, botId: string, snapshot: PreservedMarketMakeState): void {
+  const remotePath = `/var/lib/cassie/${botId}.sqlite`;
+  try {
+    sshExecOrThrow(
+      target,
+      `umask 077 && base64 --decode | tar -xzf - -C /var/lib/cassie && test -f '${remotePath}' && chown cassie:cassie /var/lib/cassie/${botId}.sqlite* && chmod 0600 /var/lib/cassie/${botId}.sqlite*`,
+      snapshot.payload,
+    );
+  } catch (error) {
+    throw new Error(
+      `could not restore market-make state on the new droplet; the recoverable snapshot remains at ${snapshot.path}: ${(error as Error).message}`,
+    );
+  }
+  console.log(pc.green("market-make state restored on the new droplet (local recovery snapshot retained)"));
+}
+
+/** Build an in-memory reachability record for a same-name orphaned droplet. */
+function configAtDroplet(cfg: BotConfig, droplet: Droplet): BotConfig {
+  const host = publicIpv4(droplet);
+  if (!host) throw new Error(`refusing to replace market-make droplet ${droplet.id}: it has no public IPv4`);
+  return {
+    ...cfg,
+    deployment: {
+      provider: "digitalocean",
+      dropletId: droplet.id,
+      host,
+      region: droplet.region.slug,
+      size: droplet.size_slug,
+      user: "root",
+      deployedAt: droplet.created_at,
+    },
+  };
+}
+
+/**
+ * A market-maker always snapshots a closed database before redeploying,
+ * including a same-droplet runtime replacement. Non-MM deployments retain the
+ * existing best-effort behavior.
+ */
+export function marketMakeStateSource(
+  cfg: BotConfig,
+  reuse: boolean,
+  namedExisting: Droplet | null,
+): BotConfig | null {
+  if (cfg.strategy.id !== "market-make") return null;
+  if (reuse) return cfg.deployment ? cfg : null;
+  if (cfg.deployment) return cfg;
+  return namedExisting ? configAtDroplet(cfg, namedExisting) : null;
 }
 
 /**
@@ -219,6 +412,7 @@ export async function runDeploy(botId: string, opts: DeployOpts = {}): Promise<v
   const name = dropletName(botId);
   const existing = cfg.deployment ? await client.droplet(cfg.deployment.dropletId).catch(() => null) : null;
   const reuse = existing !== null && existing.region.slug === region && existing.size_slug === size;
+  const namedExisting = reuse ? null : await client.dropletByName(name);
 
   console.log("");
   if (reuse) {
@@ -227,14 +421,17 @@ export async function runDeploy(botId: string, opts: DeployOpts = {}): Promise<v
   } else {
     console.log(pc.bold(`deploying ${botId} to a new droplet in ${chosen.name}`));
     console.log(pc.dim(`${name}  ${size}  ${DROPLET_IMAGE}`));
-    if (existing) console.log(pc.yellow(`the current droplet in ${existing.region.slug} will be replaced`));
+    const replacement = existing ?? namedExisting;
+    if (replacement) console.log(pc.yellow(`the current droplet in ${replacement.region.slug} will be replaced`));
   }
   if (!opts.yes && !(await confirm("Deploy?", true))) return;
 
   const { publicKey } = ensureKeypair();
   const sshKeyId = await client.upsertSshKey("cassie", publicKey);
 
-  quiesce(cfg);
+  const replacementStateSource = marketMakeStateSource(cfg, reuse, namedExisting);
+  quiesce(replacementStateSource ?? cfg, replacementStateSource !== null);
+  const preservedMarketMakeState = replacementStateSource ? preserveMarketMakeState(replacementStateSource) : null;
 
   let droplet: Droplet;
   if (reuse) {
@@ -242,7 +439,7 @@ export async function runDeploy(botId: string, opts: DeployOpts = {}): Promise<v
   } else {
     // Replace rather than run two of the same bot. The old one was already
     // quiesced above, so its resting orders are gone before this point.
-    const stale = [existing, await client.dropletByName(name)].filter(
+    const stale = [existing, namedExisting].filter(
       (d): d is Droplet => d !== null && d !== undefined,
     );
     for (const old of new Map(stale.map((d) => [d.id, d])).values()) {
@@ -291,6 +488,12 @@ export async function runDeploy(botId: string, opts: DeployOpts = {}): Promise<v
   }
   console.log(pc.green(`droplet ${name} ready at ${host} (${droplet.region.slug})`));
 
+  if (preservedMarketMakeState && !reuse) {
+    restoreMarketMakeState(target, botId, preservedMarketMakeState);
+  } else if (preservedMarketMakeState) {
+    console.log(pc.green("market-make state remains in place on the stopped droplet (local recovery snapshot retained)"));
+  }
+
   // Record the deployment before verifying. A failure below then leaves a
   // droplet cassie still knows how to reach rather than an orphan visible only
   // in the DigitalOcean dashboard.
@@ -307,6 +510,7 @@ export async function runDeploy(botId: string, opts: DeployOpts = {}): Promise<v
     },
   };
   saveBotConfig(deployedCfg);
+  const deploymentId = deploymentIdFor(deployedCfg.deployment!);
 
   const env: [string, string | null][] = [
     ["CASSIE_BOT_ID", botId],
@@ -315,6 +519,10 @@ export async function runDeploy(botId: string, opts: DeployOpts = {}): Promise<v
     // middle of the JSON and fails to parse. One line has no newlines to escape.
     ["CASSIE_BOT_CONFIG", JSON.stringify(deployedCfg)],
     ["CASSIE_BOT_CREDS", JSON.stringify(creds)],
+    ["CASSIE_DEPLOYMENT_ID", deploymentId],
+    // A market-maker's controller starts only after live checks. Reconciliation
+    // remains review-only until the operator applies the exact preview hash.
+    ["CASSIE_AUTOSTART", deployedCfg.strategy.id === "market-make" ? "0" : "1"],
     ["CASSIE_REQUIRED_REGION", droplet.region.slug],
     ["QUOTIENT_API_TOKEN", quotientToken],
     ["TELEGRAM_BOT_TOKEN", telegramToken],
@@ -410,21 +618,53 @@ export async function runDeploy(botId: string, opts: DeployOpts = {}): Promise<v
     console.log(pc.green(`Ares reporting verified by the droplet for @${check.username}`));
   }
 
-  controlCall(target, botId, "POST", "/resume");
-  const started = controlCall(target, botId, "POST", "/init") as { tickIntervalMin?: number };
-  const positionCheckSeconds = Number(((started.tickIntervalMin ?? deployedCfg.tickIntervalMin) * 60).toFixed(4));
-  const signalCheckMinutes = Number(
-    Number(
-      (deployedCfg.strategy.config as Record<string, unknown>).signalPollIntervalMin ?? 5,
-    ).toFixed(4),
+  const startup = startRuntimeAfterPreflights(
+    deployedCfg,
+    (method, path, body) => controlCall(target, botId, method, path, body),
   );
-  console.log(
-    pc.green(`loop started: positions every ${positionCheckSeconds}s; signals every ${signalCheckMinutes}m`),
-  );
+  if (deployedCfg.strategy.id === "market-make") {
+    console.log(pc.green("market-make controller loops started in HALTED mode; reconciliation still requires review"));
+    // The first boot was intentionally held until preflights and halted init.
+    // Persist autostart for later host/process restarts; durable activation
+    // state still decides whether those loops may add inventory.
+    const restartLines = lines.map((line) =>
+      line.startsWith("CASSIE_AUTOSTART=") ? `CASSIE_AUTOSTART=${JSON.stringify("1")}` : line,
+    );
+    writeFile(
+      target,
+      `/etc/cassie/${botId}.env`,
+      `${restartLines.join("\n")}\n`,
+      "0600",
+      "cassie:cassie",
+    );
+  } else {
+    const tickIntervalMin =
+      typeof startup.started.tickIntervalMin === "number"
+        ? startup.started.tickIntervalMin
+        : deployedCfg.tickIntervalMin;
+    const positionCheckSeconds = Number((tickIntervalMin * 60).toFixed(4));
+    const signalCheckMinutes = Number(
+      Number(
+        (deployedCfg.strategy.config as Record<string, unknown>).signalPollIntervalMin ?? 5,
+      ).toFixed(4),
+    );
+    console.log(
+      pc.green(`loop started: positions every ${positionCheckSeconds}s; signals every ${signalCheckMinutes}m`),
+    );
+  }
 
   console.log("");
-  console.log(pc.bold(`${botId} is live on ${name} in ${chosen.name}.`));
-  console.log(`  cassie status ${botId}`);
+  if (deployedCfg.strategy.id === "market-make") {
+    console.log(pc.bold(`${botId} is installed on ${name} in ${chosen.name} and remains HALTED.`));
+    console.log(`  cassie market-make reconcile ${botId}`);
+    console.log(`  cassie market-make reconcile ${botId} --apply`);
+    console.log(`  cassie market-make dry-run ${botId}`);
+    console.log(`  cassie market-make status ${botId}`);
+    console.log(`  cassie market-make resume ${botId}`);
+  } else {
+    console.log(pc.bold(`${botId} is live on ${name} in ${chosen.name}.`));
+    console.log(`  cassie status ${botId}`);
+  }
   console.log(`  cassie logs ${botId}`);
   console.log(`  cassie destroy ${botId}`);
 }

@@ -577,7 +577,7 @@ export class LighterAdapter implements VenueAdapter {
     const priceUnits = Math.round(intent.limitPrice * 10 ** meta.priceDecimals);
     const sizeUnits = Math.round(intent.size * 10 ** meta.sizeDecimals);
     if (sizeUnits <= 0) throw new Error("lighter: size rounds to zero at market precision");
-    const tifMap = { GTC: TIF_GTT, GTD: TIF_GTT, IOC: TIF_IOC, FOK: TIF_FOK } as const;
+    const tifMap = { GTC: TIF_GTT, GTD: TIF_GTT, IOC: TIF_IOC, FAK: TIF_IOC, FOK: TIF_FOK } as const;
     const isAsk = intent.side === "SELL";
     const clientOrderIndex = Date.now() * 1000 + Math.floor(Math.random() * 1000);
 

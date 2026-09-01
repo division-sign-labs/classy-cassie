@@ -213,6 +213,7 @@ export class Engine {
       quote: (m) => adapter.quote(m),
       openOrders: () => adapter.openOrders(account),
       fills: (since) => adapter.fills(account, since),
+      eventRef: adapter.eventRef ? (m) => adapter.eventRef!(m) : undefined,
       candles: adapter.candles ? (m, i, l) => adapter.candles!(m, i, l) : undefined,
     };
   }
@@ -295,6 +296,7 @@ export class Engine {
           side: orderSide,
           desiredSize: pos.size,
           reduceOnly: !isPrediction,
+          ignoreVolumeFloor: true,
           reason: action.reason ?? "strategy-exit",
           alertKind: "exit",
           alertMessage: `exit ${pos.side} ${shortRef(action.marketRef)}${action.reason ? ` (${action.reason})` : ""}`,
@@ -314,6 +316,14 @@ export class Engine {
         });
         return { placed: false };
       }
+      case "cancel": {
+        await adapter.cancelOrder(account, action.orderId);
+        return { placed: false };
+      }
+      case "place":
+        throw new Error(
+          "explicit market-making orders require the market-make controller and passive risk executor",
+        );
     }
   }
 
@@ -362,13 +372,39 @@ export class Engine {
       });
       return { placed: false };
     }
-    const limitPrice = p.limitPrice ?? cap.limitPrice;
+    const limitPrice = round(p.limitPrice ?? cap.limitPrice, 6);
+    const entrySpendCeiling =
+      p.side === "BUY" && p.desiredNotional !== undefined
+        ? Math.min(p.desiredNotional, risk.maxOrderNotional)
+        : undefined;
+    const size =
+      entrySpendCeiling !== undefined
+        ? floorSizeToNotionalCap(cap.size, limitPrice, entrySpendCeiling, 6)
+        : round(cap.size, 6);
+    const placedNotional = size * limitPrice;
+    const effectiveMinimumNotional = Math.max(risk.minViableNotional, p.minimumNotional ?? 0);
+    if (
+      entrySpendCeiling !== undefined &&
+      (size <= 0 || placedNotional < effectiveMinimumNotional)
+    ) {
+      const reason =
+        size <= 0
+          ? "entry size rounds to zero at the final limit price"
+          : `capped notional $${placedNotional.toFixed(2)} < minimum notional $${effectiveMinimumNotional} — skip rather than dribble`;
+      await this.alert({
+        kind: "skipped-order",
+        botId,
+        message: `skipped ${p.side} ${shortRef(p.marketRef)}: ${reason}`,
+      });
+      return { placed: false };
+    }
+    const entrySizeCapped = entrySpendCeiling !== undefined && size < cap.size;
     const intent: OrderIntent = {
       marketRef: p.marketRef,
       outcome: p.outcome,
       side: p.side,
-      size: round(cap.size, 6),
-      limitPrice: round(limitPrice, 6),
+      size,
+      limitPrice,
       tif: p.tif ?? "GTC",
       clientId: `${botId}-${this.now()}-${Math.floor(Math.random() * 1e6)}`,
       reduceOnly: p.reduceOnly,
@@ -379,7 +415,7 @@ export class Engine {
     await this.alert({
       kind: p.alertKind,
       botId,
-      message: `${p.alertMessage}: ${p.side} ${intent.size} @ ${intent.limitPrice}${cap.capped ? " (size capped)" : ""}`,
+      message: `${p.alertMessage}: ${p.side} ${intent.size} @ ${intent.limitPrice}${cap.capped || entrySizeCapped ? " (size capped)" : ""}`,
       data: {
         orderId: ack.orderId,
         status: ack.status,
@@ -393,7 +429,7 @@ export class Engine {
     });
     return {
       placed: ack.status !== "rejected",
-      ...(p.desiredNotional !== undefined ? { placedNotional: round(intent.size * intent.limitPrice, 6) } : {}),
+      ...(p.desiredNotional !== undefined ? { placedNotional } : {}),
     };
   }
 
@@ -668,4 +704,22 @@ function shortRef(marketRef: string): string {
 function round(n: number, dp: number): number {
   const f = 10 ** dp;
   return Math.round(n * f) / f;
+}
+
+/** Floor a rounded order size so its worst-case limit notional cannot exceed a USD cap. */
+function floorSizeToNotionalCap(size: number, limitPrice: number, notionalCap: number, dp: number): number {
+  if (
+    !Number.isFinite(size) ||
+    !Number.isFinite(limitPrice) ||
+    !Number.isFinite(notionalCap) ||
+    size <= 0 ||
+    limitPrice <= 0 ||
+    notionalCap <= 0
+  ) {
+    return 0;
+  }
+  const scale = 10 ** dp;
+  let units = Math.floor(Math.min(size, notionalCap / limitPrice) * scale);
+  while (units > 0 && (units / scale) * limitPrice > notionalCap) units -= 1;
+  return units / scale;
 }

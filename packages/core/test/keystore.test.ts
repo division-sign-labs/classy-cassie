@@ -1,5 +1,5 @@
 // packages/core/test/keystore.test.ts
-import { mkdtempSync, readdirSync, statSync } from "node:fs";
+import { mkdtempSync, readFileSync, readdirSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
@@ -98,5 +98,97 @@ describe("Keystore", () => {
     expect(ks.verifyPassphrase("bot-7", "right")).toBe(true);
     expect(() => ks.verifyPassphrase("bot-7", "wrong")).toThrow(WrongPassphraseError);
     expect(ks.verifyPassphrase("missing", "anything")).toBe(false);
+  });
+
+  it("changes the passphrase for every entry while preserving file and entry metadata", () => {
+    const dir = mkdtempSync(join(tmpdir(), "cassie-ks-"));
+    const ks = new Keystore(dir);
+    ks.putEntry("bot-8", "master", "master-value", "old-passphrase", {
+      address: "0x1111",
+      runtimeEligible: false,
+    });
+    ks.putEntry("bot-8", "agent", "agent-value", "old-passphrase", {
+      address: "0x2222",
+      runtimeEligible: true,
+    });
+    const before = ks.load("bot-8")!;
+
+    ks.changePassphrase("bot-8", "old-passphrase", "new-passphrase");
+
+    const after = ks.load("bot-8")!;
+    expect(after.version).toBe(before.version);
+    expect(after.botId).toBe(before.botId);
+    expect(after.createdAt).toBe(before.createdAt);
+    expect(after.entries.master?.address).toBe("0x1111");
+    expect(after.entries.master?.runtimeEligible).toBe(false);
+    expect(after.entries.agent?.address).toBe("0x2222");
+    expect(after.entries.agent?.runtimeEligible).toBe(true);
+    expect(after.entries.master?.enc.salt).not.toBe(before.entries.master?.enc.salt);
+    expect(after.entries.master?.enc.iv).not.toBe(before.entries.master?.enc.iv);
+    expect(after.entries.agent?.enc.salt).not.toBe(before.entries.agent?.enc.salt);
+    expect(after.entries.agent?.enc.iv).not.toBe(before.entries.agent?.enc.iv);
+    expect(ks.getEntry("bot-8", "master", "new-passphrase")).toBe("master-value");
+    expect(ks.getEntry("bot-8", "agent", "new-passphrase")).toBe("agent-value");
+    expect(() => ks.getEntry("bot-8", "master", "old-passphrase")).toThrow(WrongPassphraseError);
+    expect(statSync(join(dir, "bot-8.json")).mode & 0o777).toBe(0o600);
+    expect(readdirSync(dir).filter((name) => name.endsWith(".tmp"))).toEqual([]);
+  });
+
+  it("leaves the keystore bytes unchanged when the old passphrase is wrong", () => {
+    const dir = mkdtempSync(join(tmpdir(), "cassie-ks-"));
+    const path = join(dir, "bot-9.json");
+    const ks = new Keystore(dir);
+    ks.putEntry("bot-9", "master", "master-value", "right-passphrase");
+    ks.putEntry("bot-9", "agent", "agent-value", "right-passphrase", { runtimeEligible: true });
+    const before = readFileSync(path);
+
+    expect(() => ks.changePassphrase("bot-9", "wrong-passphrase", "new-passphrase")).toThrow(
+      WrongPassphraseError,
+    );
+
+    expect(readFileSync(path)).toEqual(before);
+    expect(ks.getEntry("bot-9", "master", "right-passphrase")).toBe("master-value");
+    expect(ks.getEntry("bot-9", "agent", "right-passphrase")).toBe("agent-value");
+  });
+
+  it("authenticates all entries before rotating any of them", () => {
+    const dir = mkdtempSync(join(tmpdir(), "cassie-ks-"));
+    const path = join(dir, "bot-10.json");
+    const ks = new Keystore(dir);
+    ks.putEntry("bot-10", "master", "master-value", "old-passphrase");
+    // Simulate a partially corrupted/mixed-passphrase file. The first entry
+    // decrypts, but the later failure must still leave the whole file intact.
+    ks.putEntry("bot-10", "agent", "agent-value", "different-passphrase", { runtimeEligible: true });
+    const before = readFileSync(path);
+
+    expect(() => ks.changePassphrase("bot-10", "old-passphrase", "new-passphrase")).toThrow(
+      WrongPassphraseError,
+    );
+
+    expect(readFileSync(path)).toEqual(before);
+    expect(ks.getEntry("bot-10", "master", "old-passphrase")).toBe("master-value");
+    expect(ks.getEntry("bot-10", "agent", "different-passphrase")).toBe("agent-value");
+  });
+
+  it("rejects missing or empty keystores and an empty new passphrase without writing", () => {
+    const dir = mkdtempSync(join(tmpdir(), "cassie-ks-"));
+    const ks = new Keystore(dir);
+    expect(() => ks.changePassphrase("missing", "old", "new")).toThrow(/no keystore/);
+
+    ks.putEntry("bot-11", "master", "value", "old-passphrase");
+    const populatedPath = join(dir, "bot-11.json");
+    const populatedBefore = readFileSync(populatedPath);
+    expect(() => ks.changePassphrase("bot-11", "old-passphrase", "")).toThrow(/new keystore passphrase is required/);
+    expect(readFileSync(populatedPath)).toEqual(populatedBefore);
+
+    const emptyPath = join(dir, "bot-12.json");
+    writeFileSync(
+      emptyPath,
+      JSON.stringify({ version: 1, botId: "bot-12", createdAt: "2026-08-31T00:00:00.000Z", entries: {} }) + "\n",
+      { mode: 0o600 },
+    );
+    const emptyBefore = readFileSync(emptyPath);
+    expect(() => ks.changePassphrase("bot-12", "old", "new")).toThrow(/has no entries/);
+    expect(readFileSync(emptyPath)).toEqual(emptyBefore);
   });
 });

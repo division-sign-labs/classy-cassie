@@ -1,9 +1,7 @@
 // packages/core/test/convergence-exit.test.ts
-// Convergence exit — the strategy's sole exit: sell once the market has priced
-// in the forecast on the held side, in profit or at a loss. While edge remains
-// the position is held regardless of P&L, including when the published signal
-// sits on the opposite side (a cheap market under a higher forecast is still
-// +EV to hold).
+// Positive convergence exit: sell early once the market has priced in the
+// held-side forecast and the executable bid is at least 2% above cost. A
+// converged loss remains open until the independent maximum holding period.
 
 import { describe, expect, it } from "vitest";
 import {
@@ -70,6 +68,12 @@ function ctxWith(
     memory: strategyMemory(),
     venue: {
       quote: async () => ({ marketRef: MARKET, bid: mid - 0.01, ask: mid + 0.01, mid, volume24h: 1e6, spreadBps: 40, ts: Date.now() }),
+      book: async () => ({
+        marketRef: MARKET,
+        bids: [{ price: mid - 0.01, size: 1_000 }],
+        asks: [{ price: mid + 0.01, size: 1_000 }],
+        ts: Date.now(),
+      }),
       balances: async () => [{ asset: "pUSD", total: 1_000, available: 1_000 }],
     },
   } as never;
@@ -111,18 +115,13 @@ describe("convergence exit", () => {
     expect(await exits(ctxWith([sig()], [position()], 0.6))).toHaveLength(0);
   });
 
-  it("exits at breakeven once the edge is closed", async () => {
-    // Entered at 0.69 and the market barely moved: 1pp left, +0% — with no
-    // edge remaining there is no expected upside in holding.
-    expect(await exits(ctxWith([sig()], [position({ avgPrice: 0.69 })], 0.69))).toHaveLength(1);
+  it("holds at breakeven even after the edge is closed", async () => {
+    // The executable bid is below cost, so this is not positive convergence.
+    expect(await exits(ctxWith([sig()], [position({ avgPrice: 0.69 })], 0.69))).toHaveLength(0);
   });
 
-  it("exits at a loss once the edge is gone", async () => {
-    // Entered 0.80, forecast 0.70, market fell to 0.69: down 14%, but the
-    // forecast is priced in — bank what's left rather than hold on hope.
-    const got = await exits(ctxWith([sig()], [position({ avgPrice: 0.8 })], 0.69));
-    expect(got).toHaveLength(1);
-    expect(got[0]!.reason).toMatch(/converged:.*-13\.\d%/);
+  it("holds a converged loss before the maximum holding period", async () => {
+    expect(await exits(ctxWith([sig()], [position({ avgPrice: 0.8 })], 0.69))).toHaveLength(0);
   });
 
   it("exits on an overshoot past the forecast", async () => {
@@ -156,11 +155,9 @@ describe("convergence exit", () => {
     expect(got).toHaveLength(0);
   });
 
-  it("exits when the forecast crosses below the held side's price", async () => {
+  it("does not realize a loss merely because the forecast crossed below price", async () => {
     // Signal flipped to NO at 0.70 → YES valued at 0.30 against a 0.55 mid:
     // −25pp of edge. The forecast has converged past the price, so sell.
-    const got = await exits(ctxWith([sig({ side: "NO", prob: 0.7 })], [position()], 0.55));
-    expect(got).toHaveLength(1);
-    expect(got[0]!.reason).toMatch(/converged/);
+    expect(await exits(ctxWith([sig({ side: "NO", prob: 0.7 })], [position()], 0.55))).toHaveLength(0);
   });
 });

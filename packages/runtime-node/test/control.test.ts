@@ -43,7 +43,23 @@ function fakeService(over: Partial<Record<string, unknown>> = {}) {
     signalCheck: record("signalCheck", { count: 3 }),
     reportingCheck: record("reportingCheck", { ok: true, enabled: false }),
     geoblockCheck: record("geoblockCheck", { blocked: false, country: "SG" }),
-    shutdown: record("shutdown"),
+    marketMakeStatus: () => ({ strategyId: "market-make", lifecycle: "HALTED" }),
+    marketMakeSnapshot: () => ({ strategy: {}, persistence: {} }),
+    marketMakeDryRun: record("marketMakeDryRun", { actions: [] }),
+    marketMakeHalt: record("marketMakeHalt", { lifecycle: "HALTED" }),
+    marketMakeResume: record("marketMakeResume", { lifecycle: "ACTIVE" }),
+    marketMakeReconcile: record("marketMakeReconcile", { applied: true }),
+    shutdown: record("shutdown", {
+      stopped: true,
+      restingOrdersCanceled: true,
+      cancellation: {
+        method: "engine",
+        requested: true,
+        completed: true,
+        verifiedOpenOrders: false,
+        remainingOpenOrders: null,
+      },
+    }),
     ...over,
   };
   return service as unknown as BotService & { calls: Call[] };
@@ -147,6 +163,63 @@ describe("serveControl", () => {
     expect(res.status).toBe(400);
   });
 
+  it("routes dedicated market-make controls and validates booleans", async () => {
+    const proposalHash = "a".repeat(64);
+    expect((await call(socketPath, "GET", "/market-make/status")).json).toMatchObject({ lifecycle: "HALTED" });
+    await call(socketPath, "POST", "/market-make/halt", JSON.stringify({ liquidate: true }));
+    expect(service.calls.at(-1)).toEqual({ name: "marketMakeHalt", args: [{ liquidate: true }] });
+    await call(socketPath, "POST", "/market-make/resume", JSON.stringify({ acknowledgeLossReset: true }));
+    expect(service.calls.at(-1)).toEqual({
+      name: "marketMakeResume",
+      args: [{ acknowledgeLossReset: true }],
+    });
+    await call(
+      socketPath,
+      "POST",
+      "/market-make/reconcile",
+      JSON.stringify({ apply: true, expectedProposalHash: proposalHash }),
+    );
+    expect(service.calls.at(-1)).toEqual({
+      name: "marketMakeReconcile",
+      args: [{ apply: true, expectedProposalHash: proposalHash }],
+    });
+    expect((await call(socketPath, "POST", "/market-make/reconcile", JSON.stringify({ apply: true }))).status).toBe(400);
+    expect((await call(
+      socketPath,
+      "POST",
+      "/market-make/reconcile",
+      JSON.stringify({ apply: true, expectedProposalHash: "not-a-hash" }),
+    )).status).toBe(400);
+    expect((await call(socketPath, "POST", "/market-make/halt", '{"liquidate":"yes"}')).status).toBe(400);
+  });
+
+  it("rejects manual trades before they reach a market-make service", async () => {
+    const maker = fakeService({
+      config: { id: "bot-1", venue: "polymarket", strategy: { id: "market-make" } },
+    });
+    const otherSocket = join(dir, "maker.sock");
+    const other = serveControl(maker, otherSocket);
+    await new Promise((r) => other.once("listening", r));
+    const result = await call(
+      otherSocket,
+      "POST",
+      "/trade",
+      JSON.stringify({ marketRef: "yes-token", side: "BUY", size: 1 }),
+    );
+    expect(result.status).toBe(409);
+    expect(maker.calls.some((entry) => entry.name === "manualOrder")).toBe(false);
+
+    expect((await call(
+      otherSocket,
+      "POST",
+      "/orders/cancel",
+      JSON.stringify({ id: "managed-order" }),
+    )).status).toBe(409);
+    expect((await call(otherSocket, "POST", "/orders/cancel-all")).status).toBe(409);
+    expect(maker.calls.some((entry) => entry.name === "cancelOrder" || entry.name === "cancelAll")).toBe(false);
+    await new Promise((r) => other.close(r));
+  });
+
   it("turns a thrown service error into a 500 with its message", async () => {
     const failing = fakeService({
       signalCheck: () => Promise.reject(new Error("signal API 401 Unauthorized")),
@@ -168,8 +241,26 @@ describe("serveControl", () => {
 
   it("cancels resting orders on shutdown", async () => {
     const res = await call(socketPath, "POST", "/shutdown");
-    expect(res.json).toMatchObject({ restingOrdersCanceled: true });
+    expect(res.json).toMatchObject({
+      stopped: true,
+      restingOrdersCanceled: true,
+      cancellation: { requested: true, completed: true },
+    });
     expect(service.calls.at(-1)?.name).toBe("shutdown");
+  });
+
+  it("returns 500 instead of claiming cancellation when shutdown fails", async () => {
+    const failing = fakeService({
+      shutdown: () => Promise.reject(new Error("authoritative open-orders check found 2 resting orders")),
+    });
+    const otherSocket = join(dir, "shutdown-failing.sock");
+    const other = serveControl(failing, otherSocket);
+    await new Promise((r) => other.once("listening", r));
+    const res = await call(otherSocket, "POST", "/shutdown");
+    expect(res.status).toBe(500);
+    expect(res.json).toEqual({ error: "authoritative open-orders check found 2 resting orders" });
+    expect(res.json).not.toMatchObject({ restingOrdersCanceled: true });
+    await new Promise((r) => other.close(r));
   });
 
   it("replaces a stale socket left by a crash", async () => {

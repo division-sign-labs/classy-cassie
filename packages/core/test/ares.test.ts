@@ -53,14 +53,17 @@ function stubbedAdapter(opts: { builderCode?: string } = {}) {
   });
 
   const client = {
-    placeLimitOrder: async (req: Record<string, unknown>) => {
+    createLimitOrder: async (req: Record<string, unknown>) => {
       limitCalls.push(req);
-      return { ok: true, orderId: "0xORDER", status: "live" };
+      return { kind: "limit", request: req };
     },
-    placeMarketOrder: async (req: Record<string, unknown>) => {
+    createMarketOrder: async (req: Record<string, unknown>) => {
       marketCalls.push(req);
-      return { ok: true, orderId: "0xORDER", status: "matched", makingAmount: "5", takingAmount: "10" };
+      return { kind: "market", request: req };
     },
+    postOrder: async (signed: { kind: string }) => signed.kind === "market"
+      ? { ok: true, orderId: "0xORDER", status: "matched", makingAmount: "5", takingAmount: "10" }
+      : { ok: true, orderId: "0xORDER", status: "live" },
   };
   // Bypass network setup: the SDK client and market metadata are not under test.
   const inner = adapter as unknown as {
@@ -69,7 +72,16 @@ function stubbedAdapter(opts: { builderCode?: string } = {}) {
     tokenFor: (ref: string, outcome?: "YES" | "NO") => Promise<string>;
   };
   inner.secure = async () => client;
-  inner.marketInfoForToken = async () => ({ conditionId: "0xCOND", info: { tickSize: "0.01", tokens: [] } });
+  inner.marketInfoForToken = async () => ({
+    conditionId: "0xCOND",
+    info: {
+      tickSize: "0.01",
+      tokens: [
+        { tokenId: YES_TOKEN, outcome: "Yes" },
+        { tokenId: NO_TOKEN, outcome: "No" },
+      ],
+    },
+  });
   inner.tokenFor = async (ref, outcome) => (outcome === "NO" ? NO_TOKEN : ref);
 
   return { adapter, limitCalls, marketCalls };

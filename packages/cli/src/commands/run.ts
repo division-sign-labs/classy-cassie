@@ -10,6 +10,7 @@ import { dirs, loadBotConfig, statePath } from "../paths.js";
 import { resolveQuotientToken } from "../quotient-token.js";
 import { resolveAresApiKey } from "../ares-config.js";
 import { resolveSurplusApiKey } from "../surplus-config.js";
+import { MarketMakeConfigSchema } from "@quotient-forecasting/strategy-market-make";
 
 export interface RunOpts {
   debug?: boolean;
@@ -33,16 +34,33 @@ export async function runBot(botId: string, opts: RunOpts): Promise<void> {
     surplusApiKey = resolved.value;
   }
 
-  const signalPollIntervalMin = Number(
-    (cfg.strategy.config as Record<string, unknown>).signalPollIntervalMin ?? 5,
-  );
-  console.log(
-    pc.bold(
-      `running ${botId} on ${cfg.venue} (strategy ${cfg.strategy.id}, ` +
-        `positions every ${Number((cfg.tickIntervalMin * 60).toFixed(4))}s, ` +
-        `signals every ${Number(signalPollIntervalMin.toFixed(4))}m)`,
-    ),
-  );
+  if (cfg.strategy.id === "market-make") {
+    const maker = MarketMakeConfigSchema.parse(cfg.strategy.config);
+    console.log(
+      pc.bold(
+        `running ${botId} on Polymarket (strategy market-make, reconcile every ` +
+          `${Number((cfg.tickIntervalMin * 60).toFixed(4))}s, Q every ` +
+          `${Number((maker.quotient_feed.active_poll_seconds / 60).toFixed(4))}m active / ` +
+          `${Number((maker.quotient_feed.idle_poll_seconds / 60).toFixed(4))}m idle)`,
+      ),
+    );
+    console.log(
+      pc.yellow(
+        `The controller remains halted until cassie market-make reconcile ${botId} --apply and explicit resume.`,
+      ),
+    );
+  } else {
+    const signalPollIntervalMin = Number(
+      (cfg.strategy.config as Record<string, unknown>).signalPollIntervalMin ?? 5,
+    );
+    console.log(
+      pc.bold(
+        `running ${botId} on ${cfg.venue} (strategy ${cfg.strategy.id}, ` +
+          `positions every ${Number((cfg.tickIntervalMin * 60).toFixed(4))}s, ` +
+          `signals every ${Number(signalPollIntervalMin.toFixed(4))}m)`,
+      ),
+    );
+  }
   console.log(pc.dim("Ctrl-C cancels resting orders before exit."));
 
   await runLocal({

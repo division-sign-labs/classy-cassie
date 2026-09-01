@@ -5,6 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { clearInitState, initStatePath, loadInitState, parseInitState, saveInitState } from "../src/init-state.js";
+import { requireSafeStrategyTransition } from "../src/commands/init.js";
 
 const originalHome = process.env.CASSIE_HOME;
 
@@ -97,5 +98,14 @@ describe("kalshi init journal", () => {
     expect(loadInitState("bot-k")).toEqual(state);
     expect(readFileSync(path, "utf8")).not.toMatch(/privateKey|passphrase|api[-_]?key(?!Id)/i);
     clearInitState("bot-k");
+  });
+});
+
+describe("market-make strategy transition", () => {
+  it("keeps an existing market-maker bound to its durable bot id", () => {
+    expect(() => requireSafeStrategyTransition("market-make", "signals")).toThrow(/cannot switch.*in place/);
+    expect(() => requireSafeStrategyTransition("market-make", "agent")).toThrow(/separate bot id/);
+    expect(() => requireSafeStrategyTransition("market-make", "market-make")).not.toThrow();
+    expect(() => requireSafeStrategyTransition("signals", "market-make")).not.toThrow();
   });
 });
