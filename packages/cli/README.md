@@ -29,13 +29,14 @@ the same commands. If npm lifecycle scripts are disabled, run `cassie skill inst
 ## Quickstart
 
 ```sh
-cassie init          # wallet, venue account, strategy, alerts, funding
+cassie init          # wallet, venue account, strategy, alerts, funding, optional deployment
 cassie run bot-1     # the bot in this terminal
 ```
 
 `cassie init` asks for a keystore passphrase, generates an EOA into
 `~/.cassie/keys/bot-1.json`, provisions the venue account, configures strategy allocation,
-and walks through funding. It offers to save the confirmed passphrase in the native system
+and walks through funding. Its final step offers to deploy the bot to DigitalOcean. It
+offers to save the confirmed passphrase in the native system
 credential store so later agent-driven commands do not prompt. Everything happens in the
 terminal.
 
@@ -174,21 +175,21 @@ $ cassie deploy bot-1
 DigitalOcean account you@example.com (token from ~/.cassie/digitalocean.token)
 signals credential: ~/.local.env
 
-deploying bot-1 to a new droplet in Singapore 1
+deploying bot-1 to a new droplet in Bangalore 1
 cassie-bot-1  s-1vcpu-1gb  ubuntu-24-04-x64
 ? Deploy? › yes
 
 provisioning the droplet... done
 running first-boot setup...... done
-droplet cassie-bot-1 ready at 203.0.113.10 (sgp1)
+droplet cassie-bot-1 ready at 203.0.113.10 (blr1)
 installing credentials… ok
 starting the runtime.. done
-runtime verified: droplet in sgp1 (Singapore 1)
-Polymarket order placement permitted from SG
+runtime verified: droplet in blr1 (Bangalore 1)
+Polymarket order placement permitted from IN
 signals credential verified by the droplet (34 published rows)
 loop started: positions every 60s; signals every 5m
 
-bot-1 is live on cassie-bot-1 in Singapore 1.
+bot-1 is live on cassie-bot-1 in Bangalore 1.
   cassie status bot-1
   cassie logs bot-1
   cassie destroy bot-1
@@ -200,7 +201,7 @@ reporting credentials check out. Market-make completes those checks and starts `
 as described above. A failure at any step stops the deploy with the reason and leaves the
 bot idle.
 
-`--region <slug>` picks somewhere else. The default is `sgp1`.
+`--region <slug>` picks somewhere else. The default is `blr1`.
 
 Reaching a deployed bot needs no token or open port. The runtime listens on a unix socket,
 the droplet's firewall allows SSH alone, and `cassie` uses a key it generates at

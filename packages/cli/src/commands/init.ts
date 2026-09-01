@@ -23,6 +23,7 @@ import { discoverAresApiKey, discoverAresBuilderCode, verifyAresApiKey } from ".
 import { recommendedStrategySummary, elicitRecommendedStrategyConfig, elicitStrategyConfig } from "./strategy.js";
 import { AGENT_STRATEGY_SUMMARY, elicitAgentConfig, fetchAndStorePersona } from "./agent.js";
 import { discoverSurplusApiKey, verifySurplusApiKey } from "../surplus-config.js";
+import { runDeploy } from "./deploy.js";
 import { runFund } from "./fund.js";
 import {
   MARKET_MAKE_PRESET,
@@ -40,6 +41,59 @@ export function requireSafeStrategyTransition(existingStrategyId: string | undef
       "cannot switch an existing market-make bot to another strategy in place; keep this bot id for halt/status/reconciliation and create a separate bot id",
     );
   }
+}
+
+export interface InitDeploymentDependencies {
+  confirm: (message: string, defaultYes?: boolean) => Promise<boolean>;
+  deploy: (botId: string) => Promise<void>;
+  print: (message: string) => void;
+}
+
+export interface InitCommitDependencies {
+  save: (config: BotConfig) => void;
+  clearCheckpoint: (botId: string) => void;
+}
+
+/**
+ * Make the complete venue identity durable before removing the setup journal.
+ * Funding instructions and deployment must only run after this returns.
+ */
+export function commitInitConfig(
+  config: BotConfig,
+  dependencies: InitCommitDependencies = {
+    save: saveBotConfig,
+    clearCheckpoint: clearInitState,
+  },
+): void {
+  dependencies.save(config);
+  dependencies.clearCheckpoint(config.id);
+}
+
+/** Offer the remote runtime only after setup and funding choices are complete. */
+export async function offerInitDeployment(
+  botId: string,
+  hasExistingDeployment: boolean,
+  dependencies: InitDeploymentDependencies = {
+    confirm,
+    deploy: (id) => runDeploy(id),
+    print: (message) => console.log(message),
+  },
+): Promise<void> {
+  dependencies.print(pc.bold("\nRuntime"));
+  const prompt = hasExistingDeployment
+    ? "Apply this configuration to the existing DigitalOcean droplet now?"
+    : "Deploy this bot to a DigitalOcean droplet now?";
+  if (await dependencies.confirm(prompt, true)) {
+    await dependencies.deploy(botId);
+    return;
+  }
+
+  if (hasExistingDeployment) {
+    dependencies.print(pc.dim(`apply later with: cassie deploy ${botId}`));
+    return;
+  }
+  dependencies.print(pc.dim(`run locally with: cassie run ${botId}`));
+  dependencies.print(pc.dim(`deploy later with: cassie deploy ${botId}`));
 }
 
 /**
@@ -521,8 +575,9 @@ export async function runInit(): Promise<void> {
     deployment: existing?.deployment,
     createdAt: state.createdAt,
   });
-  saveBotConfig(cfg);
-  clearInitState(botId);
+  // Recovery boundary: the complete bot and venue identity are durable before
+  // any deposit address is shown or any deployment work begins.
+  commitInitConfig(cfg);
   console.log(pc.green(`\nsaved ${botConfigPath(botId)}`));
   if (existing?.deployment) {
     console.log(pc.yellow(`The droplet still runs the old configuration. Apply this one with cassie deploy ${botId}.`));
@@ -576,5 +631,6 @@ export async function runInit(): Promise<void> {
   } else {
     console.log(pc.dim(`fund later with: cassie fund ${botId}`));
   }
-  console.log(pc.bold(`\nbot "${botId}" ready. Try: cassie run ${botId}`));
+  console.log(pc.bold(`\nbot "${botId}" setup complete.`));
+  await offerInitDeployment(botId, Boolean(existing?.deployment));
 }

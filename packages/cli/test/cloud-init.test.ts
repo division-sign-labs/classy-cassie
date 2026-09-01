@@ -54,9 +54,8 @@ describe("renderCloudInit", () => {
     expect(rendered).toContain(READY_MARKER);
   });
 
-  it("defaults to a Singapore droplet", () => {
-    // DigitalOcean has no Japan region; sgp1 is the nearest.
-    expect(DEFAULT_REGION).toBe("sgp1");
+  it("defaults to a Bangalore droplet", () => {
+    expect(DEFAULT_REGION).toBe("blr1");
     expect(DEFAULT_SIZE).toBe("s-1vcpu-1gb");
   });
 });

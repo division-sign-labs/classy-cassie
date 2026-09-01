@@ -4,7 +4,7 @@
 // Credentials arrive afterwards, over SSH, on stdin.
 
 export const DROPLET_IMAGE = "ubuntu-24-04-x64";
-export const DEFAULT_REGION = "sgp1";
+export const DEFAULT_REGION = "blr1";
 export const DEFAULT_SIZE = "s-1vcpu-1gb";
 export const RUNTIME_PACKAGE = "@quotient-forecasting/cassie-runtime-node";
 /** Written by cloud-init when provisioning finishes, and polled by `cassie deploy`. */

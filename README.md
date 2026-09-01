@@ -41,7 +41,7 @@ For contributors working from this checkout:
 ```sh
 pnpm install && pnpm build
 
-# create a bot: wallet, venue account, strategy, Telegram, funding — all in the terminal
+# create a bot: wallet, venue account, strategy, alerts, funding, optional deployment
 node packages/cli/dist/index.js init
 
 # deterministic offline engine test: entry → capacity cap → hold a losing convergence
@@ -72,8 +72,9 @@ the adapter and is pinned by known-vector tests.
 
 ## Deploy
 
-`cassie deploy <botId>` provisions a DigitalOcean droplet in the operator's own account —
-`s-1vcpu-1gb`, $6/mo, `sgp1` by default — and runs the bot there under systemd. Orders
+The final `cassie init` step offers to continue into deployment. `cassie deploy <botId>`
+can run the same flow later. It provisions a DigitalOcean droplet in the operator's own
+account — `s-1vcpu-1gb`, $6/mo, `blr1` by default — and runs the bot there under systemd. Orders
 leave from that droplet, which is what the region choice decides.
 
 Deploy refuses to start or authorize trading unless four things hold: the droplet confirms

@@ -90,7 +90,7 @@ program
 program
   .command("deploy <botId>")
   .description("run the bot on a DigitalOcean droplet in your own account")
-  .option("--region <slug>", "droplet region (default: sgp1)")
+  .option("--region <slug>", "droplet region (default: blr1)")
   .option("--size <slug>", "droplet size (default: s-1vcpu-1gb)")
   .option("-y, --yes", "skip confirmation")
   .action(wrap(runDeploy));

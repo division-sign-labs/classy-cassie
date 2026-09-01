@@ -166,9 +166,15 @@ Every step happens in the terminal; you only leave it to copy-paste dashboard va
 9. **Telegram alerts** — create a bot with **@BotFather** on Telegram and paste its token;
    get your chat id from **@userinfobot**. The wizard offers a test ping.
 10. **Funding** — optionally continues straight into `cassie fund <botId>`.
+11. **Runtime** — offers to deploy the completed bot to a DigitalOcean droplet. Declining
+    prints both the local-run and deploy-later commands. Reconfiguring a deployed bot
+    offers to apply the new configuration to its existing deployment.
 
 Non-secret progress is checkpointed at `~/.cassie/setup/<botId>.json` (0600). Rerunning
 `cassie init` resumes wallet/Splits/venue steps without repeating completed external writes.
+The complete bot config is saved before Cassie shows a funding destination or starts
+deployment. After that recovery boundary, an interrupted wizard can continue with
+`cassie fund <botId>` or `cassie deploy <botId>` without losing the funded venue identity.
 
 ### Funding flows (per venue)
 
@@ -315,7 +321,7 @@ Notes:
 ## 5. Deploy
 
 `cassie deploy <botId>` provisions a DigitalOcean droplet in the operator's own account and
-runs the bot there under systemd. Default `s-1vcpu-1gb` in `sgp1`, $6/mo, about three
+runs the bot there under systemd. Default `s-1vcpu-1gb` in `blr1`, $6/mo, about three
 minutes on a first deploy and under a minute on a redeploy. One droplet per bot.
 
 DigitalOcean has no Japan region. Droplet regions are `nyc1/2/3`, `sfo2/3`, `ams3`,
@@ -350,7 +356,7 @@ What deploy does, in order:
    explicitly `resume` only when clean.
 
 **Kalshi region rule**: Kalshi accepts API access from US IPs only — the inverse of
-Polymarket's geoblock. A Kalshi bot defaults to `nyc3` instead of `sgp1`, and deploy
+Polymarket's geoblock. A Kalshi bot defaults to `nyc3` instead of `blr1`, and deploy
 refuses a non-US `--region` up front (US slugs: `nyc1/2/3`, `sfo1/2/3`, `atl1`). An
 existing non-US droplet (e.g. `blr1`) cannot serve a Kalshi bot.
 
