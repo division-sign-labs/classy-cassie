@@ -173,16 +173,26 @@ export class PolymarketCatalogClient {
     this.#fetch = boundFetch(options.fetchImpl);
   }
 
+  /**
+   * Query by exact id through the list form. `/markets/{id}` serves a response
+   * shape that omits `events`, so the parent event identity every catalog row
+   * requires is only reachable through `/markets?id={id}`.
+   */
   async market(
     marketKey: string,
     nativeMarketId: string,
     expectedConditionId: string,
   ): Promise<PolymarketMarketCatalog> {
-    const response = await this.#fetch(`${this.#baseUrl}/markets/${encodeURIComponent(nativeMarketId)}`, {
-      headers: { accept: "application/json" },
-    });
+    const url = new URL(`${this.#baseUrl}/markets`);
+    url.searchParams.set("id", nativeMarketId);
+    const response = await this.#fetch(url, { headers: { accept: "application/json" } });
     if (!response.ok) throw new Error(`Gamma market ${nativeMarketId} → ${response.status}`);
-    return normalizePolymarketCatalog(marketKey, nativeMarketId, expectedConditionId, await response.json());
+    const body: unknown = await response.json();
+    if (!Array.isArray(body)) throw new Error(`Gamma market ${nativeMarketId} returned a non-array response`);
+    if (body.length !== 1) {
+      throw new Error(`Gamma market ${nativeMarketId} expected exactly one result, received ${body.length}`);
+    }
+    return normalizePolymarketCatalog(marketKey, nativeMarketId, expectedConditionId, body[0]);
   }
 
   /**

@@ -16,6 +16,13 @@ export interface CapacityInput {
   risk: RiskConfig;
   /** Per-order floor. May tighten, but never weaken, risk.minViableNotional. */
   minimumNotional?: number;
+  /**
+   * Whether the minimum-notional floor applies. Entry BUYs keep it (skip
+   * rather than dribble). A strategy exit passes false: closing a small
+   * position must never be blocked by the entry floor, while slippage and
+   * depth checks still apply.
+   */
+  enforceMinimumNotional?: boolean;
 }
 
 export interface CapacityResult {
@@ -35,7 +42,8 @@ export interface CapacityResult {
  * Compute executable size within the slippage band — `risk.slippagePct`
  * measured from the best executable price (the touch) — cap at
  * min(desired, depthCapPct × bandDepth, maxOrderNotional), enforce the
- * volume eligibility floor and minViableNotional. Execution quality is
+ * volume eligibility floor and minViableNotional (entries only unless
+ * `enforceMinimumNotional` is false). Execution quality is
  * governed by how far the order may walk the book, not by the quoted
  * bid–ask spread: a wide quote costs nothing when the order fills at the
  * touch, so there is no spread-based eligibility gate.
@@ -78,10 +86,17 @@ export function checkCapacity(input: CapacityInput): CapacityResult {
     notes.push(`size capped by maxOrderNotional $${risk.maxOrderNotional}`);
   }
 
+  const enforceMinimumNotional = input.enforceMinimumNotional ?? true;
   if (size * refPrice < minimumNotional) {
-    skipReasons.push(
-      `capped notional $${(size * refPrice).toFixed(2)} < minimum notional $${minimumNotional} — skip rather than dribble`,
-    );
+    if (enforceMinimumNotional) {
+      skipReasons.push(
+        `capped notional $${(size * refPrice).toFixed(2)} < minimum notional $${minimumNotional} — skip rather than dribble`,
+      );
+    } else {
+      notes.push(
+        `notional $${(size * refPrice).toFixed(2)} is below the $${minimumNotional} entry floor; floor not enforced for this exit`,
+      );
+    }
   }
 
   if (skipReasons.length > 0) {

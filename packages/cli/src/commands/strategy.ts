@@ -187,7 +187,39 @@ export interface StrategyOptions {
   signalMaxAgeHours?: string;
   slippage?: string;
   maxOrderNotional?: string;
+  scenarioExit?: string;
+  positiveConvergenceEdgePp?: string;
+  positiveConvergenceMinProfitPct?: string;
+  positiveConvergenceMaxQRetreatPp?: string;
+  adverseCrossEdgePp?: string;
+  adverseCrossMaxPnlPct?: string;
+  adverseCrossConfirmations?: string;
+  qCollapsePp?: string;
+  qCollapseMaxRemainingEdgePp?: string;
+  flipConfirmations?: string;
+  flipExitMaxRemainingEdgePp?: string;
+  exitFeeBps?: string;
+  exitRetrySeconds?: string;
+  pendingEntryReservationSeconds?: string;
 }
+
+/** Defaults of the opt-in seven-day signal-exit state machine, mirrored from the strategy schema. */
+export const SCENARIO_EXIT_DEFAULTS = {
+  scenarioExitEnabled: false,
+  positiveConvergenceEdgePp: 3,
+  positiveConvergenceMinProfitPct: 4,
+  positiveConvergenceMaxQRetreatPp: 1,
+  adverseCrossEdgePp: 0,
+  adverseCrossMaxPnlPct: 0,
+  adverseCrossConfirmations: 2,
+  qCollapsePp: 30,
+  qCollapseMaxRemainingEdgePp: 0,
+  flipConfirmations: 2,
+  flipExitMaxRemainingEdgePp: 5,
+  exitFeeBps: 0,
+  exitRetrySec: 300,
+  pendingEntryReservationSec: 900,
+} as const;
 
 /** `cassie strategy <botId>`: view and tune the bot's strategy and signal guardrails. */
 export async function runStrategy(botId: string, opts: StrategyOptions = {}): Promise<void> {
@@ -267,6 +299,7 @@ export async function runStrategy(botId: string, opts: StrategyOptions = {}): Pr
     if (opts.signalCheckMinutes !== undefined) {
       strategyConfig.signalPollIntervalMin = positiveNumber("signal check interval", opts.signalCheckMinutes);
     }
+    applyScenarioExitOptions(strategyConfig, opts);
     const maxAgeSec =
       opts.signalMaxAgeHours === undefined
         ? cfg.signals.maxAgeSec
@@ -299,6 +332,52 @@ export async function runStrategy(botId: string, opts: StrategyOptions = {}): Pr
   }
   const config = await elicitStrategyConfig(cfg.strategy.config as Record<string, unknown>, cfg.venue);
   saveStrategy(botId, config);
+}
+
+function onOff(label: string, raw: string): boolean {
+  const normalized = raw.trim().toLowerCase();
+  if (["on", "true", "yes", "1", "enabled"].includes(normalized)) return true;
+  if (["off", "false", "no", "0", "disabled"].includes(normalized)) return false;
+  throw new Error(`${label} must be on or off`);
+}
+
+function signedNumber(label: string, raw: string): number {
+  const value = Number(raw);
+  if (!Number.isFinite(value)) throw new Error(`${label} must be a number`);
+  return value;
+}
+
+function applyScenarioExitOptions(config: Record<string, unknown>, opts: StrategyOptions): void {
+  if (opts.scenarioExit !== undefined) config.scenarioExitEnabled = onOff("scenario exit", opts.scenarioExit);
+  if (opts.positiveConvergenceEdgePp !== undefined) {
+    config.positiveConvergenceEdgePp = signedNumber("positive convergence edge", opts.positiveConvergenceEdgePp);
+  }
+  if (opts.positiveConvergenceMinProfitPct !== undefined) {
+    config.positiveConvergenceMinProfitPct = signedNumber("positive convergence minimum profit", opts.positiveConvergenceMinProfitPct);
+  }
+  if (opts.positiveConvergenceMaxQRetreatPp !== undefined) {
+    config.positiveConvergenceMaxQRetreatPp = nonnegativeNumber("positive convergence maximum Q retreat", opts.positiveConvergenceMaxQRetreatPp);
+  }
+  if (opts.adverseCrossEdgePp !== undefined) config.adverseCrossEdgePp = signedNumber("adverse cross edge", opts.adverseCrossEdgePp);
+  if (opts.adverseCrossMaxPnlPct !== undefined) {
+    config.adverseCrossMaxPnlPct = signedNumber("adverse cross maximum P&L", opts.adverseCrossMaxPnlPct);
+  }
+  if (opts.adverseCrossConfirmations !== undefined) {
+    config.adverseCrossConfirmations = positiveInteger("adverse cross confirmations", opts.adverseCrossConfirmations);
+  }
+  if (opts.qCollapsePp !== undefined) config.qCollapsePp = positiveNumber("Q collapse", opts.qCollapsePp);
+  if (opts.qCollapseMaxRemainingEdgePp !== undefined) {
+    config.qCollapseMaxRemainingEdgePp = signedNumber("Q collapse maximum remaining edge", opts.qCollapseMaxRemainingEdgePp);
+  }
+  if (opts.flipConfirmations !== undefined) config.flipConfirmations = positiveInteger("flip confirmations", opts.flipConfirmations);
+  if (opts.flipExitMaxRemainingEdgePp !== undefined) {
+    config.flipExitMaxRemainingEdgePp = signedNumber("flip exit maximum remaining edge", opts.flipExitMaxRemainingEdgePp);
+  }
+  if (opts.exitFeeBps !== undefined) config.exitFeeBps = nonnegativeNumber("exit fee", opts.exitFeeBps);
+  if (opts.exitRetrySeconds !== undefined) config.exitRetrySec = positiveNumber("exit retry window", opts.exitRetrySeconds);
+  if (opts.pendingEntryReservationSeconds !== undefined) {
+    config.pendingEntryReservationSec = positiveNumber("pending entry reservation window", opts.pendingEntryReservationSeconds);
+  }
 }
 
 function positiveNumber(label: string, raw: string): number {
@@ -426,11 +505,34 @@ function printStrategy(
   console.log(
     `  maximum entry edge:   ${current.maxEntrySpreadPp === null ? "unlimited" : `${current.maxEntrySpreadPp}pp`}`,
   );
-  console.log(`  minimum viable entry: $${Number(current.minEntryNotional).toFixed(2)}`);
-  console.log(`  convergence profit:   +${Number(current.minConvergenceProfitPct).toFixed(2)}% minimum executable gain`);
-  console.log(
-    `  maximum hold:         ${current.maxHoldDays === null ? "unlimited" : `${current.maxHoldDays} days`}`,
-  );
+  console.log(`  minimum viable entry: $${Number(current.minEntryNotional).toFixed(2)} (entries only; exits are never floored)`);
+  const scenario = { ...SCENARIO_EXIT_DEFAULTS, ...normalized } as Record<string, unknown>;
+  const maxHold = current.maxHoldDays === null ? "unlimited" : `${current.maxHoldDays} days`;
+  if (scenario.scenarioExitEnabled === true) {
+    console.log("  exit model:           seven-day signal state machine (scenarioExitEnabled)");
+    console.log(
+      `  take profit:          edge <= ${scenario.positiveConvergenceEdgePp}pp, executable gain >= ` +
+        `${scenario.positiveConvergenceMinProfitPct}%, Q retreat <= ${scenario.positiveConvergenceMaxQRetreatPp}pp`,
+    );
+    console.log(
+      `  adverse cross:        edge <= ${scenario.adverseCrossEdgePp}pp and P&L <= ${scenario.adverseCrossMaxPnlPct}% on ` +
+        `${scenario.adverseCrossConfirmations} distinct forecasts`,
+    );
+    console.log(
+      `  Q collapse:           retreat >= ${scenario.qCollapsePp}pp with edge <= ${scenario.qCollapseMaxRemainingEdgePp}pp, immediate`,
+    );
+    console.log(
+      `  Q flip:               ${scenario.flipConfirmations} distinct forecasts below 50%, exit at edge <= ${scenario.flipExitMaxRemainingEdgePp}pp`,
+    );
+    console.log(`  time stop:            ${maxHold} from the entry fill, regardless of P&L`);
+    console.log(`  exit fee assumed:     ${scenario.exitFeeBps}bps on executable proceeds`);
+    console.log(`  exit retry window:    ${scenario.exitRetrySec}s before an invisible exit is re-evaluated`);
+  } else {
+    console.log("  exit model:           legacy convergence overlay (scenarioExitEnabled off)");
+    console.log(`  convergence profit:   +${Number(current.minConvergenceProfitPct).toFixed(2)}% minimum executable gain`);
+    console.log(`  maximum hold:         ${maxHold}`);
+  }
+  console.log(`  entry handoff hold:   ${scenario.pendingEntryReservationSec}s reservation while a fill is not yet visible`);
   console.log(`  slippage:             ${risk.slippagePct}% from best executable price`);
   console.log(`  hard per-order cap:   $${risk.maxOrderNotional.toFixed(2)} (risk module)`);
   console.log(`  signal max age:       ${(maxAgeSec / 3600).toFixed(2)}h`);

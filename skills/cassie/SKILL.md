@@ -143,8 +143,14 @@ Every step happens in the terminal; you only leave it to copy-paste dashboard va
    bid depth within 2¢ by default, an entry-only check that can be disabled with
    `--min-exit-depth-2c-usd 0`. Early convergence requires no more than 2pp of remaining
    edge and at least +2% at the executable held-side bid; otherwise a prediction position
-   exits at the seven-day maximum hold (or resolution). The 24h-volume floor applies to
-   entries, never exits; exit slippage and executable depth still apply. The legacy
+   exits at the seven-day maximum hold (or resolution). `--scenario-exit on` replaces that
+   overlay with the confirmed seven-day signal-exit state machine (Q collapse, confirmed
+   adverse cross, confirmed Q flip, positive price-led convergence, time stop from the
+   entry fill), evaluated in that precedence with one canonical reason per exit; it is off
+   unless an operator turns it on. The 24h-volume floor and the minimum-notional floor
+   apply to entries, never exits; exit slippage and executable depth still apply. An
+   accepted entry stays reserved against market and event caps until the venue position or
+   a resting order shows it, so a fill lag cannot admit a duplicate entry. The legacy
    `daily-budget` mode remains available; it defaults to
    $100 per UTC day and requests 25% of that allowance per entry. The budget counts only
    entry notional actually placed after risk/capacity limits, and its reset does not close
@@ -241,6 +247,7 @@ cassie strategy <botId> --min-exit-depth-2c-usd 2500 --max-hold-days 7
 cassie strategy <botId> --daily-budget 100 --position-budget-pct 25   # legacy allocator
 cassie strategy <botId> --max-entry-edge unlimited   # remove the forecast-edge ceiling
 cassie strategy <botId> --position-check-seconds 60 --signal-check-minutes 5
+cassie strategy <botId> --scenario-exit on      # confirmed seven-day signal-exit state machine
 cassie deploy <botId> [--region <slug>] [--size <slug>] [-y]   # a droplet in YOUR DigitalOcean account
 cassie destroy <botId> [-y] [--force]        # cancel resting orders, delete the droplet
 cassie status <botId>                        # droplet + service + engine, one screen
@@ -589,7 +596,7 @@ the share price. When a fresh live Quotient signal covers the market, the CLI ta
 from it automatically (mirrored if the signal's side differs from the thesis side);
 otherwise it asks the operator. Flip-flat owns exits: positive convergence (at most 2pp
 remaining edge and at least +2% at the executable bid), the default seven-day maximum
-hold, or resolution.
+hold, or resolution; with `--scenario-exit on`, the confirmed signal-exit state machine.
 
 ## 10. Rules for the agent operating cassie
 

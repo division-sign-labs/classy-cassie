@@ -180,6 +180,20 @@ program
   .option("--signal-max-age-hours <hours>", "maximum age of a live signal")
   .option("--slippage <pct>", "max book walk from the best executable price, as a percentage")
   .option("--max-order-notional <usd>", "hard per-order notional cap in the risk module")
+  .option("--scenario-exit <on|off>", "run the seven-day signal-exit state machine instead of the legacy convergence overlay")
+  .option("--positive-convergence-edge-pp <pp>", "take profit: remaining held-side edge at or below this")
+  .option("--positive-convergence-min-profit-pct <pct>", "take profit: executable return at or above this")
+  .option("--positive-convergence-max-q-retreat-pp <pp>", "take profit: held-side Q may retreat from entry by at most this")
+  .option("--adverse-cross-edge-pp <pp>", "adverse cross: remaining edge at or below this counts as non-positive")
+  .option("--adverse-cross-max-pnl-pct <pct>", "adverse cross: executable P&L at or below this")
+  .option("--adverse-cross-confirmations <n>", "adverse cross: distinct committed forecasts required")
+  .option("--q-collapse-pp <pp>", "Q collapse: immediate exit once held-side Q retreated this far from entry")
+  .option("--q-collapse-max-remaining-edge-pp <pp>", "Q collapse: only when remaining edge is at or below this")
+  .option("--flip-confirmations <n>", "Q flip: consecutive distinct forecasts below 50% required")
+  .option("--flip-exit-max-remaining-edge-pp <pp>", "Q flip: exit once remaining edge is at or below this")
+  .option("--exit-fee-bps <bps>", "fee deducted from executable sell proceeds in the P&L gates")
+  .option("--exit-retry-seconds <seconds>", "how long a submitted exit stays pending before a still-held position may resubmit")
+  .option("--pending-entry-reservation-seconds <seconds>", "how long an accepted entry stays reserved against caps while the venue shows neither position nor order")
   .action(wrap(runStrategy));
 
 const agent = program.command("agent").description("monitoring-agent strategy: mandate, persona, status, dry runs");

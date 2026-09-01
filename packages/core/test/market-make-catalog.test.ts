@@ -42,17 +42,33 @@ describe("Polymarket market-make catalog", () => {
     );
   });
 
-  it("uses the exact Gamma market endpoint", async () => {
+  it("queries the exact Gamma market by id through the list form", async () => {
     const calls: string[] = [];
     const fetchImpl: typeof fetch = async (input) => {
       calls.push(String(input));
-      return new Response(JSON.stringify(raw), { status: 200 });
+      return new Response(JSON.stringify([raw]), { status: 200 });
     };
     const client = new PolymarketCatalogClient({ gammaBaseUrl: "https://gamma.example/", fetchImpl });
     await expect(client.market("polymarket:123", "123", "0xcondition")).resolves.toMatchObject({
       conditionId: "0xcondition",
+      eventId: "polymarket:77",
     });
-    expect(calls).toEqual(["https://gamma.example/markets/123"]);
+    // `/markets/{id}` omits `events`; only the list form carries parent event identity.
+    expect(calls).toEqual(["https://gamma.example/markets?id=123"]);
+  });
+
+  it("fails closed when an exact id query does not resolve to one market", async () => {
+    const client = (body: unknown) =>
+      new PolymarketCatalogClient({
+        gammaBaseUrl: "https://gamma.example/",
+        fetchImpl: async () => new Response(JSON.stringify(body), { status: 200 }),
+      });
+    await expect(client(raw).market("polymarket:123", "123", "0xcondition")).rejects.toThrow(
+      /non-array response/,
+    );
+    await expect(client([]).market("polymarket:123", "123", "0xcondition")).rejects.toThrow(
+      /expected exactly one result, received 0/,
+    );
   });
 
   it("recovers a canonical market by an exact condition id", async () => {

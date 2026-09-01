@@ -342,11 +342,19 @@ export type Action =
       /** Optional price bound; defaults to a crossing limit within the slippage band. */
       limitPrice?: number;
       reason?: string;
+      /**
+       * Decision provenance persisted with the resulting order: the signal or
+       * forecast identity, live edge, target, current exposure, and cap
+       * headroom that produced it. Free-form but JSON-serializable.
+       */
+      provenance?: Record<string, unknown>;
     }
   | {
       kind: "exit";
       marketRef: string;
       reason?: string;
+      /** Decision provenance persisted with the resulting order. */
+      provenance?: Record<string, unknown>;
     }
   | {
       kind: "redeem";
@@ -410,8 +418,17 @@ export interface StrategyActionResult {
   placed: boolean;
   /** Final order notional after engine risk/capacity caps. Present for placed entries. */
   placedNotional?: number;
+  /** Final order size in base units after engine risk/capacity caps. */
+  placedSize?: number;
+  /** Final limit price the order carried. */
+  limitPrice?: number;
   orderId?: string;
+  clientId?: string;
   status?: OrderStatus;
+  /** Size the venue reported filled in the placement acknowledgement, when known. */
+  filledSize?: number;
+  /** Engine clock when the order was accepted. */
+  placedAt?: number;
 }
 
 /** Metadata persisted after SDK signing and before the venue POST. */

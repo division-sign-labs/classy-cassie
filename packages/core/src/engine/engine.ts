@@ -10,8 +10,10 @@ import type {
   Alerter,
   Logger,
   Order,
+  OrderAck,
   OrderIntent,
   OrderSide,
+  OrderStatus,
   Position,
   PositionSide,
   Quote,
@@ -102,6 +104,86 @@ export interface TickResult {
 
 const LOCK_TTL_MS = 120_000;
 
+/**
+ * The venue refused an order the engine deliberately submitted below the
+ * entry-only minimum-notional floor (a strategy exit closing a small
+ * position). Reported under its own error code so untradeable dust is
+ * distinguishable from an ordinary rejected exit in the error table and alerts.
+ */
+export class VenueDustRejectionError extends Error {
+  readonly code = "venue-dust-rejected" as const;
+  constructor(
+    message: string,
+    readonly detail: {
+      marketRef: string;
+      outcome?: "YES" | "NO";
+      side: OrderSide;
+      size: number;
+      limitPrice: number;
+      notionalUsd: number;
+      minimumNotionalUsd: number;
+      venueMessage: string;
+    },
+  ) {
+    super(message);
+    this.name = "VenueDustRejectionError";
+  }
+}
+
+/** Durable per-order decision record keyed by venue order id (`orders:decision:<id>`). */
+export interface OrderDecisionRecord {
+  ts: number;
+  botId: string;
+  marketRef: string;
+  outcome?: "YES" | "NO";
+  side: OrderSide;
+  size: number;
+  limitPrice: number;
+  notionalUsd: number;
+  tif: string;
+  reason: string;
+  alertKind: AlertEvent["kind"];
+  ackStatus: OrderStatus;
+  ackFilledSize?: number;
+  capacityNotes: string[];
+  /** Strategy-supplied provenance (signal id/timestamp, edge, target, exposure, headroom). */
+  provenance?: Record<string, unknown>;
+}
+
+export const orderDecisionKey = (orderId: string): string => `orders:decision:${orderId}`;
+
+const ALERT_PROVENANCE_KEYS = [
+  "signalId",
+  "signalTs",
+  "liveEdgePp",
+  "targetUsd",
+  "currentMarketUsd",
+  "currentEventUsd",
+  "headroomUsd",
+  "limitingCap",
+  "exitReason",
+  "entryQPct",
+  "currentQPct",
+  "remainingEdgePp",
+  "qRetreatPp",
+  "executablePnlPct",
+  "positionAgeDays",
+  "adverseCrossConfirmations",
+  "flipConfirmations",
+  "confirmingForecastIds",
+] as const;
+
+/** The alert carries the explanatory subset; the durable decision record keeps everything. */
+function alertProvenance(provenance: Record<string, unknown>): Record<string, unknown> {
+  const out: Record<string, unknown> = {};
+  for (const key of ALERT_PROVENANCE_KEYS) {
+    const value = provenance[key];
+    if (value === undefined) continue;
+    out[key] = typeof value === "number" ? Math.round(value * 100) / 100 : value;
+  }
+  return out;
+}
+
 interface AdvanceableSource {
   advance(): void;
 }
@@ -177,7 +259,11 @@ export class Engine {
             await this.d.strategy.onActionResult?.(ctx, action, result);
           } catch (err) {
             errors += 1;
-            await this.recordError(seq, `action-${action.kind}`, err, { marketRef: action.marketRef });
+            if (err instanceof VenueDustRejectionError) {
+              await this.recordError(seq, err.code, err, { ...err.detail });
+            } else {
+              await this.recordError(seq, `action-${action.kind}`, err, { marketRef: action.marketRef });
+            }
           }
         }
       } catch (err) {
@@ -280,6 +366,7 @@ export class Engine {
           reason: action.reason ?? "strategy-entry",
           alertKind: "entry",
           alertMessage: `enter ${action.side} ${shortRef(action.marketRef)}`,
+          provenance: action.provenance,
         });
       }
       case "exit": {
@@ -297,9 +384,13 @@ export class Engine {
           desiredSize: pos.size,
           reduceOnly: !isPrediction,
           ignoreVolumeFloor: true,
+          // The minimum-notional floor is an entry-only rule. A strategy exit
+          // must be able to close a small position; slippage and depth still apply.
+          enforceMinimumNotional: false,
           reason: action.reason ?? "strategy-exit",
           alertKind: "exit",
           alertMessage: `exit ${pos.side} ${shortRef(action.marketRef)}${action.reason ? ` (${action.reason})` : ""}`,
+          provenance: action.provenance,
         });
         if (result.placed) await this.disarmTriggers(action.marketRef);
         return result;
@@ -345,14 +436,18 @@ export class Engine {
     reduceOnly?: boolean;
     triggers?: { stopPx?: number; tpPx?: number };
     ignoreVolumeFloor?: boolean;
+    /** False for exits: the minimum-notional floor is an entry-only rule. */
+    enforceMinimumNotional?: boolean;
     reason: string;
     alertKind: AlertEvent["kind"];
     alertMessage: string;
+    provenance?: Record<string, unknown>;
   }): Promise<StrategyActionResult> {
     const { adapter, account, config, botId } = this.d;
     const { book, quote } = await this.quoteFor(p.marketRef, p.outcome);
     const refPrice = p.limitPrice ?? quote.mid;
     const desiredSize = p.desiredSize ?? (p.desiredNotional ?? 0) / refPrice;
+    const enforceMinimumNotional = p.enforceMinimumNotional ?? true;
 
     const risk = p.ignoreVolumeFloor ? { ...config.risk, minDailyVolume: 0 } : config.risk;
     const cap = checkCapacity({
@@ -363,6 +458,7 @@ export class Engine {
       quote,
       risk,
       minimumNotional: p.minimumNotional,
+      enforceMinimumNotional,
     });
     if (!cap.ok) {
       await this.alert({
@@ -410,8 +506,56 @@ export class Engine {
       reduceOnly: p.reduceOnly,
       triggers: p.triggers,
     };
-    const ack = await adapter.placeOrder(account, intent);
-    await setJson(this.d.state, `orders:placed:${ack.orderId}`, { ts: this.now(), intent });
+    const belowEntryFloor = !enforceMinimumNotional && placedNotional < effectiveMinimumNotional;
+    const dustRejection = (venueMessage: string): VenueDustRejectionError =>
+      new VenueDustRejectionError(
+        `venue rejected untradeable dust: ${p.side} ${size} ${shortRef(p.marketRef)} ` +
+          `($${placedNotional.toFixed(2)} is below the $${effectiveMinimumNotional} entry floor, ` +
+          `which the engine does not apply to exits): ${venueMessage}`,
+        {
+          marketRef: p.marketRef,
+          outcome: p.outcome,
+          side: p.side,
+          size,
+          limitPrice,
+          notionalUsd: placedNotional,
+          minimumNotionalUsd: effectiveMinimumNotional,
+          venueMessage,
+        },
+      );
+    let ack: OrderAck;
+    try {
+      ack = await adapter.placeOrder(account, intent);
+    } catch (err) {
+      const venueMessage = err instanceof Error ? err.message : String(err);
+      if (belowEntryFloor) throw dustRejection(venueMessage);
+      throw err;
+    }
+    if (ack.status === "rejected" && belowEntryFloor) {
+      throw dustRejection(`acknowledged as rejected (order ${ack.orderId})`);
+    }
+    const placedAt = this.now();
+    const decision: OrderDecisionRecord = {
+      ts: placedAt,
+      botId,
+      marketRef: p.marketRef,
+      outcome: p.outcome,
+      side: p.side,
+      size: intent.size,
+      limitPrice: intent.limitPrice,
+      notionalUsd: placedNotional,
+      tif: intent.tif,
+      reason: p.reason,
+      alertKind: p.alertKind,
+      ackStatus: ack.status,
+      ...(ack.filledSize !== undefined ? { ackFilledSize: ack.filledSize } : {}),
+      capacityNotes: cap.notes,
+      ...(p.provenance ? { provenance: p.provenance } : {}),
+    };
+    await setJson(this.d.state, `orders:placed:${ack.orderId}`, { ts: placedAt, intent, ...(p.provenance ? { provenance: p.provenance } : {}) });
+    // The placed record is deleted at TTL cancel; the decision record is
+    // permanent so venue history stays explainable after the order is gone.
+    await setJson(this.d.state, orderDecisionKey(ack.orderId), decision);
     await this.alert({
       kind: p.alertKind,
       botId,
@@ -425,11 +569,19 @@ export class Engine {
         ...(ack.builderCode ? { builderCode: ack.builderCode } : {}),
         reason: p.reason,
         ...(cap.notes.length ? { capacity: cap.notes.join("; ") } : {}),
+        ...(p.provenance ? { provenance: alertProvenance(p.provenance) } : {}),
       },
     });
     return {
       placed: ack.status !== "rejected",
       ...(p.desiredNotional !== undefined ? { placedNotional } : {}),
+      placedSize: intent.size,
+      limitPrice: intent.limitPrice,
+      orderId: ack.orderId,
+      clientId: intent.clientId,
+      status: ack.status,
+      ...(ack.filledSize !== undefined ? { filledSize: ack.filledSize } : {}),
+      placedAt,
     };
   }
 
@@ -577,6 +729,7 @@ export class Engine {
         desiredSize: pos.size,
         reduceOnly: !isPrediction,
         ignoreVolumeFloor: true, // a firing stop must exit even in a quiet market
+        enforceMinimumNotional: false,
         reason: `synthetic-${t.kind}`,
         alertKind: "exit",
         alertMessage: `synthetic ${t.kind} fired for ${t.posSide} ${shortRef(t.marketRef)}`,

@@ -813,7 +813,17 @@ export class MarketMakeController {
 
     const catalogs = new Map<string, MarketCatalogSnapshot>();
     for (const row of newest.values()) {
-      catalogs.set(row.marketKey, mapCatalog(await this.catalogClient.market(row.marketKey, row.nativeMarketId, row.conditionId)));
+      // A discovery candidate we cannot catalog is simply not a candidate. Held
+      // inventory keeps its catalog from reducer state below, so skipping here
+      // withholds new entry rather than halting the whole strategy.
+      try {
+        catalogs.set(row.marketKey, mapCatalog(await this.catalogClient.market(row.marketKey, row.nativeMarketId, row.conditionId)));
+      } catch (error) {
+        this.log.warn("market-make skipped an uncatalogable discovery candidate", {
+          marketKey: row.marketKey,
+          error: error instanceof Error ? error.message : String(error),
+        });
+      }
     }
     for (const [key, cached] of this.catalogCache) if (!catalogs.has(key)) catalogs.set(key, cached.value);
     for (const [key, market] of Object.entries(this.reducerState.markets)) {

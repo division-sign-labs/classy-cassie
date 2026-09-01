@@ -95,7 +95,41 @@ describe("market-make deploy safety", () => {
         throw new Error("shutdown returned HTTP 500");
       },
     })).toThrow(/shutdown cancellation was not verified/);
-    expect(commands).toEqual(["true"]);
+    // Reachability probe, then the liveness probe that distinguishes a still
+    // running service from one an earlier interrupted redeploy already stopped.
+    expect(commands).toEqual(["true", "systemctl is-active --quiet cassie@maker-1"]);
+  });
+
+  it("continues a strict replacement when the service was already stopped by an earlier redeploy", () => {
+    const cfg: BotConfig = {
+      ...bot("market-make"),
+      deployment: {
+        provider: "digitalocean",
+        dropletId: 1234,
+        host: "203.0.113.8",
+        region: "sgp1",
+        size: "s-1vcpu-1gb",
+        user: "root",
+        deployedAt: "2026-08-31T12:00:00.000Z",
+      },
+    };
+    const commands: string[] = [];
+
+    expect(() => quiesce(cfg, true, {
+      exec: (_target, command) => {
+        commands.push(command);
+        const ok = !command.startsWith("systemctl is-active");
+        return { ok, code: ok ? 0 : 3, stdout: "", stderr: "" };
+      },
+      control: () => {
+        throw new Error("connect ECONNREFUSED");
+      },
+    })).not.toThrow();
+    expect(commands).toEqual([
+      "true",
+      "systemctl is-active --quiet cassie@maker-1",
+      "systemctl stop cassie@maker-1",
+    ]);
   });
 
   it("includes same-droplet market-make redeploys in durable state preservation", () => {
