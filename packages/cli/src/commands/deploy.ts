@@ -207,11 +207,20 @@ export function quiesce(
     console.log(pc.green("running bot stopped, resting orders canceled"));
   } catch (error) {
     if (strict) {
+      // A previous interrupted redeploy may already have completed the
+      // shutdown and left the service inactive. In that case the control API
+      // is expected to be unavailable, and there is nothing left to cancel.
+      const active = deps.exec(target, `systemctl is-active --quiet cassie@${cfg.id}`).ok;
+      if (!active) {
+        console.log(pc.green("running bot already stopped; resting orders were canceled previously"));
+      } else {
       throw new Error(
         `refusing to replace the market-make runtime: shutdown cancellation was not verified (${(error as Error).message.slice(0, 220)})`,
       );
+      }
+    } else {
+      console.log(pc.yellow(`could not reach the running bot (${(error as Error).message.slice(0, 120)})`));
     }
-    console.log(pc.yellow(`could not reach the running bot (${(error as Error).message.slice(0, 120)})`));
   }
   const stopped = deps.exec(target, `systemctl stop cassie@${cfg.id}`);
   if (strict && !stopped.ok) {
@@ -240,7 +249,7 @@ function preserveMarketMakeState(cfg: BotConfig): PreservedMarketMakeState | nul
   const missing = "__CASSIE_NO_MARKET_MAKE_STATE__";
   const captured = sshExec(
     target,
-    `set -o pipefail && if test -f '${remotePath}'; then tar -C /var/lib/cassie -czf - '${cfg.id}.sqlite'* | base64 -w0; else printf '${missing}'; fi`,
+    `set -o pipefail && if test -f '${remotePath}'; then files=('${cfg.id}.sqlite'); for sidecar in '${cfg.id}.sqlite-wal' '${cfg.id}.sqlite-shm'; do test -e "/var/lib/cassie/$sidecar" && files+=("$sidecar"); done; tar -C /var/lib/cassie -czf - "\${files[@]}" | base64 -w0; else printf '${missing}'; fi`,
   );
   if (!captured.ok) {
     throw new Error(
