@@ -147,7 +147,11 @@ Every step happens in the terminal; you only leave it to copy-paste dashboard va
    overlay with the confirmed seven-day signal-exit state machine (Q collapse, confirmed
    adverse cross, confirmed Q flip, positive price-led convergence, time stop from the
    entry fill), evaluated in that precedence with one canonical reason per exit; it is off
-   unless an operator turns it on. The 24h-volume floor and the minimum-notional floor
+   unless an operator turns it on. In that state machine a market that resolves at or
+   before `maxHoldDays` from the entry fill is held to resolution: the positive
+   take-profit is switched off for that position while Q collapse, adverse cross, Q flip,
+   and the time stop stay armed. The resolution date comes from the Quotient feed and is
+   remembered per position. The 24h-volume floor and the minimum-notional floor
    apply to entries, never exits; exit slippage and executable depth still apply. An
    accepted entry stays reserved against market and event caps until the venue position or
    a resting order shows it, so a fill lag cannot admit a duplicate entry. The legacy
@@ -165,7 +169,8 @@ Every step happens in the terminal; you only leave it to copy-paste dashboard va
    at any time.
 8. **Quotient** — live signals and exact Q forecasts. The wizard reuses a key found from
    the Quotient CLI or asks for one. `QUOTIENT_API_KEY` and `QUOTIENT_API_TOKEN` are both
-   honoured from the environment. `market-make` consumes the same market-scoped API at
+   honoured from the environment, unless the bot pins its key with `cassie signals-key`
+   (§7). `market-make` consumes the same market-scoped API at
    runtime; it does not send balances, P&L, or position sizes to Quotient. Deterministic
    fixture sources exist only inside the contributor test harness; they are not an
    operator choice.
@@ -252,6 +257,7 @@ cassie deploy <botId> [--region <slug>] [--size <slug>] [-y]   # a droplet in YO
 cassie destroy <botId> [-y] [--force]        # cancel resting orders, delete the droplet
 cassie status <botId>                        # droplet + service + engine, one screen
 cassie ssh <botId>                           # a shell on the droplet
+cassie signals-key <botId> [--auto]           # pin this bot's Quotient key to its keystore
 cassie reporting <botId> [--no-post|--off]   # configure Ares for this bot only
 cassie portfolio [botId]                     # cash/position value/equity/orders/PnL, per bot + aggregate
 cassie orders <botId> [--cancel <id>] [--cancel-all]
@@ -450,6 +456,19 @@ calls). Get a key at quotient.social; if the **quotient-api** skill/CLI is insta
 logged in, the same key lives in `~/.config/quotient/config.json`. Give it to cassie via
 `QUOTIENT_API_TOKEN` / `QUOTIENT_API_KEY` in the environment or nearest `.local.env`,
 or let the wizard store it in the keystore by re-running `cassie init`.
+
+One working directory shared by several bots means one `.local.env` key for all of them.
+To put one bot on a different Quotient account, pin it to its own keystore entry:
+
+```sh
+cassie signals-key <botId>            # prompts, verifies against the gateway, stores + pins
+cassie signals-key <botId> --auto     # unpin: back to .local.env, environment, keystore
+```
+
+A pinned bot ignores `QUOTIENT_API_TOKEN` / `QUOTIENT_API_KEY` from the directory and the
+environment; `signals.keySource: "keystore"` in its bot config records the pin. Deploy the
+bot afterward so the droplet's `/etc/cassie/<botId>.env` gets the new key — a restart alone
+keeps the old one.
 
 The quotient-api skill is a separate product surface (research, forecasts, briefs). For
 entries, cassie consumes the published-signals feed: Polymarket `condition_id` resolves

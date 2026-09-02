@@ -5,6 +5,7 @@ import {
   LiveSignalSource,
   checkLiveSignalAccess,
   isSignalFresh,
+  marketForecastFromSignal,
   parseBotConfig,
   type Signal,
   type SignalSource,
@@ -151,6 +152,23 @@ describe("LiveSignalSource (gateway contract, verified 2026-08-13)", () => {
       ttlSec: 10_800,
     });
     expect(sig!.spreadPp).toBeCloseTo(8, 5); // |86 − 78|
+  });
+
+  it("carries the market resolution date through as epoch ms, and tolerates its absence", async () => {
+    const dated = { ...gatewayRow, market: { ...gatewayRow.market, end_date: "2026-09-30T23:59:00Z" } };
+    const src = new LiveSignalSource({ baseUrl: "https://gw.example", path: "/s" }, "t", routedFetch([dated]));
+    const [sig] = await src.latest({});
+    expect(sig!.endsAt).toBe(Date.parse("2026-09-30T23:59:00Z"));
+    expect(marketForecastFromSignal(sig!)!.endsAt).toBe(Date.parse("2026-09-30T23:59:00Z"));
+
+    const undated = new LiveSignalSource({ baseUrl: "https://gw.example", path: "/s" }, "t", routedFetch());
+    const [plain] = await undated.latest({});
+    expect(plain!.endsAt).toBeUndefined();
+
+    const bad = { ...gatewayRow, market: { ...gatewayRow.market, end_date: "not a date" } };
+    const malformed = new LiveSignalSource({ baseUrl: "https://gw.example", path: "/s" }, "t", routedFetch([bad]));
+    const [ignored] = await malformed.latest({});
+    expect(ignored!.endsAt).toBeUndefined();
   });
 
   it("allows a per-bot freshness override", async () => {

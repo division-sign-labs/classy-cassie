@@ -54,6 +54,13 @@ export const SignalsConfigSchema = z
     path: z.string().default("/api/v1/signals"),
     /** Maximum age of a live forecast before it is ignored. */
     maxAgeSec: z.number().positive().default(DEFAULT_SIGNAL_MAX_AGE_SEC),
+    /**
+     * Where this bot's Quotient API key comes from. `keystore` pins the bot to
+     * the key in its own keystore, so a shared `.local.env` or an exported
+     * variable cannot decide which account a deploy runs on. `auto` keeps the
+     * discovery chain: nearest `.local.env`, environment, keystore, quotient CLI.
+     */
+    keySource: z.enum(["auto", "keystore"]).default("auto"),
   })
   .transform(({ source: _legacySource, fixturePath: _removedFixturePath, ...config }) => config);
 export type SignalsConfig = z.output<typeof SignalsConfigSchema>;

@@ -1,6 +1,6 @@
 {
   "name": "@quotient-forecasting/cassie-core",
-  "version": "0.4.1",
+  "version": "0.4.2",
   "type": "module",
   "license": "Apache-2.0",
   "description": "Venue adapters, risk engine, signals, wallet, and sizing primitives for Cassie",

@@ -60,9 +60,23 @@ Exits are evaluated in this order and exactly one reason is emitted:
    back above 50% resets it.
 5. `positive_convergence` — remaining edge at or below 3pp, executable return at or above
    4% of actual entry cost, and held-side Q down no more than 1pp from entry. The profit
-   requirement lives only here; it never vetoes the other branches.
+   requirement lives only here; it never vetoes the other branches. Skipped entirely for a
+   market that resolves inside the hold window — see below.
 6. `time_stop` — position age at or above `maxHoldDays` (7) measured from the actual entry
    fill, regardless of P&L.
+
+### Markets that resolve inside the hold window
+
+A market whose resolution lands at or before `maxHoldDays` from the entry fill is held to
+resolution: `positive_convergence` is switched off for that position, so a converged price
+is not sold back at a partial gain when the full payout arrives before the deadline would.
+Branches 1–4 stay armed, and `time_stop` remains the outer bound for a resolution that
+slips past its published date.
+
+The resolution date comes from the Quotient feed (`market.end_date` on a signal, `end_date`
+on a forecast lookup) and is remembered per position, so a later forecast that omits it
+cannot re-arm the take-profit. A market with no known resolution date, or one resolving
+beyond the window, keeps the ordinary rules.
 
 Executable P&L walks the held-side bids for the full position and deducts `exitFeeBps`.
 Each trigger logs entry Q, current Q, midpoint, executable bid, remaining edge, Q retreat,

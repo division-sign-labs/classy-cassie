@@ -17,6 +17,7 @@ import { runDeploy } from "./commands/deploy.js";
 import { runDestroy } from "./commands/destroy.js";
 import { agentDryRun, agentPersona, agentPrompt, agentStatus } from "./commands/agent.js";
 import { configureReporting } from "./commands/reporting.js";
+import { configureSignalsKey } from "./commands/signals-key.js";
 import { installSkill } from "./commands/skill.js";
 import { changePassphrase, forgetPassphrase, passphraseStatus, rememberPassphrase } from "./commands/passphrase.js";
 import {
@@ -111,6 +112,12 @@ program
   .command("ssh <botId>")
   .description("open a shell on the bot's droplet")
   .action(wrap(runSsh));
+
+program
+  .command("signals-key <botId> [key]")
+  .description("pin this bot's Quotient signals key to its own keystore")
+  .option("--auto", "unpin: resolve the key from .local.env, the environment, then the keystore")
+  .action(wrap(configureSignalsKey));
 
 program
   .command("reporting <botId>")

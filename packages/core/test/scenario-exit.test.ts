@@ -23,6 +23,7 @@ import {
   evaluateScenarioExit,
   forecastVersionKey,
   heldSideLiquidation,
+  resolvesWithinHoldWindow,
   type ScenarioPositionRecord,
 } from "../../../strategies/flip-flat/dist/index.js";
 
@@ -78,13 +79,14 @@ function setYesMid(e: Env, mid: number, size = 10_000): void {
   e.yesAsks = [{ price: Number((mid + 0.01).toFixed(4)), size }];
 }
 
-function forecast(id: string, offsetMs: number, probYes: number): MarketForecast {
+function forecast(id: string, offsetMs: number, probYes: number, endsAt?: number): MarketForecast {
   return {
     id,
     ts: new Date(START + offsetMs).toISOString(),
     venue: "polymarket",
     marketRef: MARKET,
     probYes,
+    ...(endsAt !== undefined ? { endsAt } : {}),
   };
 }
 
@@ -154,7 +156,15 @@ function ctx(e: Env): StrategyContext {
 async function enter(
   strategy: FlipFlatStrategy,
   e: Env,
-  input: { side: "YES" | "NO"; entryQ: number; avgPrice: number; size?: number; ackStatus?: "filled" | "open"; orderId?: string },
+  input: {
+    side: "YES" | "NO";
+    entryQ: number;
+    avgPrice: number;
+    size?: number;
+    ackStatus?: "filled" | "open";
+    orderId?: string;
+    resolvesAt?: number;
+  },
 ): Promise<void> {
   const size = input.size ?? 10;
   const sig = signal(input.side, input.entryQ);
@@ -163,7 +173,14 @@ async function enter(
     marketRef: MARKET,
     side: input.side,
     notional: size * input.avgPrice,
-    provenance: { signalId: sig.id, signalTs: sig.ts, side: sig.side, qHeld: input.entryQ, signalRefPrice: sig.refPrice },
+    provenance: {
+      signalId: sig.id,
+      signalTs: sig.ts,
+      side: sig.side,
+      qHeld: input.entryQ,
+      signalRefPrice: sig.refPrice,
+      ...(input.resolvesAt !== undefined ? { resolvesAt: input.resolvesAt } : {}),
+    },
   };
   await strategy.onActionResult(ctx(e), action, {
     placed: true,
@@ -250,6 +267,40 @@ describe("pure exit precedence", () => {
         cfg,
       ).reason,
     ).toBeUndefined();
+  });
+
+  it("suppresses only the positive take-profit when the market resolves inside the hold window", () => {
+    const converged = {
+      ...base,
+      entryQHeld: 0.7,
+      currentQHeld: 0.7,
+      midHeld: 0.69,
+      executablePnlPct: 10,
+      ageMs: DAY_MS,
+      adverseCrossConfirmations: 0,
+      flipConfirmed: false,
+    };
+    expect(evaluateScenarioExit(converged, cfg).reason).toBe("positive_convergence");
+    expect(evaluateScenarioExit({ ...converged, holdsToResolution: true }, cfg).reason).toBeUndefined();
+    // Every adverse branch, resolution, and the time stop stay armed.
+    expect(evaluateScenarioExit({ ...base, holdsToResolution: true, resolved: true }, cfg).reason).toBe("market_resolved");
+    expect(evaluateScenarioExit({ ...base, holdsToResolution: true }, cfg).reason).toBe("q_collapse");
+    expect(evaluateScenarioExit({ ...base, holdsToResolution: true, entryQHeld: 0.4 }, cfg).reason).toBe("adverse_cross");
+    expect(
+      evaluateScenarioExit({ ...base, holdsToResolution: true, entryQHeld: 0.4, adverseCrossConfirmations: 1 }, cfg).reason,
+    ).toBe("q_flip");
+    // Suppressing the take-profit never suppresses the deadline behind it.
+    expect(evaluateScenarioExit({ ...converged, holdsToResolution: true, ageMs: 8 * DAY_MS }, cfg).reason).toBe("time_stop");
+  });
+
+  it("measures the hold window from entry and needs both dates", () => {
+    const entry = START;
+    expect(resolvesWithinHoldWindow(entry + 7 * DAY_MS, entry, 7)).toBe(true);
+    expect(resolvesWithinHoldWindow(entry + 7 * DAY_MS + 1, entry, 7)).toBe(false);
+    expect(resolvesWithinHoldWindow(undefined, entry, 7)).toBe(false);
+    expect(resolvesWithinHoldWindow(entry + DAY_MS, undefined, 7)).toBe(false);
+    // No deadline means nothing to outlast, so the take-profit stays in force.
+    expect(resolvesWithinHoldWindow(entry + DAY_MS, entry, null)).toBe(false);
   });
 
   it("counts a forecast version once and resets on a new committed forecast", () => {
@@ -437,6 +488,74 @@ describe("seven-day signal exit state machine", () => {
       setYesMid(e, 0.69);
       e.forecasts = [forecast("f", HOUR_MS, 0.7)];
       expect(await exits(strategy, e)).toHaveLength(0);
+    });
+  });
+
+  describe("6b. a market resolving inside the hold window rides to resolution", () => {
+    /** Same converged position every time; only the market's end date moves. */
+    async function setup(resolvesAt: number | undefined, source: "forecast" | "entry" = "forecast") {
+      const e = env();
+      const strategy = new FlipFlatStrategy();
+      await enter(strategy, e, {
+        side: "YES",
+        entryQ: 0.7,
+        avgPrice: 0.6,
+        ...(source === "entry" && resolvesAt !== undefined ? { resolvesAt } : {}),
+      });
+      setYesMid(e, 0.69);
+      e.forecasts = [forecast("f", HOUR_MS, 0.7, source === "forecast" ? resolvesAt : undefined)];
+      return { e, strategy };
+    }
+
+    it("holds a converged position whose market resolves in three days", async () => {
+      const { e, strategy } = await setup(START + 3 * DAY_MS);
+      expect(await exits(strategy, e)).toHaveLength(0);
+      const evaluation = (await record(e)).lastEvaluation;
+      expect(evaluation?.holdsToResolution).toBe(true);
+      expect(evaluation?.exitReason).toBeUndefined();
+    });
+
+    it("takes profit when resolution is beyond the hold window", async () => {
+      const { e, strategy } = await setup(START + 30 * DAY_MS);
+      const got = await exits(strategy, e);
+      expect(got).toHaveLength(1);
+      expect(got[0]!.reason).toMatch(/^positive_convergence/);
+    });
+
+    it("takes profit when no resolution date is known", async () => {
+      const { e, strategy } = await setup(undefined);
+      expect(await exits(strategy, e)).toHaveLength(1);
+    });
+
+    it("honors a resolution date the entry signal carried when the forecast omits one", async () => {
+      const { e, strategy } = await setup(START + 3 * DAY_MS, "entry");
+      expect(await exits(strategy, e)).toHaveLength(0);
+      expect((await record(e)).resolvesAt).toBe(START + 3 * DAY_MS);
+    });
+
+    it("keeps the stored date when a later forecast stops carrying one", async () => {
+      const { e, strategy } = await setup(START + 3 * DAY_MS);
+      expect(await exits(strategy, e)).toHaveLength(0);
+      e.forecasts = [forecast("f", 2 * HOUR_MS, 0.7)];
+      expect(await exits(strategy, e)).toHaveLength(0);
+      expect((await record(e)).resolvesAt).toBe(START + 3 * DAY_MS);
+    });
+
+    it("follows the market when the venue moves the resolution date out", async () => {
+      const { e, strategy } = await setup(START + 3 * DAY_MS);
+      expect(await exits(strategy, e)).toHaveLength(0);
+      e.forecasts = [forecast("f", 2 * HOUR_MS, 0.7, START + 30 * DAY_MS)];
+      expect(await exits(strategy, e)).toHaveLength(1);
+    });
+
+    it("still exits at the time stop when resolution never arrives", async () => {
+      const { e, strategy } = await setup(START + 3 * DAY_MS);
+      expect(await exits(strategy, e)).toHaveLength(0);
+      e.clock.now = START + 8 * DAY_MS;
+      e.forecasts = [forecast("f", 8 * DAY_MS, 0.7, START + 3 * DAY_MS)];
+      const got = await exits(strategy, e);
+      expect(got).toHaveLength(1);
+      expect(got[0]!.reason).toMatch(/^time_stop/);
     });
   });
 

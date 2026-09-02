@@ -113,6 +113,15 @@ droplet. Keys and venue balances are untouched.
 | `skills/cassie`        | agent-facing operator manual ([SKILL.md](skills/cassie/SKILL.md)) + thesis policy (`thesis/mappings.json`) |
 | `fixtures/`            | signal + order-book fixtures for the offline e2e                     |
 
+## Quotient key (per bot)
+
+One `.local.env` in a shared working directory serves every bot in it. To run one bot on a
+different Quotient account, pin it to its own keystore entry with `cassie signals-key
+<botId>`; the command verifies the key against the gateway before storing it, and the bot
+then ignores `QUOTIENT_API_TOKEN` / `QUOTIENT_API_KEY` from the directory and the
+environment. `cassie signals-key <botId> --auto` unpins it. Deploy afterward — the droplet
+keeps the key it was last deployed with.
+
 ## Ares reporting (per bot)
 
 For a Polymarket bot, `cassie reporting <botId>` opts only that bot into Ares builder
@@ -138,6 +147,7 @@ interface Signal {
   prob?: number;          // model probability (prediction markets)
   refPrice: number;       // market price at signal time
   spreadPp?: number;      // |prob - price| in percentage points
+  endsAt?: number;        // venue resolution/close time in epoch ms, when the feed carries one
   ttlSec: number;
 }
 ```

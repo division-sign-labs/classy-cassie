@@ -312,6 +312,8 @@ export interface Signal {
   refPrice: number;
   /** |prob - price| in percentage points. */
   spreadPp?: number;
+  /** Venue resolution/close time in epoch ms, when the feed carries one. */
+  endsAt?: number;
   ttlSec: number;
 }
 
@@ -324,6 +326,8 @@ export interface MarketForecast {
   marketRef: string;
   /** Quotient's calibrated probability for the YES outcome. */
   probYes: number;
+  /** Venue resolution/close time in epoch ms, when the feed carries one. */
+  endsAt?: number;
 }
 
 // ---------------------------------------------------------------------------

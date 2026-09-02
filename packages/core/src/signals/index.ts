@@ -33,6 +33,7 @@ export const SignalSchema = z.object({
   prob: z.number().min(0).max(1).optional(),
   refPrice: z.number(),
   spreadPp: z.number().optional(),
+  endsAt: z.number().optional(),
   ttlSec: z.number().positive(),
 });
 
@@ -53,6 +54,7 @@ export function marketForecastFromSignal(sig: Signal): MarketForecast | null {
     venue: sig.venue,
     marketRef: sig.marketRef,
     probYes,
+    ...(sig.endsAt !== undefined ? { endsAt: sig.endsAt } : {}),
   };
 }
 
@@ -81,6 +83,7 @@ const GatewaySignalSchema = z.object({
       venue: z.string().nullish(),
       condition_id: z.string().nullish(),
       nativeMarketId: z.string().nullish(),
+      end_date: z.string().nullish(),
     })
     .nullish(),
 });
@@ -228,12 +231,14 @@ export class LiveSignalSource implements SignalSource {
         const marketKey = row.marketKey?.toLowerCase();
         const marketRef = marketKey ? byKey.get(marketKey) : undefined;
         if (!marketRef || row.qProbability === undefined) return [];
+        const endsAt = epochMs(row.endDate);
         return [{
           id: row.marketKey ?? "forecast:" + marketRef,
           ts: row.forecastAt ?? new Date(0).toISOString(),
           venue: "polymarket" as const,
           marketRef,
           probYes: row.qProbability,
+          ...(endsAt !== undefined ? { endsAt } : {}),
         }];
       });
     }
@@ -247,12 +252,14 @@ export class LiveSignalSource implements SignalSource {
       return rows.flatMap((row) => {
         const marketRef = row.nativeMarketId ?? row.marketKey?.replace(/^kalshi:/, "");
         if (!marketRef || !wanted.has(marketRef) || row.qProbability === undefined) return [];
+        const endsAt = epochMs(row.endDate);
         return [{
           id: row.marketKey ?? "forecast:" + marketRef,
           ts: row.forecastAt ?? new Date(0).toISOString(),
           venue: "kalshi" as const,
           marketRef,
           probYes: row.qProbability,
+          ...(endsAt !== undefined ? { endsAt } : {}),
         }];
       });
     }
@@ -286,6 +293,8 @@ async function mapGatewayRow(
   const refPrice = costCents / 100;
   const spreadPp = prob !== undefined ? Math.abs(prob * 100 - costCents) : (g.entry_spread_pp ?? undefined);
 
+  const endsAt = epochMs(g.market?.end_date);
+
   return {
     id: g.id,
     ts: g.forecast_updated_at ?? g.published_at ?? new Date(0).toISOString(),
@@ -295,8 +304,16 @@ async function mapGatewayRow(
     prob,
     refPrice,
     spreadPp,
+    ...(endsAt !== undefined ? { endsAt } : {}),
     ttlSec,
   };
+}
+
+/** Feed timestamp to epoch ms; unparseable or absent values stay undefined. */
+function epochMs(iso: string | null | undefined): number | undefined {
+  if (!iso) return undefined;
+  const value = Date.parse(iso);
+  return Number.isFinite(value) ? value : undefined;
 }
 
 /** Resolve a Polymarket condition_id to its YES-token CLOB id (cached, public endpoint). */

@@ -3,6 +3,10 @@
 // have it, so the wizard can stop asking for a paste when a sibling tool is
 // already logged in. Order: nearest .local.env → exported env → this bot's
 // keystore → the quotient CLI config (XDG_CONFIG_HOME honoured).
+//
+// A bot with `signals.keySource: "keystore"` opts out of that chain: its own
+// keystore entry decides, so several bots sharing one working directory can run
+// on different Quotient accounts.
 
 import { existsSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
@@ -10,6 +14,7 @@ import { join } from "node:path";
 import { KeyRoles } from "@quotient-forecasting/cassie-core";
 import { getKeystoreSecret } from "./context.js";
 import { environmentValue, localEnvPath, localEnvValue } from "./local-env.js";
+import { loadBotConfig } from "./paths.js";
 
 export { localEnvPath } from "./local-env.js";
 
@@ -61,12 +66,36 @@ export function discoverQuotientToken(startDir = process.cwd()): ResolvedToken |
   return cli ? { token: cli, source: "quotient-cli", origin: quotientConfigPath() } : null;
 }
 
+function keystoreToken(botId: string, token: string): ResolvedToken {
+  return { token, source: "keystore", origin: `bot ${botId} keystore entry ${KeyRoles.quotientToken}` };
+}
+
+/** Whether this bot pins its key to its own keystore entry. */
+export function pinsKeyToKeystore(botId: string): boolean {
+  try {
+    return loadBotConfig(botId).signals.keySource === "keystore";
+  } catch {
+    // No config yet (mid-`init`), so there is nothing to pin to.
+    return false;
+  }
+}
+
 /** Full resolution chain, for the commands that need a token to run. */
 export async function resolveQuotientToken(botId: string): Promise<ResolvedToken | null> {
+  const pinned = pinsKeyToKeystore(botId);
+  if (pinned) {
+    const stored = await getKeystoreSecret(botId, KeyRoles.quotientToken);
+    if (stored) return keystoreToken(botId, stored);
+    throw new Error(
+      `${botId} pins its Quotient key to its keystore but no ${KeyRoles.quotientToken} entry is stored. ` +
+        `Run \`cassie signals-key ${botId}\` to set it, or \`cassie signals-key ${botId} --auto\` to fall back to ` +
+        "the nearest .local.env and the environment.",
+    );
+  }
   const direct = localEnvQuotientToken() ?? environmentQuotientToken();
   if (direct) return direct;
   const stored = await getKeystoreSecret(botId, KeyRoles.quotientToken);
-  if (stored) return { token: stored, source: "keystore", origin: `bot ${botId} keystore entry ${KeyRoles.quotientToken}` };
+  if (stored) return keystoreToken(botId, stored);
   const cli = quotientCliToken();
   if (cli) return { token: cli, source: "quotient-cli", origin: quotientConfigPath() };
   return null;
