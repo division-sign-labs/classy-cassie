@@ -126,6 +126,8 @@ interface VenueControl {
   redeemFailuresRemaining: number;
   removePositionOnRedeem: boolean;
   failPositionReadAt?: number;
+  /** While set, every positions read throws this message. */
+  positionReadFailure?: string;
   marketSubscribeFailuresRemaining: number;
   marketSubscriptions: ControlledSubscription[];
   userSubscriptions: ControlledSubscription[];
@@ -178,6 +180,7 @@ function fakeVenue(stateStore: MarketMakeStateStore): VenueControl {
       if (control.positionCalls === control.failPositionReadAt) {
         throw new Error("fixture position preflight failed");
       }
+      if (control.positionReadFailure !== undefined) throw new Error(control.positionReadFailure);
       return structuredClone(control.positions);
     },
     book: async (marketRef) => ({
@@ -1456,6 +1459,126 @@ describe("MarketMakeController adversarial lifecycle safety", () => {
     });
     await controller.resume();
     expect(controller.status().lifecycle).toBe("ACTIVE");
+  });
+
+  it("resumes a quiet account after a user websocket reconnect without waiting for a user message", async () => {
+    const control = fakeVenue(stateStore);
+    const controller = build(control, {}, { enableSubscriptions: true });
+    await controller.start();
+    await applyReconcile(controller);
+    await controller.resume();
+    expect(controller.status().lifecycle).toBe("ACTIVE");
+
+    control.userSubscriptions[0]!.endUnexpectedly();
+    await vi.waitFor(() => {
+      expect(controller.status().lifecycle).toBe("DATA_DEGRADED");
+      expect(control.userSubscriptions).toHaveLength(2);
+    });
+
+    // The user channel pushes only on account activity, so a quiet account
+    // never sees a post-reconnect message. The fresh subscription followed by
+    // an authoritative reconciliation is the recovery proof instead.
+    clock += 1_000;
+    control.bookTs = clock;
+    await controller.resume();
+    expect(controller.status().lifecycle).toBe("ACTIVE");
+  });
+
+  it("does not degrade a quiet account for websocket silence while REST reads stay healthy", async () => {
+    const control = fakeVenue(stateStore);
+    const controller = build(control, {}, { enableSubscriptions: true });
+    await controller.start();
+    await applyReconcile(controller);
+    await controller.resume();
+    expect(control.orders).toHaveLength(1);
+    const cancelAllBefore = control.cancelAllCalls;
+
+    // Past both stale thresholds (20s market, 10s user) with no stream
+    // message at all. A resting order that nobody trades against produces
+    // exactly this silence; the tick's own REST reads prove liveness.
+    clock += 30_000;
+    control.bookTs = clock;
+    await controller.tick();
+    expect(controller.status().lifecycle).toBe("ACTIVE");
+    expect(control.orders).toHaveLength(1);
+    expect(control.cancelAllCalls).toBe(cancelAllBefore);
+  });
+
+  it("tolerates a transient positions rate limit and degrades only once reads stay broken", async () => {
+    const control = fakeVenue(stateStore);
+    const controller = build(control, {}, { enableSubscriptions: true });
+    await controller.start();
+    await applyReconcile(controller);
+    await controller.resume();
+    expect(control.orders).toHaveLength(1);
+    const cancelAllBefore = control.cancelAllCalls;
+
+    control.positionReadFailure =
+      "Request to https://data-api.polymarket.com/positions?user=0xabc&limit=20&offset=0 was rate limited";
+    clock += 15_000;
+    control.bookTs = clock;
+    await expect(controller.tick()).resolves.toMatchObject({ fills: 0, actions: 0 });
+    expect(controller.status().lifecycle).toBe("ACTIVE");
+    expect(control.orders).toHaveLength(1);
+    expect(control.cancelAllCalls).toBe(cancelAllBefore);
+
+    // A market wake hitting the same limit is absorbed the same way.
+    control.marketSubscriptions[0]!.push({ opaque: "book" });
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(controller.status().lifecycle).toBe("ACTIVE");
+
+    // Reads still failing past the tolerance window: degrade as before.
+    clock += 60_000;
+    control.bookTs = clock;
+    await expect(controller.tick()).rejects.toThrow(/rate limited/);
+    expect(controller.status().lifecycle).toBe("DATA_DEGRADED");
+  });
+
+  it("coalesces market websocket messages into book re-reads without re-reading account state", async () => {
+    const control = fakeVenue(stateStore);
+    const controller = build(control, {}, { enableSubscriptions: true });
+    await controller.start();
+    await applyReconcile(controller);
+    await controller.resume();
+    expect(control.orders).toHaveLength(1);
+    const positionCallsBefore = control.positionCalls;
+    const bookCallsBefore = control.tokenBookCalls.length;
+
+    for (let index = 0; index < 5; index += 1) control.marketSubscriptions[0]!.push({ opaque: `book-${index}` });
+    await vi.waitFor(() => {
+      expect(control.tokenBookCalls.length).toBeGreaterThan(bookCallsBefore);
+    });
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    // One supervised market: one YES and one NO book per wake, one wake for
+    // the burst (a trailing wake, if any, waits out the coalescing window).
+    expect(control.tokenBookCalls.length - bookCallsBefore).toBe(2);
+    expect(control.positionCalls).toBe(positionCallsBefore);
+  });
+
+  it("ignores market websocket messages while flat", async () => {
+    const control = fakeVenue(stateStore);
+    const controller = build(control, {}, { enableSubscriptions: true });
+    await startAndPlace(controller, control);
+    clock += 1_000;
+    control.bookTs = clock;
+    await controller.halt();
+    for (let attempt = 0; attempt < 3 && control.orders.length > 0; attempt += 1) {
+      clock += 1_000;
+      control.bookTs = clock;
+      await controller.tick();
+    }
+    expect(control.orders).toHaveLength(0);
+    clock += 1_000;
+    control.bookTs = clock;
+    await controller.tick();
+    expect((controller as unknown as { supervisedBookKeys(): Set<string> }).supervisedBookKeys().size).toBe(0);
+    const positionCallsBefore = control.positionCalls;
+    const bookCallsBefore = control.tokenBookCalls.length;
+
+    for (let index = 0; index < 5; index += 1) control.marketSubscriptions[0]!.push({ opaque: `idle-${index}` });
+    await new Promise((resolve) => setTimeout(resolve, 30));
+    expect(control.positionCalls).toBe(positionCallsBefore);
+    expect(control.tokenBookCalls.length).toBe(bookCallsBefore);
   });
 
   it("does not degrade when replacing the expected market subscription", async () => {

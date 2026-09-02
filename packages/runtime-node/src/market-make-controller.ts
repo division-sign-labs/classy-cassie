@@ -64,6 +64,28 @@ const SNAPSHOT_SCHEMA = "cassie-market-make-controller-snapshot/1";
 const EPSILON = 1e-9;
 const FILL_CURSOR_OVERLAP_MS = 5 * 60 * 1_000;
 const CANCEL_FAILURE_ESCALATION = 3;
+// Market websocket messages are book-change wake signals. Bursts are coalesced
+// on the wall clock so a busy subscription cannot become a REST storm.
+const MARKET_WAKE_MIN_INTERVAL_MS = 2_000;
+// A transient venue read failure (rate limit, 5xx, socket reset) is retried on
+// the next cadence instead of degrading, as long as an authoritative snapshot
+// succeeded within this window. Beyond it the controller degrades as before.
+const AUTHORITATIVE_READ_TOLERANCE_MS = 45_000;
+
+function isTransientVenueReadError(error: unknown): boolean {
+  const candidate = error as { status?: unknown; retryAfter?: unknown; code?: unknown } | null;
+  if (candidate && typeof candidate === "object") {
+    if (candidate.retryAfter !== undefined) return true;
+    if ([429, 502, 503, 504].includes(Number(candidate.status))) return true;
+    if (typeof candidate.code === "string" &&
+      ["ECONNRESET", "ETIMEDOUT", "ECONNREFUSED", "EAI_AGAIN", "UND_ERR_SOCKET", "UND_ERR_CONNECT_TIMEOUT"].includes(candidate.code)) {
+      return true;
+    }
+  }
+  const message = error instanceof Error ? error.message : String(error);
+  return /rate limited|too many requests|internal server error|bad gateway|service unavailable|gateway time-?out|fetch failed|ECONNRESET|ETIMEDOUT|socket hang up/i
+    .test(message);
+}
 
 type QuotientClient = Pick<MarketMakeQuotientClient, "activeSignals" | "exactForecasts" | "spentUsd">;
 type CatalogClient = Pick<PolymarketCatalogClient, "market"> & Partial<Pick<PolymarketCatalogClient, "recover">>;
@@ -330,6 +352,7 @@ interface StreamRecoveryGate {
   reason: string;
   requiredAt: number;
   reconnectedAt?: number;
+  reconnectReconcileSequence?: number;
   messageAt?: number;
   messageAfterReconcileSequence?: number;
   reconciledAt?: number;
@@ -531,6 +554,10 @@ export class MarketMakeController {
   private marketSubscriptionKey = "";
   private subscriptionTasks = new Set<Promise<void>>();
   private wakeQueued = false;
+  private userWakePending = false;
+  private marketWakeTimer?: ReturnType<typeof setTimeout>;
+  private lastMarketWakeWallClockAt?: number;
+  private lastAuthoritativeSnapshotAt?: number;
   private reconcileSequence = 0;
   private lastEventAt?: number;
   private lastTickAt?: number;
@@ -703,7 +730,10 @@ export class MarketMakeController {
     ));
     await Promise.allSettled([...this.subscriptionTasks]);
     this.subscriptionTasks.clear();
+    if (this.marketWakeTimer) clearTimeout(this.marketWakeTimer);
+    this.marketWakeTimer = undefined;
     this.wakeQueued = false;
+    this.userWakePending = false;
     this.heartbeatInFlight = undefined;
     this.started = false;
     this.shuttingDown = false;
@@ -1034,6 +1064,12 @@ export class MarketMakeController {
       }
       await this.pollMarketInputs(this.lastPositions);
       if (this.enableSubscriptions) await this.startSubscriptions();
+      if (this.streamRecoveryBlockReason()?.endsWith("has not been followed by authoritative reconciliation")) {
+        // The (re)subscription above is only proven by a reconciliation that
+        // completes after it. Take that read now instead of refusing resume
+        // until the next scheduled tick happens to run.
+        await this.reconcileInternal(true);
+      }
       const streamBlock = this.streamRecoveryBlockReason();
       if (streamBlock) throw new Error(`cannot resume: ${streamBlock}`);
       const now = this.now();
@@ -1121,23 +1157,50 @@ export class MarketMakeController {
     return result;
   }
 
+  private emptyTick(at: number): MarketMakeTickResult {
+    return { at, signals: 0, exactForecasts: 0, catalogs: 0, books: 0, fills: 0, actions: 0, decisions: 0 };
+  }
+
+  /**
+   * A venue read that failed for a transient reason (rate limit, 5xx, socket
+   * reset) is retried on the next cadence rather than degrading, provided an
+   * authoritative snapshot succeeded recently. Returns true when the failure
+   * was absorbed; the caller then skips the rest of its cycle.
+   */
+  private tolerateTransientReadFailure(context: string, error: unknown): boolean {
+    if (!isTransientVenueReadError(error)) return false;
+    const now = this.now();
+    const lastGood = this.lastAuthoritativeSnapshotAt;
+    if (lastGood === undefined || now - lastGood > AUTHORITATIVE_READ_TOLERANCE_MS) return false;
+    this.log.warn("market-make transient venue read failure; retrying on the next cadence", {
+      context,
+      error: error instanceof Error ? error.message : String(error),
+      lastAuthoritativeSnapshotAgeMs: now - lastGood,
+    });
+    return true;
+  }
+
   private async tickInternal(): Promise<MarketMakeTickResult> {
-    if (!this.reconciliationApproved) {
-      const reconciliation = await this.reconcileInternal(false);
-      this.lastTickAt = this.now();
-      return {
-        at: reconciliation.at,
-        signals: 0,
-        exactForecasts: 0,
-        catalogs: 0,
-        books: 0,
-        fills: 0,
-        actions: 0,
-        decisions: 0,
-      };
-    }
     const at = this.now();
-    const reconciliation = await this.reconcileInternal(true);
+    if (!this.reconciliationApproved) {
+      try {
+        const reconciliation = await this.reconcileInternal(false);
+        this.lastTickAt = this.now();
+        return this.emptyTick(reconciliation.at);
+      } catch (error) {
+        if (!this.tolerateTransientReadFailure("tick reconciliation", error)) throw error;
+        this.lastTickAt = this.now();
+        return this.emptyTick(at);
+      }
+    }
+    let reconciliation: MarketMakeReconcileResult;
+    try {
+      reconciliation = await this.reconcileInternal(true);
+    } catch (error) {
+      if (!this.tolerateTransientReadFailure("tick reconciliation", error)) throw error;
+      this.lastTickAt = this.now();
+      return this.emptyTick(at);
+    }
     await this.checkStreamFreshness(at);
     // Venue balances are authoritative. Reconcile/adopt them before any Q/book
     // event is allowed to plan inventory-increasing actions.
@@ -1593,7 +1656,7 @@ export class MarketMakeController {
     return Number.isSafeInteger(gate.generation) && Number(gate.generation) > 0 &&
       typeof gate.reason === "string" && gate.reason.length > 0 &&
       Number.isFinite(gate.requiredAt) &&
-      ["reconnectedAt", "messageAt", "messageAfterReconcileSequence", "reconciledAt"]
+      ["reconnectedAt", "reconnectReconcileSequence", "messageAt", "messageAfterReconcileSequence", "reconciledAt"]
         .every((key) => gate[key] === undefined || Number.isFinite(gate[key]));
   }
 
@@ -2520,6 +2583,7 @@ export class MarketMakeController {
     }
     await this.enforceUnresolvedOrderGate(snapshot.at);
     this.lastPositions = snapshot.positions;
+    this.lastAuthoritativeSnapshotAt = snapshot.at;
     this.lastFillCursor = Math.max(this.lastFillCursor, ...snapshot.fills.map((fill) => fill.ts), 0);
     this.markStreamReconciled(reconciliationSequence, snapshot.at);
     if (settlementQuiescent && userWakeGeneration === this.userWakeGeneration) {
@@ -4022,13 +4086,17 @@ export class MarketMakeController {
       now - order.updatedAt <= FILL_CURSOR_OVERLAP_MS);
   }
 
-  private async resnapshotBooks(): Promise<number> {
-    const keys = new Set(
+  /** Markets whose books must be supervised: those carrying inventory or a working order. */
+  private supervisedBookKeys(): Set<string> {
+    return new Set(
       Object.entries(this.reducerState.markets)
         .filter(([, market]) => market.catalog && (market.inventory || Object.values(market.orders).some((order) => !["CANCELED", "FILLED", "REJECTED"].includes(order.status))))
         .map(([key]) => key),
     );
-    return (await this.fetchAndReduceBooks(keys)).books;
+  }
+
+  private async resnapshotBooks(): Promise<number> {
+    return (await this.fetchAndReduceBooks(this.supervisedBookKeys())).books;
   }
 
   private scheduleNextTick(): void {
@@ -4127,7 +4195,7 @@ export class MarketMakeController {
           // The pinned adapter currently exposes an opaque SDK payload. Treat
           // it only as a wake-up signal; exact books/orders/fills are reread
           // through typed REST APIs before the reducer acts.
-          this.queueWake(`${kind}-websocket-event`);
+          this.queueWake(kind);
         }
         if (!this.shuttingDown && this.currentSubscription(kind) === subscription) {
           await this.handleSubscriptionFailure(kind, subscription, `${kind} websocket closed`);
@@ -4183,33 +4251,97 @@ export class MarketMakeController {
     });
   }
 
-  private queueWake(reason: string): void {
-    if (this.wakeQueued || this.shuttingDown) return;
-    this.wakeQueued = true;
-    void this.serialized(async () => {
-      try {
+  private queueWake(kind: StreamKind): void {
+    if (this.shuttingDown) return;
+    if (kind === "user") {
+      // Account activity: re-read orders, fills, and positions immediately.
+      // A message arriving mid-read schedules one trailing follow-up so a
+      // fill that lands during the read is not deferred to the next tick.
+      if (this.wakeQueued) {
+        this.userWakePending = true;
+        return;
+      }
+      this.wakeQueued = true;
+      void this.serialized(() => this.runWake("user")).finally(() => {
+        this.wakeQueued = false;
+        if (this.userWakePending) {
+          this.userWakePending = false;
+          this.queueWake("user");
+        }
+      });
+      return;
+    }
+    // A market message is a book change. It only matters for markets that
+    // carry inventory or working orders, and bursts are coalesced on the wall
+    // clock so a busy subscription cannot become a REST storm. Account state
+    // is not re-read here: fills arrive on the user stream and the periodic
+    // tick reconciles on its own cadence.
+    if (!this.marketRecoveryReconcilePending() && this.supervisedBookKeys().size === 0) return;
+    if (this.marketWakeTimer) return;
+    const wallClock = Date.now();
+    const elapsed = this.lastMarketWakeWallClockAt === undefined
+      ? Number.POSITIVE_INFINITY
+      : wallClock - this.lastMarketWakeWallClockAt;
+    if (elapsed >= MARKET_WAKE_MIN_INTERVAL_MS) {
+      this.lastMarketWakeWallClockAt = wallClock;
+      void this.serialized(() => this.runWake("market"));
+      return;
+    }
+    this.marketWakeTimer = setTimeout(() => {
+      this.marketWakeTimer = undefined;
+      if (this.shuttingDown) return;
+      this.lastMarketWakeWallClockAt = Date.now();
+      void this.serialized(() => this.runWake("market"));
+    }, MARKET_WAKE_MIN_INTERVAL_MS - elapsed);
+    this.marketWakeTimer.unref?.();
+  }
+
+  /** A post-reconnect market message is waiting for the reconciliation that proves recovery. */
+  private marketRecoveryReconcilePending(): boolean {
+    const gate = this.marketStreamRecovery;
+    return gate !== undefined && gate.messageAt !== undefined && gate.reconciledAt === undefined;
+  }
+
+  private async runWake(kind: StreamKind): Promise<void> {
+    if (this.shuttingDown) return;
+    try {
+      if (kind === "user" || this.marketRecoveryReconcilePending()) {
         await this.reconcileInternal(true);
         await this.adoptResidualInventory(this.lastPositions);
-        await this.resnapshotBooks();
-      } catch (error) {
-        await this.degrade(`${reason}: ${error instanceof Error ? error.message : String(error)}`);
-      } finally {
-        this.wakeQueued = false;
       }
-    });
+      await this.resnapshotBooks();
+    } catch (error) {
+      if (this.tolerateTransientReadFailure(`${kind}-websocket-event`, error)) return;
+      await this.degrade(`${kind}-websocket-event: ${error instanceof Error ? error.message : String(error)}`);
+    }
   }
 
   private async checkStreamFreshness(at: number): Promise<void> {
     if (!this.enableSubscriptions) return;
+    // A silent stream is not a dead stream. The CLOB market channel pushes
+    // only on book changes and the user channel only on account activity, so
+    // a quiet book or a flat account legitimately hears nothing for minutes.
+    // Socket death surfaces through the subscription ending. The kill switch
+    // therefore fires only when there is exposure to supervise, the stream
+    // is silent, and the typed REST reads that supervise it have gone stale.
+    if (this.supervisedBookKeys().size === 0) return;
+    // REST reads land once per tick, and a tick can run long behind a slow
+    // paid poll, so their freshness is judged against the read-tolerance
+    // window rather than the (shorter) stream-silence threshold.
+    const marketRestStaleMs = Math.max(
+      this.config.global_kill_switches.market_websocket_stale_seconds * 1_000,
+      AUTHORITATIVE_READ_TOLERANCE_MS,
+    );
+    const userRestStaleMs = Math.max(
+      this.config.global_kill_switches.user_websocket_stale_seconds * 1_000,
+      AUTHORITATIVE_READ_TOLERANCE_MS,
+    );
     if (
       this.marketSubscription && this.lastMarketStreamAt !== undefined &&
-      at - this.lastMarketStreamAt > this.config.global_kill_switches.market_websocket_stale_seconds * 1_000
+      at - this.lastMarketStreamAt > this.config.global_kill_switches.market_websocket_stale_seconds * 1_000 &&
+      !(this.lastMarketRestAt !== undefined && at - this.lastMarketRestAt <= marketRestStaleMs)
     ) {
-      const restHealthy = this.lastMarketRestAt !== undefined &&
-        at - this.lastMarketRestAt <= this.config.global_kill_switches.market_websocket_stale_seconds * 1_000;
-      const reason = restHealthy
-        ? "market websocket stale; REST exits remain supervised but entries require stream recovery"
-        : "market websocket and REST market data are stale";
+      const reason = "market websocket and REST market data are stale";
       this.requireStreamRecovery("market", reason, at);
       await this.latchEmergencyDegrade(reason);
       await this.degrade(reason);
@@ -4222,13 +4354,10 @@ export class MarketMakeController {
     }
     if (
       this.userSubscription && this.lastUserStreamAt !== undefined &&
-      at - this.lastUserStreamAt > this.config.global_kill_switches.user_websocket_stale_seconds * 1_000
+      at - this.lastUserStreamAt > this.config.global_kill_switches.user_websocket_stale_seconds * 1_000 &&
+      !(this.lastUserRestAt !== undefined && at - this.lastUserRestAt <= userRestStaleMs)
     ) {
-      const restHealthy = this.lastUserRestAt !== undefined &&
-        at - this.lastUserRestAt <= this.config.global_kill_switches.user_websocket_stale_seconds * 1_000;
-      const reason = restHealthy
-        ? "user websocket stale; REST exits remain supervised but entries require stream recovery"
-        : "user websocket and REST account data are stale";
+      const reason = "user websocket and REST account data are stale";
       this.requireStreamRecovery("user", reason, at);
       await this.latchEmergencyDegrade(reason);
       await this.degrade(reason);
@@ -4261,6 +4390,7 @@ export class MarketMakeController {
     const gate = this.streamRecovery(kind);
     if (!gate) return;
     gate.reconnectedAt = at;
+    gate.reconnectReconcileSequence = this.reconcileSequence;
     gate.messageAt = undefined;
     gate.messageAfterReconcileSequence = undefined;
     gate.reconciledAt = undefined;
@@ -4275,12 +4405,25 @@ export class MarketMakeController {
   }
 
   private markStreamReconciled(sequence: number, at: number): void {
-    for (const gate of [this.marketStreamRecovery, this.userStreamRecovery]) {
-      if (
-        gate?.messageAt !== undefined &&
+    for (const [kind, gate] of [
+      ["market", this.marketStreamRecovery],
+      ["user", this.userStreamRecovery],
+    ] as const) {
+      if (!gate || gate.reconnectedAt === undefined) continue;
+      const afterMessage =
+        gate.messageAt !== undefined &&
         gate.messageAfterReconcileSequence !== undefined &&
-        sequence > gate.messageAfterReconcileSequence
-      ) gate.reconciledAt = at;
+        sequence > gate.messageAfterReconcileSequence;
+      // The market channel replays a book snapshot for every subscribed
+      // token on connect, so a post-reconnect message is guaranteed there.
+      // The user channel pushes only on account activity, so a quiet or flat
+      // account can never prove delivery with a message: a fresh subscription
+      // followed by an authoritative REST reconciliation is its proof.
+      const afterReconnect =
+        kind === "user" &&
+        gate.reconnectReconcileSequence !== undefined &&
+        sequence > gate.reconnectReconcileSequence;
+      if (afterMessage || afterReconnect) gate.reconciledAt = at;
     }
   }
 
@@ -4292,8 +4435,12 @@ export class MarketMakeController {
     ] as const) {
       if (!gate) continue;
       if (gate.reconnectedAt === undefined) return `${kind} websocket has not reconnected`;
-      if (gate.messageAt === undefined) return `${kind} websocket has not delivered a post-reconnect message`;
-      if (gate.reconciledAt === undefined) return `${kind} websocket message has not been followed by authoritative reconciliation`;
+      if (kind === "market" && gate.messageAt === undefined) return `${kind} websocket has not delivered a post-reconnect message`;
+      if (gate.reconciledAt === undefined) {
+        return kind === "market"
+          ? `${kind} websocket message has not been followed by authoritative reconciliation`
+          : `${kind} websocket reconnect has not been followed by authoritative reconciliation`;
+      }
     }
     return undefined;
   }
