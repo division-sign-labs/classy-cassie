@@ -174,7 +174,8 @@ export function controlCall(
   if (body !== undefined) parts.push("--data-binary", "@-");
   parts.push(`'http://localhost${path.startsWith("/") ? path : `/${path}`}'`);
 
-  const result = sshExec(target, parts.join(" "), body);
+  // A dry-run or status body over dozens of markets can run to tens of MB.
+  const result = sshExec(target, parts.join(" "), body, { maxBufferBytes: 256 * 1024 * 1024 });
   const text = result.stdout.trim();
   if (!result.ok) {
     let parsed: unknown;
@@ -183,7 +184,7 @@ export function controlCall(
     } catch {
       parsed = undefined;
     }
-    const detail = text || result.stderr.trim();
+    const detail = /ssh failed:/.test(result.stderr) ? result.stderr.trim() : (text || result.stderr.trim());
     throw new ControlApiError(`control API: ${detail.slice(0, 400) || `curl exited ${result.code}`}`, parsed);
   }
   try {

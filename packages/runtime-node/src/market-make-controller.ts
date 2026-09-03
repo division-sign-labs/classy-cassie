@@ -1006,8 +1006,10 @@ export class MarketMakeController {
         ]);
         const yesBook: TokenBook = { tokenId: market.yesTokenId, bids: yesRaw.bids, asks: yesRaw.asks, ts: yesRaw.ts };
         const noBook: TokenBook = { tokenId: market.noTokenId, bids: noRaw.bids, asks: noRaw.asks, ts: noRaw.ts };
-        apply({ type: "book", ts: at, marketKey, outcome: "YES", book: yesBook });
-        apply({ type: "book", ts: at, marketKey, outcome: "NO", book: noBook });
+        // Books are observed after the dry run began; stamping them with its
+        // start time would make every one look skewed or stale at the gate.
+        apply({ type: "book", ts: this.now(), marketKey, outcome: "YES", book: yesBook });
+        apply({ type: "book", ts: this.now(), marketKey, outcome: "NO", book: noBook });
         const signal = state.markets[marketKey]?.signal;
         if (!signal) continue;
         const computed = this.metricsProvider
@@ -3569,25 +3571,24 @@ export class MarketMakeController {
       const catalog = this.catalogCache.get(marketKey)?.value ?? this.reducerState.markets[marketKey]?.catalog;
       return catalog ? [{ marketKey, catalog }] : [];
     });
-    const fetched = new Map<string, { yesBook: TokenBook; noBook: TokenBook }>();
+    // Each batch is reduced as soon as it lands, so a book is never more than
+    // one batch’s round trip old when its freshness gate is evaluated.
     for (let offset = 0; offset < ordered.length; offset += BOOK_FETCH_CONCURRENCY) {
       const batch = ordered.slice(offset, offset + BOOK_FETCH_CONCURRENCY);
-      const results = await Promise.all(batch.map(async ({ marketKey, catalog }) => {
+      const fetched = await Promise.all(batch.map(async ({ marketKey, catalog }) => {
         const [yesRaw, noRaw] = await Promise.all([
           this.venue.tokenBook!(catalog.yesTokenId),
           this.venue.tokenBook!(catalog.noTokenId),
         ]);
         return {
           marketKey,
+          catalog,
           yesBook: { tokenId: catalog.yesTokenId, bids: yesRaw.bids, asks: yesRaw.asks, ts: yesRaw.ts } satisfies TokenBook,
           noBook: { tokenId: catalog.noTokenId, bids: noRaw.bids, asks: noRaw.asks, ts: noRaw.ts } satisfies TokenBook,
         };
       }));
-      for (const result of results) fetched.set(result.marketKey, result);
       if (this.enableSubscriptions) this.lastMarketRestAt = this.now();
-    }
-    for (const { marketKey, catalog } of ordered) {
-      const { yesBook, noBook } = fetched.get(marketKey)!;
+      for (const { marketKey, catalog, yesBook, noBook } of fetched) {
       const shock = await this.observeShock(marketKey, yesBook, noBook, this.now());
       actions += shock.actions;
       decisions += shock.decisions;
@@ -3606,6 +3607,7 @@ export class MarketMakeController {
       const stability = await this.processEvent({ type: "stability", ts: this.now(), marketKey, stability: metrics.stability });
       actions += volatility.actions + stability.actions;
       decisions += volatility.decisions + stability.decisions;
+      }
     }
     const loss = await this.updateLossState(this.now());
     actions += loss.actions;

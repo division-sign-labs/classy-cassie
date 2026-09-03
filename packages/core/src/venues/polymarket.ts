@@ -736,7 +736,11 @@ export class PolymarketAdapter implements VenueAdapter {
       // SDK returns bids ascending / asks descending; normalize to best-first.
       bids: ob.bids.map(toNum).sort((x, y) => y.price - x.price),
       asks: ob.asks.map(toNum).sort((x, y) => x.price - y.price),
-      ts: Number(ob.timestamp ?? Date.now()),
+      // The CLOB timestamp is the book’s last change, not the read: a quiet
+      // market can carry a minutes-old value while the venue’s clock can also
+      // run slightly ahead of ours. Freshness gates need the observation time.
+      ts: Date.now(),
+      ...(ob.timestamp === undefined || ob.timestamp === null ? {} : { venueTs: Number(ob.timestamp) }),
     };
   }
 

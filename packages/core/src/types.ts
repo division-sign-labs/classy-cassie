@@ -66,7 +66,10 @@ export interface OrderBook {
   marketRef: string;
   bids: BookLevel[]; // sorted best (highest) first
   asks: BookLevel[]; // sorted best (lowest) first
+  /** Observation time (ms). Freshness and skew gates key off this, never off the venue’s own stamp. */
   ts: number;
+  /** The venue’s own book timestamp (ms) when it reports one; informational. */
+  venueTs?: number;
 }
 
 export interface Quote {
