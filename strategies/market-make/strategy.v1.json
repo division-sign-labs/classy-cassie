@@ -103,7 +103,7 @@
     "max_move_away_from_q_during_entry_stability_pp": 2.0,
     "reject_crossed_or_empty_book": true,
     "reject_unknown_tick_or_min_order_size": true,
-    "reject_drawdown_risk_elevated": true
+    "reject_drawdown_risk_elevated": false
   },
   "direction_policy": {
     "NO": {
@@ -114,7 +114,7 @@
       "maximum_center_shift_pp": 3.0
     },
     "YES": {
-      "minimum_edge_pp": 20.0,
+      "minimum_edge_pp": 10.0,
       "maximum_edge_pp": 30.0,
       "size_multiplier": 0.5,
       "target_market_cost_usd": 20.0,
@@ -164,6 +164,7 @@
     "existing_inventory_reduction_first",
     "first_pass_adds_new_category_family",
     "NO_before_YES",
+    "drawdown_risk_not_elevated_first",
     "larger_live_edge_within_bounds",
     "newer_forecast",
     "tighter_book_spread",

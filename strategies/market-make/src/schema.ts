@@ -329,6 +329,7 @@ export const MarketMakeConfigSchema = strict({
     z.literal("existing_inventory_reduction_first"),
     z.literal("first_pass_adds_new_category_family"),
     z.literal("NO_before_YES"),
+    z.literal("drawdown_risk_not_elevated_first"),
     z.literal("larger_live_edge_within_bounds"),
     z.literal("newer_forecast"),
     z.literal("tighter_book_spread"),

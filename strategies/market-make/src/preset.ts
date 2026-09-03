@@ -5,7 +5,7 @@ import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { MarketMakeConfigSchema, type MarketMakeConfig } from "./schema.js";
 
-export const MARKET_MAKE_SOURCE_SHA256 = "27feab003ab5d22f85387fb778653f748c1f50e1104edd9457cfbdfa09e85c32";
+export const MARKET_MAKE_SOURCE_SHA256 = "699b59faaecd43037555cdb114cc577445ba71ab0bb8dd48034e118ea526c857";
 
 export interface MarketMakePresetProvenance {
   source_repository: string;

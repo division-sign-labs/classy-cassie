@@ -6,6 +6,7 @@ import type { CategoryFamily, NormalizedCandidate } from "./types.js";
 
 export function compareCandidatePriority(a: NormalizedCandidate, b: NormalizedCandidate): number {
   if (a.side !== b.side) return a.side === "NO" ? -1 : 1;
+  if (a.drawdownRiskElevated !== b.drawdownRiskElevated) return a.drawdownRiskElevated ? 1 : -1;
   if (a.liveEdgePp !== b.liveEdgePp) return b.liveEdgePp - a.liveEdgePp;
   if (a.qAsOf !== b.qAsOf) return b.qAsOf - a.qAsOf;
   if (a.selectedSpreadPp !== b.selectedSpreadPp) return a.selectedSpreadPp - b.selectedSpreadPp;

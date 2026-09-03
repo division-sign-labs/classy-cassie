@@ -787,7 +787,11 @@ movement and data-freshness checks supply shock detection.
   free collateral, a $50 operational reserve, six active markets, and 12 live orders.
 - $12.50 base ticket and $20 hard per-order notional cap.
 - NO: 10–30pp live Q edge, full sizing, $40 target cost per market.
-- YES: 20–30pp live Q edge, half sizing, $20 target cost per market.
+- YES: 10–30pp live Q edge, half sizing, $20 target cost per market. Smaller YES
+  inventory and the shorter YES renewal edge carry the directional asymmetry; the entry
+  threshold does not.
+- A forecast flagged drawdown-risk is ranked below clean candidates of the same side, not
+  excluded; every entry decision logs the flag and the other candidate facts as covariates.
 - 4pp operational selected-token spread ceiling; 30pp is the hard sanity ceiling.
 - Category-family diversification is preferred when valid candidates exist. V1 is
   generally opportunity-constrained rather than bankroll-constrained.

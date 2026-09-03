@@ -16,6 +16,7 @@ import type { MarketMakeConfig } from "./schema.js";
 import type {
   CategoryFamily,
   DecisionRecord,
+  EntryDecisionCovariates,
   InventoryCycle,
   MarketMakeAction,
   MarketMakeState,
@@ -736,10 +737,11 @@ function entryActions(state: MarketMakeState, now: number, eventType: Normalized
         decision: gate.passed ? "entry-deferred" : "entry-rejected",
         reasons: gate.passed ? ["catalog-refresh-cancellation-only"] : gate.reasons,
         actions: 0,
+        covariates: candidateCovariates(candidate),
       });
       continue;
     }
-    records.push({ ts: now, marketKey: market.marketKey, eventType, decision: gate.passed ? "entry-eligible" : "entry-rejected", reasons: gate.reasons, actions: 0 });
+    records.push({ ts: now, marketKey: market.marketKey, eventType, decision: gate.passed ? "entry-eligible" : "entry-rejected", reasons: gate.reasons, actions: 0, covariates: candidateCovariates(candidate) });
     if (gate.passed) eligible.push(candidate);
   }
 
@@ -781,6 +783,21 @@ function entryActions(state: MarketMakeState, now: number, eventType: Normalized
     if (record) record.actions += 1;
   }
   return { actions, records };
+}
+
+/** Facts about a candidate that every entry decision records for offline covariate analysis. */
+function candidateCovariates(candidate: NormalizedCandidate): EntryDecisionCovariates {
+  return {
+    side: candidate.side,
+    liveEdgePp: candidate.liveEdgePp,
+    qSide: candidate.qSide,
+    qAsOf: candidate.qAsOf,
+    forecastStatus: candidate.forecastStatus ?? "unknown",
+    drawdownRiskElevated: candidate.drawdownRiskElevated,
+    selectedSpreadPp: candidate.selectedSpreadPp,
+    depthWithin2cUsd: candidate.depthWithin2cUsd,
+    volatilityRegime: candidate.volatilityRegime,
+  };
 }
 
 export function reduceMarketMake(previous: MarketMakeState, event: NormalizedMarketMakeEvent, config: MarketMakeConfig): ReducerResult {

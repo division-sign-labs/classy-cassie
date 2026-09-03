@@ -3,24 +3,43 @@
   "source_path": "research/polymarket_mm_strategy/2026-08-31/strategy.v1.json",
   "source_schema_version": "q-directed-polymarket-mm/1",
   "copied_at": "2026-08-31",
-  "sha256": "27feab003ab5d22f85387fb778653f748c1f50e1104edd9457cfbdfa09e85c32",
+  "sha256": "699b59faaecd43037555cdb114cc577445ba71ab0bb8dd48034e118ea526c857",
   "cassie_resolution": {
     "bankroll": {
       "mode": "live",
       "maximum_sizing_bankroll_usd": null
     },
     "renewal_min_edge_pp": {
-      "NO": 10.0,
-      "YES": 20.0
+      "NO": 10,
+      "YES": 20
     },
     "liquidity": {
-      "minimum_exit_bid_depth_1c_usd": 1000.0,
-      "minimum_exit_bid_depth_2c_usd": 2500.0,
+      "minimum_exit_bid_depth_1c_usd": 1000,
+      "minimum_exit_bid_depth_2c_usd": 2500,
       "max_order_fraction_of_exit_bid_depth_1c": 0.02,
       "max_order_fraction_of_exit_bid_depth_2c": 0.008,
       "max_market_fraction_of_exit_bid_depth_1c": 0.04,
       "max_market_fraction_of_exit_bid_depth_2c": 0.016
     }
   },
-  "note": "The source JSON is vendored byte-for-byte. Cassie-only decisions are added by the typed preset loader, never written into the source artifact."
+  "note": "The source JSON was vendored byte-for-byte on 2026-08-31 (source_sha256) and carries the amendments listed below; sha256 pins the amended file. Cassie-only resolution decisions are added by the typed preset loader, never written into the artifact.",
+  "source_sha256": "27feab003ab5d22f85387fb778653f748c1f50e1104edd9457cfbdfa09e85c32",
+  "amendments": [
+    {
+      "date": "2026-09-02",
+      "fields": {
+        "direction_policy.YES.minimum_edge_pp": {
+          "from": 20,
+          "to": 10
+        },
+        "eligibility.reject_drawdown_risk_elevated": {
+          "from": true,
+          "to": false
+        },
+        "candidate_priority": "inserted drawdown_risk_not_elevated_first after NO_before_YES"
+      },
+      "rationale": "Last-30-day Q-above/YES markouts were +0.37pp at 1h, +0.11pp at 6h, and -0.43pp at 24h: smaller YES inventory (0.5 size multiplier) and the shorter YES renewal edge carry the directional asymmetry; excluding every 10-20pp YES opportunity is not justified. The drawdown-risk hard gate had no basis in the source analysis; flagged forecasts are ranked below clean ones and the flag is logged on every entry decision as a covariate for later testing.",
+      "port_back": "Apply the same edit to research/polymarket_mm_strategy in quotient-analytics-pipelines and re-vendor to restore a byte-for-byte copy."
+    }
+  ]
 }

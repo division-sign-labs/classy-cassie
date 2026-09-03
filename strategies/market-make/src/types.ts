@@ -282,6 +282,18 @@ export interface MarketMakeState {
   decisions: DecisionRecord[];
 }
 
+export interface EntryDecisionCovariates {
+  side: "YES" | "NO";
+  liveEdgePp: number;
+  qSide: number;
+  qAsOf: number;
+  forecastStatus: string;
+  drawdownRiskElevated: boolean;
+  selectedSpreadPp: number;
+  depthWithin2cUsd: number;
+  volatilityRegime: string;
+}
+
 export interface DecisionRecord {
   ts: number;
   marketKey?: string;
@@ -289,6 +301,8 @@ export interface DecisionRecord {
   decision: string;
   reasons: string[];
   actions: number;
+  /** Candidate facts logged with every entry decision so gates can be tested as covariates offline. */
+  covariates?: EntryDecisionCovariates;
   /** Runtime-only sizing identity attached before a live decision is persisted. */
   sizing?: {
     policyConfigHash: string;

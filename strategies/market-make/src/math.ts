@@ -187,7 +187,9 @@ export function evaluateEntryGates(candidate: NormalizedCandidate, context: Entr
   if (candidate.volume24hUsd + EPSILON < config.eligibility.min_volume_24h_usd) reasons.push("volume-low");
   if (!Number.isFinite(candidate.yesMid) || !Number.isFinite(candidate.noMid) || Math.abs(candidate.yesMid + candidate.noMid - 1) * 100 > config.market_data.max_yes_no_midpoint_complement_error_pp + EPSILON) reasons.push("yes-no-complement-error");
   if (candidate.volatilityRegime === "dead" || candidate.volatilityRegime === "extreme") reasons.push(`volatility-${candidate.volatilityRegime}`);
-  if (candidate.drawdownRiskElevated) reasons.push("q-drawdown-risk-elevated");
+  // Drawdown risk is a covariate under test, not evidence against the edge: the
+  // preset ranks flagged candidates below clean ones instead of excluding them.
+  if (config.eligibility.reject_drawdown_risk_elevated && candidate.drawdownRiskElevated) reasons.push("q-drawdown-risk-elevated");
   if (candidate.forecastStatus === "converged" || candidate.forecastStatus === "diverging" || candidate.forecastStatus === "caution" || candidate.forecastStatus === "warning") reasons.push(`forecast-status-${candidate.forecastStatus}`);
   if (now - candidate.stability.validSince + EPSILON < config.eligibility.entry_stability_seconds * 1_000) reasons.push("entry-not-stable-long-enough");
   if (candidate.stability.maxMoveAwayFromQPp + EPSILON >= config.eligibility.max_move_away_from_q_during_entry_stability_pp) reasons.push("entry-moved-away-from-q");

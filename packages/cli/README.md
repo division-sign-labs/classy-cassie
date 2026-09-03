@@ -89,7 +89,7 @@ news; Quotient updates provide the thesis and CLOB movement provides shock detec
 The $500 preset is a ratio template applied automatically to funded strategy capital. At
 the $500 reference size it allows at most $350 of inventory plus pending entries across
 six markets. It starts with $12.50 tickets, a $20 per-order cap, $40 NO and $20 YES targets, 10–30pp
-NO edges, and 20–30pp YES edges. Six hours is review-only. Cassie reacts immediately to
+NO edges, and 10–30pp YES edges (YES at half size). Six hours is review-only. Cassie reacts immediately to
 new `latest_q`, exits at 5pp remaining edge or 75% of the first-fill gap captured, uses a
 24-hour normal ceiling, and permits one qualifying same-direction forecast to extend the
 position to at most 36 hours.

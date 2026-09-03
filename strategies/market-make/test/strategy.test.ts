@@ -324,9 +324,9 @@ describe("entry boundary gates", () => {
     expect(gates(0.4001).reasons).toContain("edge-below-direction-min");
   });
 
-  it("passes YES 20.00pp and rejects 19.99pp", () => {
-    expect(gates(0.7).passed).toBe(true);
-    expect(gates(0.6999).reasons).toContain("edge-below-direction-min");
+  it("passes YES 10.00pp and rejects 9.99pp", () => {
+    expect(gates(0.6).passed).toBe(true);
+    expect(gates(0.5999).reasons).toContain("edge-below-direction-min");
   });
 
   it("passes 30.00pp and rejects 30.01pp", () => {
@@ -361,7 +361,7 @@ describe("entry boundary gates", () => {
   });
 
   it("does not let a reward bypass a failed edge gate", () => {
-    const rewarded = candidate(0.6, { market: { rewardRateUsd: 1_000_000 } });
+    const rewarded = candidate(0.55, { market: { rewardRateUsd: 1_000_000 } });
     const result = gateCandidate(rewarded.candidate, rewarded.yesBook, rewarded.noBook, { now: NOW }, config);
     expect(result.passed).toBe(false);
     expect(result.reasons).toContain("edge-below-direction-min");
@@ -470,6 +470,38 @@ describe("allocation", () => {
     const chosen = allocateCandidates([international, domestic, culture], new Set(), 2, config);
     expect(new Set(chosen.map((row) => row.categoryFamily)).size).toBe(2);
     expect(chosen[0]?.side).toBe("NO");
+  });
+});
+
+describe("drawdown risk covariate", () => {
+  const flaggedMarket = { marketKey: "m-flag", nativeMarketId: "flag", conditionId: "c-flag", marketRef: "r-flag", eventId: "e-flag", yesTokenId: "yes-token", noTokenId: "no-token" };
+  const flaggedSignal = { marketKey: "m-flag", nativeMarketId: "flag", conditionId: "c-flag", drawdownRiskElevated: true };
+
+  it("does not reject a drawdown-flagged forecast under the preset", () => {
+    const decision = gates(0.75, { market: flaggedMarket, signal: flaggedSignal });
+    expect(decision.passed).toBe(true);
+    expect(decision.reasons).not.toContain("q-drawdown-risk-elevated");
+  });
+
+  it("still rejects it when an operator turns the hard gate back on", () => {
+    const strict = createMarketMakeConfig({ eligibility: { reject_drawdown_risk_elevated: true } });
+    const built = candidate(0.75, { market: flaggedMarket, signal: flaggedSignal });
+    expect(gateCandidate(built.candidate, built.yesBook, built.noBook, { now: NOW }, strict).reasons).toContain("q-drawdown-risk-elevated");
+  });
+
+  it("ranks a flagged candidate below a clean same-side candidate with less edge", () => {
+    const flagged = candidate(0.75, { market: flaggedMarket, signal: flaggedSignal }).candidate;
+    const clean = candidate(0.62).candidate;
+    expect(flagged.liveEdgePp).toBeGreaterThan(clean.liveEdgePp);
+    const chosen = allocateCandidates([flagged, clean], new Set(), 2, config);
+    expect(chosen.map((row) => row.marketKey)).toEqual([clean.marketKey, flagged.marketKey]);
+  });
+
+  it("records the flag and the other candidate facts on every entry decision", () => {
+    const { state } = reduceAll(readyEvents(0.7));
+    const entry = state.decisions.find((row) => row.decision === "entry-eligible" || row.decision === "entry-rejected");
+    expect(entry?.covariates).toMatchObject({ side: "YES", drawdownRiskElevated: false, forecastStatus: expect.any(String) });
+    expect(entry?.covariates?.liveEdgePp).toBeCloseTo(20, 5);
   });
 });
 
