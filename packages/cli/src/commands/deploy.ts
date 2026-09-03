@@ -250,6 +250,10 @@ function preserveMarketMakeState(cfg: BotConfig): PreservedMarketMakeState | nul
   const captured = sshExec(
     target,
     `set -o pipefail && if test -f '${remotePath}'; then files=('${cfg.id}.sqlite'); for sidecar in '${cfg.id}.sqlite-wal' '${cfg.id}.sqlite-shm'; do test -e "/var/lib/cassie/$sidecar" && files+=("$sidecar"); done; tar -C /var/lib/cassie -czf - "\${files[@]}" | base64 -w0; else printf '${missing}'; fi`,
+    // A long-running market maker accumulates a large event log; the archive
+    // must not be cut off by the default output cap.
+    undefined,
+    { maxBufferBytes: 1024 * 1024 * 1024 },
   );
   if (!captured.ok) {
     throw new Error(

@@ -95,19 +95,28 @@ export interface ExecResult {
 }
 
 /** Run one command on the droplet. `stdin` never appears in argv or the process list. */
-export function sshExec(target: Target, command: string, stdin?: string): ExecResult {
+export function sshExec(
+  target: Target,
+  command: string,
+  stdin?: string,
+  options: { maxBufferBytes?: number } = {},
+): ExecResult {
   const result = spawnSync("ssh", [...sshArgs(target), "--", command], {
     encoding: "utf8",
     input: stdin,
     stdio: ["pipe", "pipe", "pipe"],
     env: restrictedChildEnv(["SSH_"]),
-    maxBuffer: 32 * 1024 * 1024,
+    maxBuffer: options.maxBufferBytes ?? 32 * 1024 * 1024,
   });
+  // A spawn-level failure (ENOBUFS when output exceeds maxBuffer, a missing
+  // binary, a signal) leaves status null and stderr empty; surface it so the
+  // caller reports the real cause instead of a slice of truncated stdout.
+  const spawnFailure = result.error ? `ssh failed: ${result.error.message}` : "";
   return {
     ok: result.status === 0,
     code: result.status,
     stdout: result.stdout ?? "",
-    stderr: result.stderr ?? "",
+    stderr: [result.stderr ?? "", spawnFailure].filter(Boolean).join("\n"),
   };
 }
 
