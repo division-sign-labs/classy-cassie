@@ -1527,8 +1527,8 @@ describe("MarketMakeController adversarial lifecycle safety", () => {
     await new Promise((resolve) => setTimeout(resolve, 20));
     expect(controller.status().lifecycle).toBe("ACTIVE");
 
-    // Reads still failing past the tolerance window: degrade as before.
-    clock += 60_000;
+    // Reads still failing past the five-minute tolerance window: degrade as before.
+    clock += 6 * 60_000;
     control.bookTs = clock;
     await expect(controller.tick()).rejects.toThrow(/rate limited/);
     expect(controller.status().lifecycle).toBe("DATA_DEGRADED");

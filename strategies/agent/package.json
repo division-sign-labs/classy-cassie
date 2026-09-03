@@ -1,6 +1,6 @@
 {
   "name": "@quotient-forecasting/strategy-agent",
-  "version": "0.4.5",
+  "version": "0.4.6",
   "type": "module",
   "license": "Apache-2.0",
   "description": "LLM monitoring-agent strategy for Cassie: prompt-driven market discovery, Quotient enrichment, deterministic quarter-Kelly sizing",

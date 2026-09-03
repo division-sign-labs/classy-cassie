@@ -70,7 +70,11 @@ const MARKET_WAKE_MIN_INTERVAL_MS = 2_000;
 // A transient venue read failure (rate limit, 5xx, socket reset) is retried on
 // the next cadence instead of degrading, as long as an authoritative snapshot
 // succeeded within this window. Beyond it the controller degrades as before.
-const AUTHORITATIVE_READ_TOLERANCE_MS = 45_000;
+// A poll over dozens of markets can itself run for a minute or more, so the
+// window is measured in minutes, not in ticks.
+const AUTHORITATIVE_READ_TOLERANCE_MS = 5 * 60 * 1_000;
+// Markets whose YES and NO books are requested at the same time during a poll.
+const BOOK_FETCH_CONCURRENCY = 8;
 // A decision that changed nothing (no action, same verdict, same reasons as the
 // last one persisted for that market) is re-persisted only as a periodic
 // heartbeat, so the telemetry table records transitions and samples rather
@@ -3558,16 +3562,32 @@ export class MarketMakeController {
     let books = 0;
     let actions = 0;
     let decisions = 0;
-    for (const marketKey of [...keys].sort()) {
+    // Fetch every market’s books with bounded concurrency, then reduce them in
+    // stable key order. Serial round trips from the droplet to the CLOB made a
+    // 57-market tick take minutes; the reducer still sees a deterministic order.
+    const ordered = [...keys].sort().flatMap((marketKey) => {
       const catalog = this.catalogCache.get(marketKey)?.value ?? this.reducerState.markets[marketKey]?.catalog;
-      if (!catalog) continue;
-      const [yesRaw, noRaw] = await Promise.all([
-        this.venue.tokenBook!(catalog.yesTokenId),
-        this.venue.tokenBook!(catalog.noTokenId),
-      ]);
-      const yesBook: TokenBook = { tokenId: catalog.yesTokenId, bids: yesRaw.bids, asks: yesRaw.asks, ts: yesRaw.ts };
-      const noBook: TokenBook = { tokenId: catalog.noTokenId, bids: noRaw.bids, asks: noRaw.asks, ts: noRaw.ts };
+      return catalog ? [{ marketKey, catalog }] : [];
+    });
+    const fetched = new Map<string, { yesBook: TokenBook; noBook: TokenBook }>();
+    for (let offset = 0; offset < ordered.length; offset += BOOK_FETCH_CONCURRENCY) {
+      const batch = ordered.slice(offset, offset + BOOK_FETCH_CONCURRENCY);
+      const results = await Promise.all(batch.map(async ({ marketKey, catalog }) => {
+        const [yesRaw, noRaw] = await Promise.all([
+          this.venue.tokenBook!(catalog.yesTokenId),
+          this.venue.tokenBook!(catalog.noTokenId),
+        ]);
+        return {
+          marketKey,
+          yesBook: { tokenId: catalog.yesTokenId, bids: yesRaw.bids, asks: yesRaw.asks, ts: yesRaw.ts } satisfies TokenBook,
+          noBook: { tokenId: catalog.noTokenId, bids: noRaw.bids, asks: noRaw.asks, ts: noRaw.ts } satisfies TokenBook,
+        };
+      }));
+      for (const result of results) fetched.set(result.marketKey, result);
       if (this.enableSubscriptions) this.lastMarketRestAt = this.now();
+    }
+    for (const { marketKey, catalog } of ordered) {
+      const { yesBook, noBook } = fetched.get(marketKey)!;
       const shock = await this.observeShock(marketKey, yesBook, noBook, this.now());
       actions += shock.actions;
       decisions += shock.decisions;
