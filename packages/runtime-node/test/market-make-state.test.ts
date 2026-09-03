@@ -29,12 +29,12 @@ describe("MarketMakeStateStore", () => {
     rmSync(dir, { recursive: true, force: true });
   });
 
-  function open(options?: { maxEvents?: number; maxEventAgeMs?: number }): MarketMakeStateStore {
+  function open(options?: ConstructorParameters<typeof MarketMakeStateStore>[1]): MarketMakeStateStore {
     store = new MarketMakeStateStore(path, options);
     return store;
   }
 
-  function closeAndReopen(options?: { maxEvents?: number; maxEventAgeMs?: number }): MarketMakeStateStore {
+  function closeAndReopen(options?: ConstructorParameters<typeof MarketMakeStateStore>[1]): MarketMakeStateStore {
     store!.close();
     store = new MarketMakeStateStore(path, options);
     return store;
@@ -708,4 +708,30 @@ describe("MarketMakeStateStore", () => {
     expect(state.readEvents(3).map((event) => event.eventId)).toEqual(["event-new"]);
     expect(state.status().counts.events).toBe(1);
   });
+  it("bounds decision telemetry by count and age without ever reading it back", () => {
+    const state = open({ maxDecisions: 3, maxDecisionAgeMs: 500 });
+    // Pruning runs every thousand inserts; a flat market maker watching
+    // dozens of markets writes that many rejections in a few minutes.
+    for (let i = 0; i < 1_000; i += 1) {
+      state.appendDecision({ decisionId: `d-${i}`, ts: BASE_TS + i, kind: "entry-rejected", decision: { i } });
+    }
+    const rows = () => (state.exportSnapshot().mm_decisions as Array<{ decision_id: string }>).map((row) => row.decision_id);
+    expect(rows()).toEqual(["d-997", "d-998", "d-999"]);
+    for (let i = 0; i < 1_000; i += 1) {
+      state.appendDecision({ decisionId: `late-${i}`, ts: BASE_TS + 2_000 + i, kind: "entry-rejected", decision: { i } });
+    }
+    expect(rows()).toEqual(["late-997", "late-998", "late-999"]);
+  });
+
+  it("replays only events after a sequence and reports the newest fill without exporting tables", () => {
+    const state = open();
+    for (let i = 0; i < 3; i += 1) {
+      state.appendEvent({ eventId: `event-${i}`, ts: BASE_TS + i, type: "BOOK", payload: { i } });
+    }
+    const [first] = state.readEvents(3);
+    expect(state.readEventsAfter(first!.seq).map((event) => event.eventId)).toEqual(["event-1", "event-2"]);
+    expect(state.readEventsAfter(0)).toHaveLength(3);
+    expect(state.latestFillTimestamp()).toBe(0);
+  });
+
 });

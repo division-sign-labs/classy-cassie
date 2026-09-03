@@ -71,6 +71,11 @@ const MARKET_WAKE_MIN_INTERVAL_MS = 2_000;
 // the next cadence instead of degrading, as long as an authoritative snapshot
 // succeeded within this window. Beyond it the controller degrades as before.
 const AUTHORITATIVE_READ_TOLERANCE_MS = 45_000;
+// A decision that changed nothing (no action, same verdict, same reasons as the
+// last one persisted for that market) is re-persisted only as a periodic
+// heartbeat, so the telemetry table records transitions and samples rather
+// than one identical rejection per market per book tick.
+const DECISION_HEARTBEAT_MS = 15 * 60 * 1_000;
 
 function isTransientVenueReadError(error: unknown): boolean {
   const candidate = error as { status?: unknown; retryAfter?: unknown; code?: unknown } | null;
@@ -558,6 +563,7 @@ export class MarketMakeController {
   private marketWakeTimer?: ReturnType<typeof setTimeout>;
   private lastMarketWakeWallClockAt?: number;
   private lastAuthoritativeSnapshotAt?: number;
+  private readonly lastPersistedDecision = new Map<string, { fingerprint: string; ts: number }>();
   private reconcileSequence = 0;
   private lastEventAt?: number;
   private lastTickAt?: number;
@@ -1365,21 +1371,20 @@ export class MarketMakeController {
       this.reducerState = createInitialMarketMakeState(this.config);
     }
 
-    const exported = this.stateStore.exportSnapshot();
-    const rows = Array.isArray(exported.mm_events) ? exported.mm_events as Array<Record<string, unknown>> : [];
-    for (const row of rows.sort((a, b) => Number(a.seq) - Number(b.seq))) {
-      const seq = Number(row.seq);
-      if (seq <= lastEventSeq) continue;
-      const payload = JSON.parse(String(row.payload_json));
-      const parsed = NormalizedMarketMakeEventSchema.safeParse(payload);
-      if (!parsed.success) throw new Error(`persisted market-make event ${String(row.event_id)} is invalid`);
+    // Replay only the events the snapshot has not absorbed. Exporting the whole
+    // database here once loaded the decision telemetry (hundreds of MB after a
+    // day of watching dozens of markets) and exhausted the heap on a 1GB box.
+    for (const row of this.stateStore.readEventsAfter(lastEventSeq)) {
+      const seq = row.seq;
+      const parsed = NormalizedMarketMakeEventSchema.safeParse(row.payload);
+      if (!parsed.success) throw new Error(`persisted market-make event ${row.eventId} is invalid`);
       const event = parsed.data as NormalizedMarketMakeEvent;
       this.reducerState = reduceMarketMake(this.reducerState, event, this.config).state;
       this.rememberEvent(event);
       lastEventSeq = seq;
     }
     this.hydrateCachesFromReducer();
-    this.lastFillCursor = this.maxPersistedFillTimestamp(exported);
+    this.lastFillCursor = this.stateStore.latestFillTimestamp();
     await this.saveReducerState(lastEventSeq);
   }
 
@@ -1390,9 +1395,23 @@ export class MarketMakeController {
     }
   }
 
-  private maxPersistedFillTimestamp(snapshot: Record<string, unknown>): number {
-    const fills = Array.isArray(snapshot.mm_fills) ? snapshot.mm_fills as Array<Record<string, unknown>> : [];
-    return fills.reduce((latest, fill) => Math.max(latest, Number(fill.ts ?? 0)), 0);
+  private shouldPersistDecision(decision: DecisionRecord): boolean {
+    if (decision.actions > 0) return true;
+    const key = decision.marketKey ?? `portfolio:${decision.decision}`;
+    // The sizing identity is part of the verdict: a deposit that rescales limits
+    // must leave a persisted row even when the reasons did not change.
+    const sizing = decision.sizing;
+    const fingerprint = [
+      decision.decision,
+      [...decision.reasons].sort().join(","),
+      sizing?.effectiveConfigHash ?? "",
+      sizing?.effectiveBankrollUsd ?? "",
+      sizing?.bankrollEntryReady ?? "",
+    ].join("|");
+    const previous = this.lastPersistedDecision.get(key);
+    if (previous && previous.fingerprint === fingerprint && decision.ts - previous.ts < DECISION_HEARTBEAT_MS) return false;
+    this.lastPersistedDecision.set(key, { fingerprint, ts: decision.ts });
+    return true;
   }
 
   private async saveReducerState(lastEventSeq?: number): Promise<void> {
@@ -1518,6 +1537,7 @@ export class MarketMakeController {
     const seq = this.stateStore.readEvents(1)[0]?.seq ?? 0;
     for (let index = 0; index < reduced.decisions.length; index += 1) {
       const decision = reduced.decisions[index]!;
+      if (!this.shouldPersistDecision(decision)) continue;
       this.stateStore.appendDecision({
         decisionId: `${eventId}:${index}`,
         ts: decision.ts,

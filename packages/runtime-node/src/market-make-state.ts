@@ -9,6 +9,14 @@ export const MARKET_MAKE_SCHEMA_VERSION = 1;
 
 const DEFAULT_MAX_EVENTS = 50_000;
 const DEFAULT_MAX_EVENT_AGE_MS = 7 * 24 * 60 * 60 * 1_000;
+// Decision and reconciliation rows are research telemetry. They are never read
+// back into memory by the runtime, but a market maker watching dozens of
+// markets writes them by the hundred per minute, so they need a ceiling too.
+const DEFAULT_MAX_DECISIONS = 250_000;
+const DEFAULT_MAX_DECISION_AGE_MS = 14 * 24 * 60 * 60 * 1_000;
+const DEFAULT_MAX_RECONCILIATIONS = 20_000;
+const DECISION_PRUNE_EVERY = 1_000;
+const RECONCILIATION_PRUNE_EVERY = 100;
 const EPSILON = 1e-9;
 
 export type MarketMakeLifecycle =
@@ -57,6 +65,9 @@ const UNRESOLVED_TRANSITIONAL_ORDER_STATUSES: readonly MarketMakeOrderStatus[] =
 export interface MarketMakeStateOptions {
   maxEvents?: number;
   maxEventAgeMs?: number;
+  maxDecisions?: number;
+  maxDecisionAgeMs?: number;
+  maxReconciliations?: number;
 }
 
 export interface MarketMakeMarketInput {
@@ -426,10 +437,22 @@ export class MarketMakeStateStore {
   private readonly db: Database.Database;
   private readonly maxEvents: number;
   private readonly maxEventAgeMs: number;
+  private readonly maxDecisions: number;
+  private readonly maxDecisionAgeMs: number;
+  private readonly maxReconciliations: number;
+  private decisionsSincePrune = 0;
+  private reconciliationsSincePrune = 0;
 
   constructor(path: string, options: MarketMakeStateOptions = {}) {
     this.maxEvents = options.maxEvents ?? DEFAULT_MAX_EVENTS;
     this.maxEventAgeMs = options.maxEventAgeMs ?? DEFAULT_MAX_EVENT_AGE_MS;
+    this.maxDecisions = options.maxDecisions ?? DEFAULT_MAX_DECISIONS;
+    this.maxDecisionAgeMs = options.maxDecisionAgeMs ?? DEFAULT_MAX_DECISION_AGE_MS;
+    this.maxReconciliations = options.maxReconciliations ?? DEFAULT_MAX_RECONCILIATIONS;
+    for (const [name, value] of [["maxDecisions", this.maxDecisions], ["maxReconciliations", this.maxReconciliations]] as const) {
+      if (!Number.isInteger(value) || value < 1) throw new Error(` must be a positive integer`);
+    }
+    if (!Number.isFinite(this.maxDecisionAgeMs) || this.maxDecisionAgeMs <= 0) throw new Error("maxDecisionAgeMs must be positive");
     if (!Number.isInteger(this.maxEvents) || this.maxEvents < 1) {
       throw new Error("maxEvents must be a positive integer");
     }
@@ -1561,6 +1584,10 @@ export class MarketMakeStateStore {
       this.db.prepare(
         "INSERT INTO mm_reconciliations (reconciliation_id, ts, source, snapshot_json) VALUES (?, ?, ?, ?)",
       ).run(reconciliationId, ts, input.source ?? null, canonical);
+      if (++this.reconciliationsSincePrune >= RECONCILIATION_PRUNE_EVERY) {
+        this.reconciliationsSincePrune = 0;
+        this.pruneReconciliations();
+      }
       this.db.prepare(`
         UPDATE mm_runtime SET last_reconciliation_id = ?, last_reconciled_at = ?,
           last_reconcile_ok = 1, updated_at = ? WHERE singleton = 1
@@ -1744,7 +1771,28 @@ export class MarketMakeStateStore {
       input.rationale ?? null,
       JSON.stringify(input.decision),
     );
+    if (result.changes === 1 && ++this.decisionsSincePrune >= DECISION_PRUNE_EVERY) {
+      this.decisionsSincePrune = 0;
+      this.pruneDecisions(input.ts);
+    }
     return result.changes === 1;
+  }
+
+  private pruneDecisions(now: number): void {
+    this.db.prepare("DELETE FROM mm_decisions WHERE ts < ?").run(now - this.maxDecisionAgeMs);
+    this.db.prepare(`
+      DELETE FROM mm_decisions WHERE decision_id NOT IN (
+        SELECT decision_id FROM mm_decisions ORDER BY ts DESC LIMIT ?
+      )
+    `).run(this.maxDecisions);
+  }
+
+  private pruneReconciliations(): void {
+    this.db.prepare(`
+      DELETE FROM mm_reconciliations WHERE reconciliation_id NOT IN (
+        SELECT reconciliation_id FROM mm_reconciliations ORDER BY ts DESC LIMIT ?
+      )
+    `).run(this.maxReconciliations);
   }
 
   appendMarkout(input: {
@@ -1808,6 +1856,28 @@ export class MarketMakeStateStore {
         SELECT seq FROM mm_events ORDER BY seq DESC LIMIT ?
       )
     `).run(this.maxEvents);
+  }
+
+  /** Every persisted event after `seq`, oldest first; the table itself is bounded by maxEvents. */
+  readEventsAfter(seq: number): Array<MarketMakeNormalizedEventInput & { seq: number }> {
+    if (!Number.isFinite(seq) || seq < 0) throw new Error("seq must be a non-negative number");
+    const rows = this.db.prepare("SELECT * FROM mm_events WHERE seq > ? ORDER BY seq ASC").all(seq) as Array<
+      Record<string, unknown>
+    >;
+    return rows.map((row) => ({
+      seq: Number(row.seq),
+      eventId: String(row.event_id),
+      ts: Number(row.ts),
+      type: String(row.type),
+      marketKey: optionalString(row.market_key),
+      payload: parseJson(row.payload_json),
+    }));
+  }
+
+  /** Newest persisted fill timestamp, or 0 when no fill has been recorded. */
+  latestFillTimestamp(): number {
+    const row = this.db.prepare("SELECT MAX(ts) AS ts FROM mm_fills").get() as { ts: number | null };
+    return Number(row.ts ?? 0);
   }
 
   readEvents(limit = 100): Array<MarketMakeNormalizedEventInput & { seq: number }> {
