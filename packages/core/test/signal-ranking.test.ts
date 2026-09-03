@@ -73,8 +73,10 @@ describe("signal ranking by edge", () => {
     const config = FlipFlatConfigSchema.parse({});
     expect(config.allocationMode).toBe("portfolio-kelly");
     expect(config.kellyFraction).toBe(0.25);
-    expect(config.marketCapPct).toBe(5);
-    expect(config.eventCapPct).toBe(7.5);
+    expect(config.marketCapPct).toBe(2.5);
+    expect(config.eventCapPct).toBe(5);
+    expect(config.nearResolutionDays).toBe(3);
+    expect(config.nearResolutionSizeCutPct).toBe(25);
     expect(config.topN).toBeNull();
     expect(config.maxEntrySpreadPp).toBe(30);
     expect(config.tickIntervalMin).toBe(1);

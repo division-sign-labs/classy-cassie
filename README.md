@@ -175,8 +175,9 @@ depth. Set an explicit position cap with `--top N`; restore the default with
 `--top unlimited`.
 
 Prediction markets use portfolio-relative sizing by default. Each signal gets a
-quarter-Kelly target based on current portfolio equity, capped at 5% of equity in one
-market and 7.5% across one parent event. A repeat signal on the same side may top the
+quarter-Kelly target based on current portfolio equity, capped at 2.5% of equity in one
+market and 5% across one parent event. An entry into a market that resolves within three
+days is sized 25% smaller. A repeat signal on the same side may top the
 position up only by the remaining target and cap headroom. Deposits therefore affect the
 next sizing decision automatically; there is no fixed daily allowance in this mode. An
 existing position above a target or cap is grandfathered: it cannot be topped up, but the
@@ -194,7 +195,8 @@ an exit; executable depth and slippage still bound it.
 
 ```sh
 cassie strategy <botId> --allocation-mode portfolio-kelly \
-  --kelly-fraction 0.25 --market-cap-pct 5 --event-cap-pct 7.5
+  --kelly-fraction 0.25 --market-cap-pct 2.5 --event-cap-pct 5
+cassie strategy <botId> --near-resolution-days 3 --near-resolution-size-cut-pct 25
 ```
 
 The legacy fixed-budget allocator remains available. Supplying either legacy budget flag

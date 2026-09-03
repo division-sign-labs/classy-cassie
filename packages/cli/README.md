@@ -257,10 +257,13 @@ saying which limit stopped them.
 The strategy has no position-count cap by default. `cassie strategy <bot>` shows the
 allocation and accepts either `--top N` or `--top unlimited`. On prediction markets the
 default allocator recalculates a quarter-Kelly target from current portfolio equity, then
-caps exposure at 5% per market and 7.5% per parent event. Same-side repeat signals may top
-up toward that target. Positions already above a target or cap are not topped up and are
-not automatically trimmed. New entries and top-ups also require $2,500 of held-outcome
-bid depth within 2¢ by default; `--min-exit-depth-2c-usd 0` disables that entry-only gate.
+caps exposure at 2.5% per market and 5% per parent event. A market that resolves within
+three days gets a target 25% smaller; tune that with `--near-resolution-days` and
+`--near-resolution-size-cut-pct`, or `--near-resolution-days off` to disable it. Same-side
+repeat signals may top up toward that target. Positions already above a target or cap are
+not topped up and are not automatically trimmed. New entries and top-ups also require
+$2,500 of held-outcome bid depth within 2¢ by default; `--min-exit-depth-2c-usd 0`
+disables that entry-only gate.
 
 Early convergence takes profit only when no more than 2pp of edge remains and the
 executable held-side bid is at least 2% above cost. Otherwise the default maximum hold is
@@ -274,8 +277,9 @@ available, and either `--daily-budget` or `--position-budget-pct` selects `daily
 An explicitly conflicting `--allocation-mode` is rejected.
 
 ```sh
-cassie strategy <bot> --kelly-fraction 0.25 --market-cap-pct 5 --event-cap-pct 7.5 \
+cassie strategy <bot> --kelly-fraction 0.25 --market-cap-pct 2.5 --event-cap-pct 5 \
   --min-exit-depth-2c-usd 2500
+cassie strategy <bot> --near-resolution-days 3 --near-resolution-size-cut-pct 25
 cassie strategy <bot> --daily-budget 100 --position-budget-pct 25
 ```
 

@@ -12,11 +12,13 @@ This edge is the gap between the Q forecast and the market reference price, not 
 bid/ask spread.
 
 The default prediction-market allocator targets quarter Kelly using current portfolio
-equity, subject to a 5% cap per market and a 7.5% cap across markets in the same parent
-event. Same-side repeat signals can top up only the gap between existing exposure and the
-new target. Added capital changes future targets automatically. If an existing position is
-already above its target or cap, the allocator blocks further additions but does not
-auto-trim it.
+equity, subject to a 2.5% cap per market and a 5% cap across markets in the same parent
+event. A market that resolves within three days of the entry gets a target 25% smaller
+(`nearResolutionDays`, `nearResolutionSizeCutPct`); the same cut applies to a legacy
+daily-budget entry. Same-side repeat signals can top up only the gap between existing
+exposure and the new target, so a reduced position is not topped back up to full size.
+Added capital changes future targets automatically. If an existing position is already
+above its target or cap, the allocator blocks further additions but does not auto-trim it.
 
 Before a portfolio-mode entry or top-up, the strategy requires at least $2,500 of
 held-outcome bid notional within 2¢ of the best bid. This is an entry-only ability-to-exit
@@ -60,23 +62,10 @@ Exits are evaluated in this order and exactly one reason is emitted:
    back above 50% resets it.
 5. `positive_convergence` — remaining edge at or below 3pp, executable return at or above
    4% of actual entry cost, and held-side Q down no more than 1pp from entry. The profit
-   requirement lives only here; it never vetoes the other branches. Skipped entirely for a
-   market that resolves inside the hold window — see below.
+   requirement lives only here; it never vetoes the other branches. It applies the same
+   way whatever the market's resolution date.
 6. `time_stop` — position age at or above `maxHoldDays` (7) measured from the actual entry
    fill, regardless of P&L.
-
-### Markets that resolve inside the hold window
-
-A market whose resolution lands at or before `maxHoldDays` from the entry fill is held to
-resolution: `positive_convergence` is switched off for that position, so a converged price
-is not sold back at a partial gain when the full payout arrives before the deadline would.
-Branches 1–4 stay armed, and `time_stop` remains the outer bound for a resolution that
-slips past its published date.
-
-The resolution date comes from the Quotient feed (`market.end_date` on a signal, `end_date`
-on a forecast lookup) and is remembered per position, so a later forecast that omits it
-cannot re-arm the take-profit. A market with no known resolution date, or one resolving
-beyond the window, keeps the ordinary rules.
 
 Executable P&L walks the held-side bids for the full position and deducts `exitFeeBps`.
 Each trigger logs entry Q, current Q, midpoint, executable bid, remaining edge, Q retreat,
@@ -116,8 +105,9 @@ Tune it through the CLI rather than in code:
 
 ```sh
 cassie strategy <botId> --allocation-mode portfolio-kelly \
-  --kelly-fraction 0.25 --market-cap-pct 5 --event-cap-pct 7.5 \
+  --kelly-fraction 0.25 --market-cap-pct 2.5 --event-cap-pct 5 \
   --min-exit-depth-2c-usd 2500
+cassie strategy <botId> --near-resolution-days 3 --near-resolution-size-cut-pct 25
 cassie strategy <botId> --daily-budget 100 --position-budget-pct 25
 cassie strategy <botId> --max-entry-edge unlimited
 cassie strategy <botId> --scenario-exit on

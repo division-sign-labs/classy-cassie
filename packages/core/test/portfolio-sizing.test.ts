@@ -1,6 +1,7 @@
 // packages/core/test/portfolio-sizing.test.ts
 // Portfolio-relative sizing for the base signals strategy: quarter-Kelly
-// targets, market/event concentration caps, and repeat-signal top-ups.
+// targets, market/event concentration caps, repeat-signal top-ups, and the
+// size haircut for markets that resolve soon.
 
 import { describe, expect, it } from "vitest";
 import {
@@ -13,10 +14,12 @@ import {
 } from "@quotient-forecasting/cassie-core";
 import {
   FlipFlatStrategy,
+  nearResolutionSizeFactor,
   portfolioKellyTargetUsd,
 } from "../../../strategies/flip-flat/dist/index.js";
 
 const NOW = Date.parse("2026-08-31T12:00:00Z");
+const DAY_MS = 86_400_000;
 
 function memory(): StrategyMemory {
   const values = new Map<string, unknown>();
@@ -28,7 +31,7 @@ function memory(): StrategyMemory {
   };
 }
 
-function signal(marketRef: string, spreadPp = 20): Signal {
+function signal(marketRef: string, spreadPp = 20, over: Partial<Signal> = {}): Signal {
   return {
     id: `sig-${marketRef}`,
     ts: new Date(NOW).toISOString(),
@@ -39,6 +42,7 @@ function signal(marketRef: string, spreadPp = 20): Signal {
     refPrice: 0.5,
     spreadPp,
     ttlSec: 86_400,
+    ...over,
   };
 }
 
@@ -222,6 +226,57 @@ describe("flip-flat portfolio allocation", () => {
         }),
       ),
     ).toHaveLength(0);
+  });
+
+  describe("near-resolution size haircut", () => {
+    const cfg = { nearResolutionDays: 3, nearResolutionSizeCutPct: 25 };
+
+    it("cuts size inside the window, measured from now, inclusive of the boundary", () => {
+      expect(nearResolutionSizeFactor(NOW + 2 * DAY_MS, NOW, cfg)).toBeCloseTo(0.75, 8);
+      expect(nearResolutionSizeFactor(NOW + 3 * DAY_MS, NOW, cfg)).toBeCloseTo(0.75, 8);
+      expect(nearResolutionSizeFactor(NOW + 3 * DAY_MS + 1, NOW, cfg)).toBe(1);
+      expect(nearResolutionSizeFactor(NOW - DAY_MS, NOW, cfg)).toBeCloseTo(0.75, 8);
+    });
+
+    it("keeps full size without a resolution date or with the window off", () => {
+      expect(nearResolutionSizeFactor(undefined, NOW, cfg)).toBe(1);
+      expect(nearResolutionSizeFactor(NOW + DAY_MS, NOW, { ...cfg, nearResolutionDays: null })).toBe(1);
+      expect(nearResolutionSizeFactor(NOW + DAY_MS, NOW, { ...cfg, nearResolutionSizeCutPct: 0 })).toBe(1);
+    });
+
+    it("sizes a portfolio entry at 75% of its target when the market resolves in two days", async () => {
+      const got = await entries(context({ signals: [signal("m-soon", 20, { endsAt: NOW + 2 * DAY_MS })] }));
+      expect(got).toHaveLength(1);
+      expect(got[0]).toMatchObject({ marketRef: "m-soon", notional: 37.5 });
+      expect(got[0]!.provenance).toMatchObject({ targetUsd: 37.5, nearResolutionSizeFactor: 0.75, resolvesAt: NOW + 2 * DAY_MS });
+    });
+
+    it("leaves an entry alone when the market resolves later than the window", async () => {
+      const got = await entries(context({ signals: [signal("m-later", 20, { endsAt: NOW + 10 * DAY_MS })] }));
+      expect(got[0]).toMatchObject({ notional: 50 });
+      expect(got[0]!.provenance).not.toHaveProperty("nearResolutionSizeFactor");
+    });
+
+    it("does not top a reduced position back up to the full target", async () => {
+      const got = await entries(
+        context({
+          signals: [signal("m-soon", 20, { endsAt: NOW + 2 * DAY_MS })],
+          positions: [{ marketRef: "m-soon", side: "YES", size: 75, avgPrice: 0.5 }],
+        }),
+      );
+      expect(got).toHaveLength(0);
+    });
+
+    it("cuts a daily-budget entry by the same fraction", async () => {
+      const got = await entries(
+        context({
+          signals: [signal("m-soon", 20, { endsAt: NOW + DAY_MS })],
+          config: { allocationMode: "daily-budget", dailyBudgetUsd: 100, positionBudgetPct: 25 },
+        }),
+      );
+      expect(got).toHaveLength(1);
+      expect(got[0]).toMatchObject({ notional: 18.75 });
+    });
   });
 
   it("does not impose the former $100 daily entry throttle", async () => {

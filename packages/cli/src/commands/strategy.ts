@@ -11,9 +11,11 @@ export const RECOMMENDED_STRATEGY = {
   topN: null,
   allocationMode: "portfolio-kelly",
   kellyFraction: 0.25,
-  marketCapPct: 5,
-  eventCapPct: 7.5,
+  marketCapPct: 2.5,
+  eventCapPct: 5,
   minExitDepth2cUsd: 2_500,
+  nearResolutionDays: 3,
+  nearResolutionSizeCutPct: 25,
   entrySpreadPp: 10,
   maxEntrySpreadPp: 30,
   minEntryNotional: 1,
@@ -26,14 +28,16 @@ export const RECOMMENDED_STRATEGY = {
 
 export const RECOMMENDED_SUMMARY =
   "no position-count cap, widest eligible edges first, quarter-Kelly targets with same-side top-ups, " +
-  "capped at 5% per market and 7.5% per event, $2.5k exit depth within 2¢, 10–30pp entry edge, " +
-  "+2% positive convergence or 7-day max hold";
+  "capped at 2.5% per market and 5% per event, 25% smaller within 3 days of resolution, " +
+  "$2.5k exit depth within 2¢, 10–30pp entry edge, +2% positive convergence or 7-day max hold";
 
 const LEGACY_DAILY_BUDGET_STRATEGY = {
   topN: null,
   allocationMode: "daily-budget",
   dailyBudgetUsd: 100,
   positionBudgetPct: 25,
+  nearResolutionDays: 3,
+  nearResolutionSizeCutPct: 25,
   entrySpreadPp: 10,
   maxEntrySpreadPp: 30,
   minEntryNotional: 1,
@@ -175,6 +179,8 @@ export interface StrategyOptions {
   kellyFraction?: string;
   marketCapPct?: string;
   eventCapPct?: string;
+  nearResolutionDays?: string;
+  nearResolutionSizeCutPct?: string;
   minExitDepth2cUsd?: string;
   dailyBudget?: string;
   positionBudgetPct?: string;
@@ -267,6 +273,12 @@ export async function runStrategy(botId: string, opts: StrategyOptions = {}): Pr
     }
     if (opts.marketCapPct !== undefined) strategyConfig.marketCapPct = percentage("market cap", opts.marketCapPct);
     if (opts.eventCapPct !== undefined) strategyConfig.eventCapPct = percentage("event cap", opts.eventCapPct);
+    if (opts.nearResolutionDays !== undefined) {
+      strategyConfig.nearResolutionDays = optionalPositiveNumber("near-resolution window", opts.nearResolutionDays);
+    }
+    if (opts.nearResolutionSizeCutPct !== undefined) {
+      strategyConfig.nearResolutionSizeCutPct = cutPercentage("near-resolution size cut", opts.nearResolutionSizeCutPct);
+    }
     if (opts.minExitDepth2cUsd !== undefined) {
       strategyConfig.minExitDepth2cUsd = nonnegativeNumber(
         "minimum exit depth within 2 cents",
@@ -469,6 +481,12 @@ function percentage(label: string, raw: string): number {
   return value;
 }
 
+function cutPercentage(label: string, raw: string): number {
+  const value = nonnegativeNumber(label, raw);
+  if (value > 100) throw new Error(`${label} must be at most 100%`);
+  return value;
+}
+
 function normalizeStrategyConfig(config: Record<string, unknown>): Record<string, unknown> {
   const { sizing: _sizing, maxPositionNotional: _maxPositionNotional, maxOpenPositions: _maxOpenPositions, ...current } = config;
   return current;
@@ -501,6 +519,11 @@ function printStrategy(
     console.log(`  daily entry budget:   $${dailyBudgetUsd.toFixed(2)} (resets 00:00 UTC)`);
     console.log(`  budget per entry:     ${positionBudgetPct}% = $${perEntryUsd.toFixed(2)} before liquidity/risk caps`);
   }
+  const nearResolution =
+    current.nearResolutionDays === null
+      ? "off"
+      : `${current.nearResolutionSizeCutPct}% smaller when the market resolves within ${current.nearResolutionDays} days`;
+  console.log(`  near resolution:      ${nearResolution}`);
   console.log(`  minimum entry edge:   ${current.entrySpreadPp}pp`);
   console.log(
     `  maximum entry edge:   ${current.maxEntrySpreadPp === null ? "unlimited" : `${current.maxEntrySpreadPp}pp`}`,

@@ -26,9 +26,13 @@ const FlipFlatConfigObjectSchema = z.object({
   /** Fraction of full Kelly used for binary prediction-market targets. */
   kellyFraction: z.number().positive().max(1).default(0.25),
   /** Maximum capital-at-risk in one market as a percentage of current equity. */
-  marketCapPct: z.number().positive().max(100).default(5),
+  marketCapPct: z.number().positive().max(100).default(2.5),
   /** Maximum capital-at-risk across sibling markets in one event. */
-  eventCapPct: z.number().positive().max(100).default(7.5),
+  eventCapPct: z.number().positive().max(100).default(5),
+  /** Entries into a market resolving within this many days are sized down; null disables. */
+  nearResolutionDays: z.number().positive().nullable().default(3),
+  /** Percentage removed from an entry's size inside the near-resolution window. */
+  nearResolutionSizeCutPct: z.number().nonnegative().max(100).default(25),
   /** Held-outcome bid notional required within $0.02 of its best bid; 0 disables. */
   minExitDepth2cUsd: z.number().nonnegative().default(2_500),
   /** Enter when |prob − price| in percentage points is at least this. */
@@ -240,10 +244,6 @@ export interface ScenarioExitTelemetry {
   flipConfirmations: number;
   flipConfirmed: boolean;
   positionAgeDays: number;
-  /** Venue resolution/close time in epoch ms, when known. */
-  resolvesAt?: number;
-  /** Resolution lands inside the hold window, so the take-profit branch is off. */
-  holdsToResolution: boolean;
   exitReason?: ScenarioExitReason;
   /** Distinct committed forecast versions that provided the current confirmations. */
   confirmingForecastIds: string[];
@@ -257,11 +257,6 @@ export interface ScenarioPositionRecord {
   marketRef: string;
   side: "YES" | "NO";
   entry?: ScenarioEntrySnapshot;
-  /**
-   * Venue resolution/close time in epoch ms, sticky once learned. A feed that
-   * stops carrying it must not silently re-arm the take-profit branch.
-   */
-  resolvesAt?: number;
   entryOrderId?: string;
   entryPlacedAt?: number;
   /** Actual entry-fill timestamp when known; position age is measured from it. */
@@ -301,12 +296,6 @@ export interface ScenarioExitInput {
   ageMs: number;
   adverseCrossConfirmations: number;
   flipConfirmed: boolean;
-  /**
-   * The market resolves inside the maximum holding period measured from entry,
-   * so there is no time pressure to realize early. Suppresses the positive
-   * take-profit branch alone.
-   */
-  holdsToResolution?: boolean;
 }
 
 export interface ScenarioExitDecision {
@@ -331,28 +320,11 @@ type ScenarioExitConfig = Pick<
 >;
 
 /**
- * Whether the market resolves before the maximum holding period runs out,
- * measured from entry. Both the resolution time and the deadline must be
- * known; an unknown resolution date leaves the ordinary rules in force.
- */
-export function resolvesWithinHoldWindow(
-  resolvesAt: number | undefined,
-  entryFilledAt: number | undefined,
-  maxHoldDays: number | null,
-): boolean {
-  if (resolvesAt === undefined || entryFilledAt === undefined || maxHoldDays === null) return false;
-  return resolvesAt - entryFilledAt <= maxHoldDays * DAY_MS + EPSILON;
-}
-
-/**
  * Exit precedence, evaluated top to bottom; exactly one reason is returned.
  * The profit requirement belongs to the positive take-profit branch alone and
  * never vetoes collapse, adverse-cross, flip, resolution, or the time stop.
- *
- * A position whose market resolves inside the hold window skips the positive
- * take-profit entirely: the deadline that made early convergence worth taking
- * falls after resolution, so the full payout is the better exit. Every adverse
- * branch stays armed.
+ * The positive take-profit applies to every position the same way, whatever
+ * the market's resolution date.
  */
 export function evaluateScenarioExit(input: ScenarioExitInput, cfg: ScenarioExitConfig): ScenarioExitDecision {
   const remainingEdgePp =
@@ -392,7 +364,6 @@ export function evaluateScenarioExit(input: ScenarioExitInput, cfg: ScenarioExit
     return { reason: "q_flip", ...metrics };
   }
   if (
-    !input.holdsToResolution &&
     remainingEdgePp !== undefined &&
     pnl !== undefined &&
     qRetreatPp !== undefined &&
@@ -524,10 +495,6 @@ function fmtPx(value: number | undefined): string {
   return value === undefined ? "n/a" : value.toFixed(3);
 }
 
-function fmtDate(value: number | undefined): string {
-  return value === undefined ? "n/a" : new Date(value).toISOString();
-}
-
 export function formatScenarioExitReason(t: ScenarioExitTelemetry, cfg: Pick<FlipFlatConfig, "adverseCrossConfirmations" | "flipConfirmations">): string {
   const pnl = t.executablePnlPct === undefined ? "n/a" : `${t.executablePnlPct >= 0 ? "+" : ""}${t.executablePnlPct.toFixed(1)}%`;
   return (
@@ -535,7 +502,6 @@ export function formatScenarioExitReason(t: ScenarioExitTelemetry, cfg: Pick<Fli
     `mid ${fmtPx(t.midHeld)}, bid ${fmtPx(t.executableBid)}, edge ${fmtPp(t.remainingEdgePp)}, ` +
     `retreat ${fmtPp(t.qRetreatPp)}, pnl ${pnl}, adverse ${t.adverseCrossConfirmations}/${cfg.adverseCrossConfirmations}, ` +
     `flip ${t.flipConfirmations}/${cfg.flipConfirmations}, age ${t.positionAgeDays.toFixed(2)}d, ` +
-    (t.holdsToResolution ? `holding to resolution ${fmtDate(t.resolvesAt)}, ` : "") +
     `forecasts [${t.confirmingForecastIds.join(", ")}]`
   );
 }
@@ -543,6 +509,21 @@ export function formatScenarioExitReason(t: ScenarioExitTelemetry, cfg: Pick<Fli
 // ---------------------------------------------------------------------------
 // Sizing helpers
 // ---------------------------------------------------------------------------
+
+/**
+ * Multiplier applied to an entry's size when its market resolves within
+ * `nearResolutionDays` of now. A market with no known resolution date, or a
+ * disabled window, keeps full size.
+ */
+export function nearResolutionSizeFactor(
+  resolvesAt: number | undefined,
+  now: number,
+  cfg: Pick<FlipFlatConfig, "nearResolutionDays" | "nearResolutionSizeCutPct">,
+): number {
+  if (resolvesAt === undefined || cfg.nearResolutionDays === null) return 1;
+  if (resolvesAt - now > cfg.nearResolutionDays * DAY_MS + EPSILON) return 1;
+  return Math.max(0, 1 - cfg.nearResolutionSizeCutPct / 100);
+}
 
 export function portfolioKellyTargetUsd(input: {
   prob: number;
@@ -989,7 +970,6 @@ export class FlipFlatStrategy implements Strategy {
       byMarket[marketRef] = {
         ...record,
         marketRef,
-        resolvesAt: Number.isFinite(record.resolvesAt) ? record.resolvesAt : undefined,
         fillLookupAttempts: Number.isFinite(record.fillLookupAttempts) ? record.fillLookupAttempts : 0,
         adverseCross: {
           count: Number.isFinite(record.adverseCross?.count) ? record.adverseCross.count : 0,
@@ -1034,7 +1014,6 @@ export class FlipFlatStrategy implements Strategy {
       record = {
         marketRef: held.marketRef,
         side,
-        ...(seed?.endsAt !== undefined ? { resolvesAt: seed.endsAt } : {}),
         ...(seed && seed.prob !== undefined
           ? {
               entry: {
@@ -1201,10 +1180,6 @@ export class FlipFlatStrategy implements Strategy {
     }
     const entryFilledAt = record.entryFilledAt ?? holdStarts.byMarket[held.marketRef] ?? record.entryPlacedAt ?? now;
     const ageMs = Math.max(0, now - entryFilledAt);
-    if (forecast?.endsAt !== undefined && forecast.endsAt !== record.resolvesAt) {
-      record.resolvesAt = forecast.endsAt;
-    }
-    const holdsToResolution = resolvesWithinHoldWindow(record.resolvesAt, entryFilledAt, cfg.maxHoldDays);
     const decision = evaluateScenarioExit(
       {
         resolved: false,
@@ -1215,7 +1190,6 @@ export class FlipFlatStrategy implements Strategy {
         ageMs,
         adverseCrossConfirmations: record.adverseCross.count,
         flipConfirmed: record.flip.confirmed,
-        holdsToResolution,
       },
       cfg,
     );
@@ -1246,8 +1220,6 @@ export class FlipFlatStrategy implements Strategy {
       flipConfirmations: record.flip.count,
       flipConfirmed: record.flip.confirmed,
       positionAgeDays: ageMs / DAY_MS,
-      ...(record.resolvesAt !== undefined ? { resolvesAt: record.resolvesAt } : {}),
-      holdsToResolution,
       ...(decision.reason ? { exitReason: decision.reason } : {}),
       confirmingForecastIds: confirming,
       ...(forecastVersion ? { forecastVersion } : {}),
@@ -1282,7 +1254,6 @@ export class FlipFlatStrategy implements Strategy {
       return;
     }
     const provenance = action.provenance ?? {};
-    const resolvesAt = typeof provenance.resolvesAt === "number" ? provenance.resolvesAt : undefined;
     const qHeld = typeof provenance.qHeld === "number" ? provenance.qHeld : undefined;
     const signalId = typeof provenance.signalId === "string" ? provenance.signalId : undefined;
     const signalTs = typeof provenance.signalTs === "string" ? provenance.signalTs : undefined;
@@ -1291,7 +1262,6 @@ export class FlipFlatStrategy implements Strategy {
     state.byMarket[action.marketRef] = {
       marketRef: action.marketRef,
       side,
-      ...(resolvesAt !== undefined ? { resolvesAt } : {}),
       ...(qHeld !== undefined && signalId !== undefined && signalTs !== undefined
         ? {
             entry: {
@@ -1700,13 +1670,22 @@ export class FlipFlatStrategy implements Strategy {
       return undefined;
     }
 
-    const targetUsd = portfolioKellyTargetUsd({
-      prob: sig.prob,
-      price,
-      equity: ctx.equity,
-      kellyFraction: cfg.kellyFraction,
-      marketCapPct: cfg.marketCapPct,
-    });
+    // The haircut scales the target rather than this tick's order, so a
+    // same-side top-up converges to the reduced size instead of restoring it.
+    const sizeFactor = nearResolutionSizeFactor(sig.endsAt, ctx.now(), cfg);
+    const targetUsd =
+      portfolioKellyTargetUsd({
+        prob: sig.prob,
+        price,
+        equity: ctx.equity,
+        kellyFraction: cfg.kellyFraction,
+        marketCapPct: cfg.marketCapPct,
+      }) * sizeFactor;
+    if (sizeFactor < 1) {
+      ctx.log.info(
+        `${sig.marketRef} resolves within ${cfg.nearResolutionDays}d; target sized down ${cfg.nearResolutionSizeCutPct}% to $${targetUsd.toFixed(2)}`,
+      );
+    }
     const currentMarketUsd = state.marketExposureUsd.get(sig.marketRef) ?? 0;
     const currentEventUsd = state.eventExposureUsd.get(eventRef) ?? 0;
     const marketCapUsd = (cfg.marketCapPct / 100) * ctx.equity;
@@ -1728,7 +1707,6 @@ export class FlipFlatStrategy implements Strategy {
       qHeld: sig.prob,
       signalRefPrice: sig.refPrice,
       ...(signalEdgePp(sig) !== undefined ? { signalEdgePp: signalEdgePp(sig) } : {}),
-      ...(sig.endsAt !== undefined ? { resolvesAt: sig.endsAt } : {}),
       liveEdgePp,
       yesMid,
       heldPrice: price,
@@ -1736,6 +1714,8 @@ export class FlipFlatStrategy implements Strategy {
       isTopUp: currentMarketUsd > 0,
       equityUsd: ctx.equity,
       targetUsd,
+      ...(sig.endsAt !== undefined ? { resolvesAt: sig.endsAt } : {}),
+      ...(sizeFactor < 1 ? { nearResolutionSizeFactor: sizeFactor } : {}),
       marketCapUsd,
       eventCapUsd,
       currentMarketUsd,
@@ -1777,7 +1757,13 @@ export class FlipFlatStrategy implements Strategy {
       /* fall back to equity */
     }
     const perPositionUsd = (cfg.dailyBudgetUsd * cfg.positionBudgetPct) / 100;
-    const notional = Math.min(perPositionUsd, remainingBudgetUsd, available * 0.95);
+    const sizeFactor = nearResolutionSizeFactor(sig.endsAt, ctx.now(), cfg);
+    const notional = Math.min(perPositionUsd, remainingBudgetUsd, available * 0.95) * sizeFactor;
+    if (sizeFactor < 1) {
+      ctx.log.info(
+        `${sig.marketRef} resolves within ${cfg.nearResolutionDays}d; entry sized down ${cfg.nearResolutionSizeCutPct}% to $${notional.toFixed(2)}`,
+      );
+    }
     if (notional < cfg.minEntryNotional) {
       ctx.log.info(
         `entry notional $${notional.toFixed(2)} < minEntryNotional $${cfg.minEntryNotional.toFixed(2)}; skipping ${sig.marketRef}`,

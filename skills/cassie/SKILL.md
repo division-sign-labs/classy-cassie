@@ -135,9 +135,10 @@ Every step happens in the terminal; you only leave it to copy-paste dashboard va
    cap, prioritizes the widest eligible edges for new entries, and accepts forecast entry
    edges from 10pp through 30pp, inclusive. The 30pp maximum is configurable or removable;
    it is the forecast-to-market edge, not quoted bid/ask spread. On prediction venues, the recommended allocator targets
-   quarter Kelly from current portfolio equity, capped at 5% per market and 7.5% across one
-   parent event. Same-side repeat signals may top up only the remaining target and cap
-   headroom. New deposits automatically affect subsequent targets. A holding already above
+   quarter Kelly from current portfolio equity, capped at 2.5% per market and 5% across one
+   parent event. A market that resolves within three days gets a target 25% smaller
+   (`--near-resolution-days`, `--near-resolution-size-cut-pct`). Same-side repeat signals
+   may top up only the remaining target and cap headroom. New deposits automatically affect subsequent targets. A holding already above
    its target or cap is not topped up and is not automatically trimmed. There is no daily
    throttle in this mode. Entry and top-up eligibility also requires $2,500 of held-outcome
    bid depth within 2¢ by default, an entry-only check that can be disabled with
@@ -147,11 +148,8 @@ Every step happens in the terminal; you only leave it to copy-paste dashboard va
    overlay with the confirmed seven-day signal-exit state machine (Q collapse, confirmed
    adverse cross, confirmed Q flip, positive price-led convergence, time stop from the
    entry fill), evaluated in that precedence with one canonical reason per exit; it is off
-   unless an operator turns it on. In that state machine a market that resolves at or
-   before `maxHoldDays` from the entry fill is held to resolution: the positive
-   take-profit is switched off for that position while Q collapse, adverse cross, Q flip,
-   and the time stop stay armed. The resolution date comes from the Quotient feed and is
-   remembered per position. The 24h-volume floor and the minimum-notional floor
+   unless an operator turns it on. The positive take-profit applies to every position the
+   same way whatever the market's resolution date. The 24h-volume floor and the minimum-notional floor
    apply to entries, never exits; exit slippage and executable depth still apply. An
    accepted entry stays reserved against market and event caps until the venue position or
    a resting order shows it, so a fill lag cannot admit a duplicate entry. The legacy
@@ -247,7 +245,8 @@ cassie fund <botId> [--from splits]          # run/re-run the venue funding flow
 cassie withdraw <botId> <amount|all> --to <address>   # send collateral out (signs locally)
 cassie run <botId> [--debug]
 cassie strategy <botId>                      # view/tune position cap, allocation, guardrails
-cassie strategy <botId> --kelly-fraction .25 --market-cap-pct 5 --event-cap-pct 7.5
+cassie strategy <botId> --kelly-fraction .25 --market-cap-pct 2.5 --event-cap-pct 5
+cassie strategy <botId> --near-resolution-days 3 --near-resolution-size-cut-pct 25
 cassie strategy <botId> --min-exit-depth-2c-usd 2500 --max-hold-days 7
 cassie strategy <botId> --daily-budget 100 --position-budget-pct 25   # legacy allocator
 cassie strategy <botId> --max-entry-edge unlimited   # remove the forecast-edge ceiling
@@ -309,7 +308,8 @@ Notes:
   This guardrail compares the Q forecast with the market reference price; it does not cap
   the quoted bid/ask spread.
 - Prediction-market signals default to `portfolio-kelly`: 0.25 of full Kelly, capped at
-  5% of current portfolio equity per market and 7.5% per parent event. Repeat signals can
+  2.5% of current portfolio equity per market and 5% per parent event, with the target
+  25% smaller for a market that resolves within three days. Repeat signals can
   add only enough to reach the current target. The allocator never auto-trims an existing
   over-cap holding. An entry/top-up additionally needs $2,500 of held-side bid depth within
   2¢ by default. Any of `--kelly-fraction`, `--market-cap-pct`, `--event-cap-pct`, or

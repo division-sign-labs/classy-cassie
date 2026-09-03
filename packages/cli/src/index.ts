@@ -175,6 +175,8 @@ program
   .option("--kelly-fraction <fraction>", "fraction of full Kelly, from 0 to 1 (0.25 = quarter Kelly)")
   .option("--market-cap-pct <pct>", "maximum portfolio equity allocated to one prediction market")
   .option("--event-cap-pct <pct>", "maximum portfolio equity allocated across one parent event")
+  .option("--near-resolution-days <days|off>", "size entries down when the market resolves within this many days; off disables")
+  .option("--near-resolution-size-cut-pct <pct>", "percentage removed from an entry's size inside the near-resolution window")
   .option("--min-exit-depth-2c-usd <usd>", "minimum held-side bid depth within 2¢ for an entry; 0 disables")
   .option("--daily-budget <usd>", "legacy mode: maximum entry notional placed per UTC day")
   .option("--position-budget-pct <pct>", "legacy mode: percentage of the daily budget requested per entry")
