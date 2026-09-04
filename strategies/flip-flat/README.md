@@ -2,8 +2,8 @@
 
 The `signals` strategy for [cassie](https://www.npmjs.com/package/@quotient-forecasting/cassie).
 It follows published [Quotient](https://dev.quotient.social) forecasts. On prediction
-markets, it enters where a forecast diverges from the market price, then exits on positive
-convergence or the default seven-day maximum hold.
+markets, it enters where a forecast diverges from the market price, then exits once the
+held-side bid reaches 90¢ or at the default seven-day maximum hold.
 
 The strategy has no position-count cap by default and ranks competing signals widest edge
 first. An optional numeric cap remains available. The default eligible forecast entry edge
@@ -30,18 +30,18 @@ The legacy `daily-budget` mode remains available. It caps cumulative entry notio
 or risk consumes only what it actually placed. The UTC reset replenishes entry capacity
 without closing anything.
 
-Exits are position-driven, not signal-driven. Every held prediction market gets its latest
-Q forecast on the five-minute forecast cadence; the venue price is checked every minute.
-By default, early convergence requires at most 2pp of edge remaining and at least a +2%
-gain at the executable held-outcome bid. Otherwise the default maximum hold is seven days.
-A stale or unpublished entry signal cannot suppress either exit. Neither the entry volume
-floor nor the minimum-notional floor ever blocks a sell; executable slippage and depth
-still apply.
+Exits are position-driven, not signal-driven, and the venue book is checked every minute.
+By default a position is sold once the executable held-outcome bid reaches 90¢
+(`takeProfitPrice`; `null` disables it). The forecast plays no part in that exit.
+Otherwise the default maximum hold is seven days. A stale or unpublished entry signal
+cannot suppress either exit. Neither the entry volume floor nor the minimum-notional floor
+ever blocks a sell; executable slippage and depth still apply.
 
 ## Seven-day signal-exit state machine (opt-in)
 
-`scenarioExitEnabled: true` replaces the convergence overlay above with a confirmed exit
-state machine. Everything is measured on the contract actually held: for a NO position,
+`scenarioExitEnabled: true` wraps the take-profit above in a confirmed exit state machine
+that also reads the latest Q forecast for every held market on the five-minute forecast
+cadence. Everything is measured on the contract actually held: for a NO position,
 Q, the midpoint, and the executable bid are all mirrored. The immutable entry Q is the
 published signal's held-side probability captured when the entry is accepted; it never
 changes, however the linked forecast later moves. The current Q is the newest distinct
@@ -60,10 +60,8 @@ Exits are evaluated in this order and exactly one reason is emitted:
    confirm the flip; exit once remaining edge is at or below 5pp. The confirmation is
    retained while Q stays flipped, so a later market move can still trigger it. A forecast
    back above 50% resets it.
-5. `positive_convergence` — remaining edge at or below 3pp, executable return at or above
-   4% of actual entry cost, and held-side Q down no more than 1pp from entry. The profit
-   requirement lives only here; it never vetoes the other branches. It applies the same
-   way whatever the market's resolution date.
+5. `take_profit` — the held-side executable bid is at or above `takeProfitPrice` (90¢).
+   It needs no forecast and applies the same way whatever the market's resolution date.
 6. `time_stop` — position age at or above `maxHoldDays` (7) measured from the actual entry
    fill, regardless of P&L.
 
@@ -76,13 +74,12 @@ cannot create duplicate sells; a still-held position resubmits only after `exitR
 with no visible order.
 
 Positions that predate the record are seeded from the active same-side signal when one
-exists; without an entry Q, the collapse and take-profit branches stay off for that
-position while the adverse-cross, flip, and time stop still apply.
+exists; without an entry Q, the collapse branch stays off for that position while the
+adverse-cross, flip, take-profit, and time stop still apply.
 
 ```sh
 cassie strategy <botId> --scenario-exit on
-cassie strategy <botId> --positive-convergence-edge-pp 3 --positive-convergence-min-profit-pct 4 \
-  --positive-convergence-max-q-retreat-pp 1 --adverse-cross-confirmations 2 \
+cassie strategy <botId> --take-profit-price 0.9 --adverse-cross-confirmations 2 \
   --q-collapse-pp 30 --flip-confirmations 2 --flip-exit-max-remaining-edge-pp 5 --max-hold-days 7
 ```
 

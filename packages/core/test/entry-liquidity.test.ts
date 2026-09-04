@@ -74,7 +74,7 @@ function context(input: {
       kellyFraction: 0.25,
       marketCapPct: 2.5,
       eventCapPct: 5,
-      convergenceExit: false,
+      takeProfitPrice: null,
       ...input.config,
     },
     signals: { latest: async () => [input.signal ?? signal()] },
@@ -212,16 +212,16 @@ describe("flip-flat entry-side unwind liquidity", () => {
     expect(got).toHaveLength(0);
   });
 
-  it("never applies the entry-depth floor to a convergence exit", async () => {
+  it("never applies the entry-depth floor to a take-profit exit", async () => {
     const actions = await new FlipFlatStrategy().tick(
       context({
         signal: signal("YES", 0.54),
-        mid: 0.53,
+        mid: 0.91,
         positions: [{ marketRef: MARKET, side: "YES", size: 10, avgPrice: 0.5 }],
-        config: { convergenceExit: true, minExitDepth2cUsd: 2_500 },
+        config: { takeProfitPrice: 0.9, minExitDepth2cUsd: 2_500 },
         book: book({
-          bids: [{ price: 0.52, size: 1 }],
-          asks: [{ price: 0.54, size: 1 }],
+          bids: [{ price: 0.9, size: 1 }],
+          asks: [{ price: 0.92, size: 1 }],
         }),
       }),
     );

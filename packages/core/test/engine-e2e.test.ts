@@ -1,13 +1,13 @@
 // packages/core/test/engine-e2e.test.ts
 // Offline strategy e2e: entry with visible capacity cap, fill reconciliation,
-// then a signal-side flip whose convergence would realize a loss and is held.
+// then a signal-side flip that is held: exits are the price floor or the deadline.
 
 import { describe, expect, it } from "vitest";
 import { StateKeys } from "@quotient-forecasting/cassie-core";
 import { buildFixtureEngine } from "./helpers.js";
 
 describe("flip-flat against fixtures (offline e2e)", () => {
-  it("enters capped and does not realize a losing convergence", async () => {
+  it("enters capped and holds through a signal-side flip", async () => {
     const { engine, venue, alerter, state } = buildFixtureEngine();
 
     // Tick 1: flat + YES signal (spread 15pp ≥ 10) → entry, size capped by depth.
@@ -39,8 +39,8 @@ describe("flip-flat against fixtures (offline e2e)", () => {
     expect(positions[0]!.size).toBe(8);
 
     // Tick 3: the signal moves to NO at 0.70, valuing the held YES at 0.30.
-    // The forecast has crossed the market, but the executable YES bid is below
-    // the 0.56 cost basis. Positive convergence therefore does not sell it.
+    // The executable YES bid is nowhere near the 90¢ take-profit and the hold
+    // deadline is days away, so nothing sells.
     const t3 = await engine.tick();
     expect(t3.ordersPlaced).toBe(0);
     expect(alerter.ofKind("exit")).toHaveLength(0);

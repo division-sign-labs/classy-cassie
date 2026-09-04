@@ -98,7 +98,7 @@ function build(input: { lagTicks: number; signals: Signal[]; config?: Record<str
         marketCapPct: 5,
         eventCapPct: 7.5,
         minExitDepth2cUsd: 0,
-        convergenceExit: false,
+        takeProfitPrice: null,
         // The fixture fills at the touch, below the crossing limit the entry
         // was sized against, so the visible cost basis lands a few dollars
         // under target. Keep that routine top-up out of these assertions.
@@ -238,7 +238,7 @@ describe("pending-entry reservation across a venue handoff lag", () => {
       venue: "polymarket",
       strategy: {
         id: "flip-flat",
-        config: { allocationMode: "portfolio-kelly", minExitDepth2cUsd: 0, convergenceExit: false, pendingEntryReservationSec: 600 },
+        config: { allocationMode: "portfolio-kelly", minExitDepth2cUsd: 0, takeProfitPrice: null, pendingEntryReservationSec: 600 },
       },
       risk: { slippagePct: 10, minDailyVolume: 1_000 },
     });

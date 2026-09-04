@@ -65,7 +65,7 @@ function context(input: {
       kellyFraction: 0.25,
       marketCapPct: 5,
       eventCapPct: 7.5,
-      convergenceExit: false,
+      takeProfitPrice: null,
       ...input.config,
     },
     signals: { latest: async () => input.signals },

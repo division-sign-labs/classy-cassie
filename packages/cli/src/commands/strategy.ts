@@ -19,7 +19,7 @@ export const RECOMMENDED_STRATEGY = {
   entrySpreadPp: 10,
   maxEntrySpreadPp: 30,
   minEntryNotional: 1,
-  minConvergenceProfitPct: 2,
+  takeProfitPrice: 0.9,
   maxHoldDays: 7,
   universe: "from-signals",
   tickIntervalMin: 1,
@@ -29,7 +29,7 @@ export const RECOMMENDED_STRATEGY = {
 export const RECOMMENDED_SUMMARY =
   "no position-count cap, widest eligible edges first, quarter-Kelly targets with same-side top-ups, " +
   "capped at 2.5% per market and 5% per event, 25% smaller within 3 days of resolution, " +
-  "$2.5k exit depth within 2¢, 10–30pp entry edge, +2% positive convergence or 7-day max hold";
+  "$2.5k exit depth within 2¢, 10–30pp entry edge, sell at a 90¢ bid or 7-day max hold";
 
 const LEGACY_DAILY_BUDGET_STRATEGY = {
   topN: null,
@@ -41,7 +41,7 @@ const LEGACY_DAILY_BUDGET_STRATEGY = {
   entrySpreadPp: 10,
   maxEntrySpreadPp: 30,
   minEntryNotional: 1,
-  minConvergenceProfitPct: 2,
+  takeProfitPrice: 0.9,
   maxHoldDays: 7,
   universe: "from-signals",
   tickIntervalMin: 1,
@@ -135,10 +135,10 @@ export async function elicitStrategyConfig(
     "minimum entry",
     await ask("Minimum viable entry after risk caps ($)", { default: d("minEntryNotional", "1") }),
   );
-  const minConvergenceProfitPct = nonnegativeNumber(
-    "minimum convergence profit",
-    await ask("Minimum executable gain for early convergence (%)", {
-      default: d("minConvergenceProfitPct", "2"),
+  const takeProfitPrice = optionalPrice(
+    "take-profit price",
+    await ask("Take-profit held-side bid (0–1, or off)", {
+      default: current.takeProfitPrice === null ? "off" : d("takeProfitPrice", "0.9"),
     }),
   );
   const maxHoldDays = optionalPositiveNumber(
@@ -165,7 +165,7 @@ export async function elicitStrategyConfig(
     entrySpreadPp,
     maxEntrySpreadPp,
     minEntryNotional,
-    minConvergenceProfitPct,
+    takeProfitPrice,
     maxHoldDays,
     universe: universeRaw === "from-signals" ? "from-signals" : universeRaw.split(",").map((s) => s.trim()),
     tickIntervalMin: positionCheckSeconds / 60,
@@ -186,7 +186,7 @@ export interface StrategyOptions {
   positionBudgetPct?: string;
   maxEntryEdge?: string;
   minEntryNotional?: string;
-  minConvergenceProfitPct?: string;
+  takeProfitPrice?: string;
   maxHoldDays?: string;
   positionCheckSeconds?: string;
   signalCheckMinutes?: string;
@@ -194,9 +194,6 @@ export interface StrategyOptions {
   slippage?: string;
   maxOrderNotional?: string;
   scenarioExit?: string;
-  positiveConvergenceEdgePp?: string;
-  positiveConvergenceMinProfitPct?: string;
-  positiveConvergenceMaxQRetreatPp?: string;
   adverseCrossEdgePp?: string;
   adverseCrossMaxPnlPct?: string;
   adverseCrossConfirmations?: string;
@@ -212,9 +209,6 @@ export interface StrategyOptions {
 /** Defaults of the opt-in seven-day signal-exit state machine, mirrored from the strategy schema. */
 export const SCENARIO_EXIT_DEFAULTS = {
   scenarioExitEnabled: false,
-  positiveConvergenceEdgePp: 3,
-  positiveConvergenceMinProfitPct: 4,
-  positiveConvergenceMaxQRetreatPp: 1,
   adverseCrossEdgePp: 0,
   adverseCrossMaxPnlPct: 0,
   adverseCrossConfirmations: 2,
@@ -295,11 +289,8 @@ export async function runStrategy(botId: string, opts: StrategyOptions = {}): Pr
     if (opts.minEntryNotional !== undefined) {
       strategyConfig.minEntryNotional = nonnegativeNumber("minimum entry notional", opts.minEntryNotional);
     }
-    if (opts.minConvergenceProfitPct !== undefined) {
-      strategyConfig.minConvergenceProfitPct = nonnegativeNumber(
-        "minimum convergence profit",
-        opts.minConvergenceProfitPct,
-      );
+    if (opts.takeProfitPrice !== undefined) {
+      strategyConfig.takeProfitPrice = optionalPrice("take-profit price", opts.takeProfitPrice);
     }
     if (opts.maxHoldDays !== undefined) {
       strategyConfig.maxHoldDays = optionalPositiveNumber("maximum hold", opts.maxHoldDays);
@@ -361,15 +352,6 @@ function signedNumber(label: string, raw: string): number {
 
 function applyScenarioExitOptions(config: Record<string, unknown>, opts: StrategyOptions): void {
   if (opts.scenarioExit !== undefined) config.scenarioExitEnabled = onOff("scenario exit", opts.scenarioExit);
-  if (opts.positiveConvergenceEdgePp !== undefined) {
-    config.positiveConvergenceEdgePp = signedNumber("positive convergence edge", opts.positiveConvergenceEdgePp);
-  }
-  if (opts.positiveConvergenceMinProfitPct !== undefined) {
-    config.positiveConvergenceMinProfitPct = signedNumber("positive convergence minimum profit", opts.positiveConvergenceMinProfitPct);
-  }
-  if (opts.positiveConvergenceMaxQRetreatPp !== undefined) {
-    config.positiveConvergenceMaxQRetreatPp = nonnegativeNumber("positive convergence maximum Q retreat", opts.positiveConvergenceMaxQRetreatPp);
-  }
   if (opts.adverseCrossEdgePp !== undefined) config.adverseCrossEdgePp = signedNumber("adverse cross edge", opts.adverseCrossEdgePp);
   if (opts.adverseCrossMaxPnlPct !== undefined) {
     config.adverseCrossMaxPnlPct = signedNumber("adverse cross maximum P&L", opts.adverseCrossMaxPnlPct);
@@ -414,6 +396,14 @@ function positionLimit(raw: string): number | null {
   const normalized = raw.trim().toLowerCase();
   if (normalized === "unlimited" || normalized === "none" || normalized === "off") return null;
   return positiveInteger("position limit", raw);
+}
+
+function optionalPrice(label: string, raw: string): number | null {
+  const normalized = raw.trim().toLowerCase();
+  if (normalized === "off" || normalized === "none" || normalized === "unlimited") return null;
+  const value = positiveNumber(label, raw);
+  if (value > 1) throw new Error(`${label} must be a price between 0 and 1`);
+  return value;
 }
 
 function optionalPositiveNumber(label: string, raw: string): number | null {
@@ -531,12 +521,13 @@ function printStrategy(
   console.log(`  minimum viable entry: $${Number(current.minEntryNotional).toFixed(2)} (entries only; exits are never floored)`);
   const scenario = { ...SCENARIO_EXIT_DEFAULTS, ...normalized } as Record<string, unknown>;
   const maxHold = current.maxHoldDays === null ? "unlimited" : `${current.maxHoldDays} days`;
+  const takeProfit =
+    current.takeProfitPrice === null
+      ? "off"
+      : `sell once the held-side bid reaches $${Number(current.takeProfitPrice).toFixed(2)}`;
+  console.log(`  take profit:          ${takeProfit}`);
   if (scenario.scenarioExitEnabled === true) {
     console.log("  exit model:           seven-day signal state machine (scenarioExitEnabled)");
-    console.log(
-      `  take profit:          edge <= ${scenario.positiveConvergenceEdgePp}pp, executable gain >= ` +
-        `${scenario.positiveConvergenceMinProfitPct}%, Q retreat <= ${scenario.positiveConvergenceMaxQRetreatPp}pp`,
-    );
     console.log(
       `  adverse cross:        edge <= ${scenario.adverseCrossEdgePp}pp and P&L <= ${scenario.adverseCrossMaxPnlPct}% on ` +
         `${scenario.adverseCrossConfirmations} distinct forecasts`,
@@ -551,8 +542,7 @@ function printStrategy(
     console.log(`  exit fee assumed:     ${scenario.exitFeeBps}bps on executable proceeds`);
     console.log(`  exit retry window:    ${scenario.exitRetrySec}s before an invisible exit is re-evaluated`);
   } else {
-    console.log("  exit model:           legacy convergence overlay (scenarioExitEnabled off)");
-    console.log(`  convergence profit:   +${Number(current.minConvergenceProfitPct).toFixed(2)}% minimum executable gain`);
+    console.log("  exit model:           take-profit and maximum hold (scenarioExitEnabled off)");
     console.log(`  maximum hold:         ${maxHold}`);
   }
   console.log(`  entry handoff hold:   ${scenario.pendingEntryReservationSec}s reservation while a fill is not yet visible`);

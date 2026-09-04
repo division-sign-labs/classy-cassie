@@ -265,9 +265,9 @@ not topped up and are not automatically trimmed. New entries and top-ups also re
 $2,500 of held-outcome bid depth within 2¢ by default; `--min-exit-depth-2c-usd 0`
 disables that entry-only gate.
 
-Early convergence takes profit only when no more than 2pp of edge remains and the
-executable held-side bid is at least 2% above cost. Otherwise the default maximum hold is
-seven days. Tune those with `--min-convergence-profit-pct` and `--max-hold-days`.
+A position is sold once the executable held-side bid reaches 90¢; the forecast plays no
+part in that exit. Otherwise the default maximum hold is seven days. Tune those with
+`--take-profit-price` (`off` disables it) and `--max-hold-days`.
 The 24-hour volume floor remains an entry filter but never blocks an exit; exit slippage
 and executable depth still apply.
 
