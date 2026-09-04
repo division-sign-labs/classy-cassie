@@ -75,6 +75,14 @@ const MARKET_WAKE_MIN_INTERVAL_MS = 2_000;
 const AUTHORITATIVE_READ_TOLERANCE_MS = 5 * 60 * 1_000;
 // Markets whose YES and NO books are requested at the same time during a poll.
 const BOOK_FETCH_CONCURRENCY = 8;
+// A single venue read that times out or hits a 5xx is retried in place before
+// it is allowed to fail the whole poll. One slow book must not cost a tick:
+// Promise.all rejects on the first failure, so without this a lone timeout
+// discarded every other book in its batch and degraded the controller.
+// Attempts are bounded and backed off, so a real outage still surfaces
+// promptly through the tolerance window rather than stalling the cadence.
+const VENUE_READ_RETRY_ATTEMPTS = 3;
+const VENUE_READ_RETRY_BASE_DELAY_MS = 250;
 // A decision that changed nothing (no action, same verdict, same reasons as the
 // last one persisted for that market) is re-persisted only as a periodic
 // heartbeat, so the telemetry table records transitions and samples rather
@@ -86,9 +94,14 @@ const DECISION_HEARTBEAT_MS = 15 * 60 * 1_000;
 const REDUCER_SNAPSHOT_MIN_INTERVAL_MS = 5_000;
 
 function isTransientVenueReadError(error: unknown): boolean {
-  const candidate = error as { status?: unknown; retryAfter?: unknown; code?: unknown } | null;
+  const candidate = error as { status?: unknown; retryAfter?: unknown; code?: unknown; name?: unknown } | null;
   if (candidate && typeof candidate === "object") {
     if (candidate.retryAfter !== undefined) return true;
+    // The Polymarket SDK surfaces a client-side deadline as a TimeoutError
+    // ("Request timed out: GET …"), which matches none of the wire-level
+    // patterns below. A read that ran out of time is the most transient
+    // failure there is; treating it as fatal degraded the bot on one slow book.
+    if (candidate.name === "TimeoutError" || candidate.name === "AbortError") return true;
     if ([429, 502, 503, 504].includes(Number(candidate.status))) return true;
     if (typeof candidate.code === "string" &&
       ["ECONNRESET", "ETIMEDOUT", "ECONNREFUSED", "EAI_AGAIN", "UND_ERR_SOCKET", "UND_ERR_CONNECT_TIMEOUT"].includes(candidate.code)) {
@@ -96,7 +109,7 @@ function isTransientVenueReadError(error: unknown): boolean {
     }
   }
   const message = error instanceof Error ? error.message : String(error);
-  return /rate limited|too many requests|internal server error|bad gateway|service unavailable|gateway time-?out|fetch failed|ECONNRESET|ETIMEDOUT|socket hang up/i
+  return /rate limited|too many requests|internal server error|bad gateway|service unavailable|gateway time-?out|request timed out|timed out|timeout|fetch failed|ECONNRESET|ETIMEDOUT|socket hang up/i
     .test(message);
 }
 
@@ -571,6 +584,13 @@ export class MarketMakeController {
   private marketWakeTimer?: ReturnType<typeof setTimeout>;
   private lastMarketWakeWallClockAt?: number;
   private lastAuthoritativeSnapshotAt?: number;
+  /**
+   * End of the last tick that completed every stage, including the book poll.
+   * Reconciliation alone refreshes `lastAuthoritativeSnapshotAt` on every tick,
+   * so it cannot bound how long the controller may run blind on books. This
+   * does: unreadable books eventually degrade even while the account reads fine.
+   */
+  private lastCompleteTickAt?: number;
   private readonly lastPersistedDecision = new Map<string, { fingerprint: string; ts: number }>();
   private reducerSnapshotDirtySeq?: number;
   private lastReducerSnapshotWallClockAt = 0;
@@ -761,6 +781,14 @@ export class MarketMakeController {
       try {
         return await this.tickInternal();
       } catch (error) {
+        // A transient venue read that already exhausted its in-place retries
+        // costs this tick, not the deployment: the next cadence retries it.
+        // Only a venue unreadable for longer than the tolerance window, which
+        // requires a successful authoritative snapshot inside it, degrades.
+        if (this.tolerateTransientTickFailure(error)) {
+          this.lastTickAt = this.now();
+          return this.emptyTick(this.now());
+        }
         await this.degrade(error instanceof Error ? error.message : String(error));
         throw error;
       }
@@ -1140,6 +1168,10 @@ export class MarketMakeController {
       }
       this.marketStreamRecovery = undefined;
       this.userStreamRecovery = undefined;
+      // Going live is the baseline for the blind-run bound: a freshly resumed
+      // deployment gets one tolerance window to complete a tick before a
+      // transient venue read is allowed to halt it again.
+      this.lastCompleteTickAt = now;
       await this.processEvent({
         type: "resume",
         ts: now,
@@ -1198,6 +1230,48 @@ export class MarketMakeController {
    * authoritative snapshot succeeded recently. Returns true when the failure
    * was absorbed; the caller then skips the rest of its cycle.
    */
+  /**
+   * Run one venue read, retrying a transient failure in place. This is the
+   * first line of defence: a timeout or 5xx on a single book is retried on the
+   * spot instead of failing its batch, so the tolerance window and the
+   * degrade path are reserved for a venue that is genuinely unavailable.
+   */
+  private async readWithRetry<T>(context: string, read: () => Promise<T>): Promise<T> {
+    for (let attempt = 1; ; attempt += 1) {
+      try {
+        return await read();
+      } catch (error) {
+        if (attempt >= VENUE_READ_RETRY_ATTEMPTS || !isTransientVenueReadError(error)) throw error;
+        this.log.warn("market-make venue read failed; retrying in place", {
+          context,
+          attempt,
+          of: VENUE_READ_RETRY_ATTEMPTS,
+          error: error instanceof Error ? error.message : String(error),
+        });
+        const backoff = VENUE_READ_RETRY_BASE_DELAY_MS * 2 ** (attempt - 1);
+        await new Promise((resolve) => setTimeout(resolve, backoff));
+      }
+    }
+  }
+
+  /**
+   * Whether a failed tick may simply be retried on the next cadence. Unlike the
+   * per-read tolerance this is measured from the last tick that completed its
+   * book poll, so a venue whose books stay unreadable degrades on schedule even
+   * though its account endpoints keep answering.
+   */
+  private tolerateTransientTickFailure(error: unknown): boolean {
+    if (!isTransientVenueReadError(error)) return false;
+    const now = this.now();
+    const lastGood = this.lastCompleteTickAt;
+    if (lastGood === undefined || now - lastGood > AUTHORITATIVE_READ_TOLERANCE_MS) return false;
+    this.log.warn("market-make tick failed on a transient venue read; retrying on the next cadence", {
+      error: error instanceof Error ? error.message : String(error),
+      lastCompleteTickAgeMs: now - lastGood,
+    });
+    return true;
+  }
+
   private tolerateTransientReadFailure(context: string, error: unknown): boolean {
     if (!isTransientVenueReadError(error)) return false;
     const now = this.now();
@@ -1240,6 +1314,7 @@ export class MarketMakeController {
     const timer = await this.processEvent({ type: "timer", ts: this.now() });
     await this.heartbeatOnce();
     this.lastTickAt = this.now();
+    this.lastCompleteTickAt = this.lastTickAt;
     this.lastError = undefined;
     await this.saveReducerState();
     if (this.enableSubscriptions) await this.refreshMarketSubscription();
@@ -3611,8 +3686,8 @@ export class MarketMakeController {
       const batch = ordered.slice(offset, offset + BOOK_FETCH_CONCURRENCY);
       const fetched = await Promise.all(batch.map(async ({ marketKey, catalog }) => {
         const [yesRaw, noRaw] = await Promise.all([
-          this.venue.tokenBook!(catalog.yesTokenId),
-          this.venue.tokenBook!(catalog.noTokenId),
+          this.readWithRetry(`YES book ${marketKey}`, () => this.venue.tokenBook!(catalog.yesTokenId)),
+          this.readWithRetry(`NO book ${marketKey}`, () => this.venue.tokenBook!(catalog.noTokenId)),
         ]);
         return {
           marketKey,

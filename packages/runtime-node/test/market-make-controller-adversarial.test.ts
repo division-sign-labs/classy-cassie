@@ -133,6 +133,8 @@ interface VenueControl {
   userSubscriptions: ControlledSubscription[];
   bookTs: number;
   tokenBookCalls: string[];
+  /** When it returns an error, that book read throws instead of returning. */
+  tokenBookThrow?: (tokenId: string, callIndex: number) => Error | undefined;
   tokenBookOverride?: (tokenId: string, callIndex: number) => {
     bids: Array<{ price: number; size: number }>;
     asks: Array<{ price: number; size: number }>;
@@ -192,6 +194,8 @@ function fakeVenue(stateStore: MarketMakeStateStore): VenueControl {
     tokenBook: async (tokenId) => {
       const callIndex = control.tokenBookCalls.length;
       control.tokenBookCalls.push(tokenId);
+      const thrown = control.tokenBookThrow?.(tokenId, callIndex);
+      if (thrown) throw thrown;
       const overridden = control.tokenBookOverride?.(tokenId, callIndex);
       return {
         marketRef: tokenId,
@@ -1688,5 +1692,97 @@ describe("MarketMakeController adversarial lifecycle safety", () => {
     expect(controller.stateSnapshot().markets[MARKET_KEY]?.inventory?.freeQuantity ?? 0).toBeCloseTo(correctedQuantity);
     expect(stateStore.listInventoryCycles(true)[0]?.quantity ?? 0).toBeCloseTo(correctedQuantity);
     expect((stateStore.exportSnapshot().mm_fills as unknown[])).toHaveLength(1);
+  });
+
+  describe("a transient book read does not degrade the deployment", () => {
+    /** The SDK's client-side deadline, verbatim: it carries no status or code. */
+    function timeoutError(tokenId: string): Error {
+      const error = new Error(`Request timed out: GET https://clob.polymarket.com/book?token_id=${tokenId}`);
+      error.name = "TimeoutError";
+      return error;
+    }
+
+    it("retries a timed-out book in place and keeps quoting", async () => {
+      const control = fakeVenue(stateStore);
+      const controller = build(control);
+      await controller.start();
+      await applyReconcile(controller);
+      await controller.resume();
+      expect(controller.status().lifecycle).toBe("ACTIVE");
+
+      // The first read of the YES book times out; the retry succeeds. One slow
+      // book must not discard the rest of its concurrent batch.
+      let thrown = 0;
+      control.tokenBookThrow = (tokenId) => {
+        if (tokenId === YES && thrown === 0) {
+          thrown += 1;
+          return timeoutError(tokenId);
+        }
+        return undefined;
+      };
+      clock += 1_000;
+      control.bookTs = clock;
+      await controller.tick();
+
+      expect(thrown).toBe(1);
+      expect(controller.status().lifecycle).toBe("ACTIVE");
+      expect(controller.status().halted).toBe(false);
+      expect(control.cancelAllCalls).toBe(0);
+    });
+
+    it("skips the tick when the timeout outlasts its retries, without degrading", async () => {
+      const control = fakeVenue(stateStore);
+      const controller = build(control);
+      await controller.start();
+      await applyReconcile(controller);
+      await controller.resume();
+
+      control.tokenBookThrow = (tokenId) => (tokenId === YES ? timeoutError(tokenId) : undefined);
+      clock += 1_000;
+      control.bookTs = clock;
+      await controller.tick();
+
+      // An authoritative snapshot succeeded inside the tolerance window, so the
+      // next cadence retries rather than the deployment halting.
+      expect(controller.status().lifecycle).toBe("ACTIVE");
+      expect(controller.status().halted).toBe(false);
+      expect(control.cancelAllCalls).toBe(0);
+
+      // Recovery needs no operator step.
+      control.tokenBookThrow = undefined;
+      clock += 1_000;
+      control.bookTs = clock;
+      await controller.tick();
+      expect(controller.status().lifecycle).toBe("ACTIVE");
+    });
+
+    it("still degrades once the venue has been unreadable past the tolerance window", async () => {
+      const control = fakeVenue(stateStore);
+      const controller = build(control);
+      await controller.start();
+      await applyReconcile(controller);
+      await controller.resume();
+
+      control.tokenBookThrow = (tokenId) => (tokenId === YES ? timeoutError(tokenId) : undefined);
+      clock += 6 * 60 * 1_000;
+      control.bookTs = clock;
+      await expect(controller.tick()).rejects.toThrow(/timed out/);
+      expect(controller.status().lifecycle).toBe("DATA_DEGRADED");
+    });
+
+    it("degrades immediately on a book error that is not transient", async () => {
+      const control = fakeVenue(stateStore);
+      const controller = build(control);
+      await controller.start();
+      await applyReconcile(controller);
+      await controller.resume();
+
+      control.tokenBookThrow = (tokenId) =>
+        tokenId === YES ? new Error("unauthorized: bad api credentials") : undefined;
+      clock += 1_000;
+      control.bookTs = clock;
+      await expect(controller.tick()).rejects.toThrow(/unauthorized/);
+      expect(controller.status().lifecycle).toBe("DATA_DEGRADED");
+    });
   });
 });
