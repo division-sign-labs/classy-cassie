@@ -1756,17 +1756,61 @@ describe("MarketMakeController adversarial lifecycle safety", () => {
       expect(controller.status().lifecycle).toBe("ACTIVE");
     });
 
-    it("still degrades once the venue has been unreadable past the tolerance window", async () => {
+    it("still degrades once a held market has been unreadable past the tolerance window", async () => {
       const control = fakeVenue(stateStore);
       const controller = build(control);
-      await controller.start();
-      await applyReconcile(controller);
-      await controller.resume();
+      // Inventory makes this market's book load-bearing: its exit is priced
+      // from it, so the read cannot simply be skipped.
+      await fillOpenEntry(controller, control);
 
       control.tokenBookThrow = (tokenId) => (tokenId === YES ? timeoutError(tokenId) : undefined);
       clock += 6 * 60 * 1_000;
       control.bookTs = clock;
       await expect(controller.tick()).rejects.toThrow(/timed out/);
+      expect(controller.status().lifecycle).toBe("DATA_DEGRADED");
+    });
+
+    it("skips a flat market whose book does not exist and keeps the rest of the poll", async () => {
+      const control = fakeVenue(stateStore);
+      // Refused entries leave the market flat while still polling its books.
+      control.acknowledgement = "rejected";
+      const controller = build(control);
+      await startAndPlace(controller, control);
+      clock += 1_000;
+      control.bookTs = clock;
+      await controller.tick();
+
+      // Every entry is refused, so the market carries no inventory and no
+      // working order once the global rejection pause latches.
+      expect(controller.stateSnapshot().markets[MARKET_KEY]?.inventory).toBeUndefined();
+
+      // A delisted or not-yet-quoted token answers with no orderbook. That is
+      // permanent for the token, so retrying cannot help, but it must not cost
+      // the deployment: nothing is held here.
+      control.tokenBookThrow = (tokenId) =>
+        tokenId === YES ? new Error("No orderbook exists for the requested token id") : undefined;
+      clock += 1_000;
+      control.bookTs = clock;
+      await controller.tick();
+
+      expect(controller.status().lifecycle).toBe("ACTIVE");
+      expect(controller.status().halted).toBe(false);
+      expect(control.cancelAllCalls).toBe(0);
+    });
+
+    it("escalates an unreadable book on a market the deployment is exposed to", async () => {
+      const control = fakeVenue(stateStore);
+      const controller = build(control);
+      await startAndPlace(controller, control);
+      expect(controller.status().lifecycle).toBe("ACTIVE");
+
+      // With an order working in this market its exit is priced from this book,
+      // so an unreadable book is a safety event rather than a skippable one.
+      control.tokenBookThrow = (tokenId) =>
+        tokenId === YES ? new Error("No orderbook exists for the requested token id") : undefined;
+      clock += 1_000;
+      control.bookTs = clock;
+      await expect(controller.tick()).rejects.toThrow(/No orderbook exists/);
       expect(controller.status().lifecycle).toBe("DATA_DEGRADED");
     });
 

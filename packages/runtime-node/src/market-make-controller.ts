@@ -3669,6 +3669,22 @@ export class MarketMakeController {
     return true;
   }
 
+  /**
+   * Whether the deployment currently has something at stake in this market:
+   * held inventory, or an order that is still working at the venue. Such a
+   * market must stay readable; a flat one may be skipped for a poll.
+   */
+  private hasOpenExposure(marketKey: string): boolean {
+    const market = this.reducerState.markets[marketKey];
+    if (!market) return false;
+    const inventory = market.inventory;
+    if (inventory && inventory.freeQuantity + inventory.reservedSellQuantity > EPSILON) return true;
+    // PLANNED and UNKNOWN count as exposure: both may already rest at the venue.
+    return Object.values(market.orders ?? {}).some(
+      (order) => !["FILLED", "CANCELED", "REJECTED"].includes(order.status),
+    );
+  }
+
   private async fetchAndReduceBooks(keys: Set<string>): Promise<{ books: number; actions: number; decisions: number }> {
     let books = 0;
     let actions = 0;
@@ -3684,18 +3700,33 @@ export class MarketMakeController {
     // one batch’s round trip old when its freshness gate is evaluated.
     for (let offset = 0; offset < ordered.length; offset += BOOK_FETCH_CONCURRENCY) {
       const batch = ordered.slice(offset, offset + BOOK_FETCH_CONCURRENCY);
-      const fetched = await Promise.all(batch.map(async ({ marketKey, catalog }) => {
-        const [yesRaw, noRaw] = await Promise.all([
-          this.readWithRetry(`YES book ${marketKey}`, () => this.venue.tokenBook!(catalog.yesTokenId)),
-          this.readWithRetry(`NO book ${marketKey}`, () => this.venue.tokenBook!(catalog.noTokenId)),
-        ]);
-        return {
-          marketKey,
-          catalog,
-          yesBook: { tokenId: catalog.yesTokenId, bids: yesRaw.bids, asks: yesRaw.asks, ts: yesRaw.ts } satisfies TokenBook,
-          noBook: { tokenId: catalog.noTokenId, bids: noRaw.bids, asks: noRaw.asks, ts: noRaw.ts } satisfies TokenBook,
-        };
+      const settled = await Promise.all(batch.map(async ({ marketKey, catalog }) => {
+        try {
+          const [yesRaw, noRaw] = await Promise.all([
+            this.readWithRetry(`YES book ${marketKey}`, () => this.venue.tokenBook!(catalog.yesTokenId)),
+            this.readWithRetry(`NO book ${marketKey}`, () => this.venue.tokenBook!(catalog.noTokenId)),
+          ]);
+          return {
+            marketKey,
+            catalog,
+            yesBook: { tokenId: catalog.yesTokenId, bids: yesRaw.bids, asks: yesRaw.asks, ts: yesRaw.ts } satisfies TokenBook,
+            noBook: { tokenId: catalog.noTokenId, bids: noRaw.bids, asks: noRaw.asks, ts: noRaw.ts } satisfies TokenBook,
+          };
+        } catch (error) {
+          // A market this deployment is exposed to cannot be skipped: its exit
+          // is priced from this book, so an unreadable book there escalates to
+          // the tick's tolerance and degrade path. A flat market is merely not
+          // quotable this poll — a delisted or not-yet-quoted token returns
+          // "no orderbook exists", which must not cost the other 60-odd books.
+          if (this.hasOpenExposure(marketKey)) throw error;
+          this.log.warn("market-make skipping a flat market whose book could not be read", {
+            marketKey,
+            error: error instanceof Error ? error.message : String(error),
+          });
+          return undefined;
+        }
       }));
+      const fetched = settled.filter((entry): entry is NonNullable<typeof entry> => entry !== undefined);
       if (this.enableSubscriptions) this.lastMarketRestAt = this.now();
       for (const { marketKey, catalog, yesBook, noBook } of fetched) {
       const shock = await this.observeShock(marketKey, yesBook, noBook, this.now());
