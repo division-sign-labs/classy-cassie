@@ -80,6 +80,10 @@ const BOOK_FETCH_CONCURRENCY = 8;
 // heartbeat, so the telemetry table records transitions and samples rather
 // than one identical rejection per market per book tick.
 const DECISION_HEARTBEAT_MS = 15 * 60 * 1_000;
+// Every event is durably appended before it is reduced and replayed at startup,
+// so the reducer snapshot is a cache. Serialising it after every one of the
+// hundreds of events in a poll was the runtime’s dominant CPU and disk cost.
+const REDUCER_SNAPSHOT_MIN_INTERVAL_MS = 5_000;
 
 function isTransientVenueReadError(error: unknown): boolean {
   const candidate = error as { status?: unknown; retryAfter?: unknown; code?: unknown } | null;
@@ -568,6 +572,8 @@ export class MarketMakeController {
   private lastMarketWakeWallClockAt?: number;
   private lastAuthoritativeSnapshotAt?: number;
   private readonly lastPersistedDecision = new Map<string, { fingerprint: string; ts: number }>();
+  private reducerSnapshotDirtySeq?: number;
+  private lastReducerSnapshotWallClockAt = 0;
   private reconcileSequence = 0;
   private lastEventAt?: number;
   private lastTickAt?: number;
@@ -1164,7 +1170,20 @@ export class MarketMakeController {
   }
 
   private serialized<T>(work: () => Promise<T>): Promise<T> {
-    const result = this.queue.then(work, work);
+    // Every operation leaves the on-disk reducer snapshot current; the write
+    // throttle only coalesces the burst of events inside one operation.
+    const flushed = async (): Promise<T> => {
+      try {
+        return await work();
+      } finally {
+        await this.flushReducerState().catch((error) => {
+          this.log.error("market-make reducer snapshot flush failed", {
+            error: error instanceof Error ? error.message : String(error),
+          });
+        });
+      }
+    };
+    const result = this.queue.then(flushed, flushed);
     this.queue = result.then(() => undefined, () => undefined);
     return result;
   }
@@ -1420,7 +1439,22 @@ export class MarketMakeController {
     return true;
   }
 
+  /** Mark the snapshot stale after an event and write it at most every few seconds. */
+  private async persistReducerStateThrottled(seq: number): Promise<void> {
+    this.reducerSnapshotDirtySeq = Math.max(this.reducerSnapshotDirtySeq ?? 0, seq);
+    if (Date.now() - this.lastReducerSnapshotWallClockAt < REDUCER_SNAPSHOT_MIN_INTERVAL_MS) return;
+    await this.flushReducerState();
+  }
+
+  /** Write the snapshot now if any event has been reduced since the last write. */
+  private async flushReducerState(): Promise<void> {
+    if (this.reducerSnapshotDirtySeq === undefined) return;
+    await this.saveReducerState(this.reducerSnapshotDirtySeq);
+  }
+
   private async saveReducerState(lastEventSeq?: number): Promise<void> {
+    this.reducerSnapshotDirtySeq = undefined;
+    this.lastReducerSnapshotWallClockAt = Date.now();
     const latest = lastEventSeq ?? this.stateStore.readEvents(1)[0]?.seq ?? 0;
     const snapshot: PersistedReducerSnapshot = {
       schemaVersion: SNAPSHOT_SCHEMA,
@@ -1554,7 +1588,7 @@ export class MarketMakeController {
         rationale: decision.reasons.join("; "),
       });
     }
-    await this.saveReducerState(seq);
+    await this.persistReducerStateThrottled(seq);
     if (
       rejectionsBefore < 3 &&
       (this.reducerState.consecutiveOrderRejections ?? 0) >= 3 &&
@@ -4352,6 +4386,7 @@ export class MarketMakeController {
         await this.adoptResidualInventory(this.lastPositions);
       }
       await this.resnapshotBooks();
+      await this.flushReducerState();
     } catch (error) {
       if (this.tolerateTransientReadFailure(`${kind}-websocket-event`, error)) return;
       await this.degrade(`${kind}-websocket-event: ${error instanceof Error ? error.message : String(error)}`);
