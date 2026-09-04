@@ -1,6 +1,6 @@
 {
   "name": "@quotient-forecasting/cassie-skill",
-  "version": "0.4.10",
+  "version": "0.4.11",
   "type": "module",
   "license": "Apache-2.0",
   "description": "Agent Skill operator manual and policy files for Cassie",

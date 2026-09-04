@@ -130,7 +130,7 @@ Every step happens in the terminal; you only leave it to copy-paste dashboard va
    deterministic Q-directed passive-inventory strategy, not a symmetric dealer; see §14.
    The `agent` strategy is the monitoring agent — plain-language mandate, Quotient
    research, model-selected entries, quarter-Kelly sizing; see §13. `signals` follows
-   Quotient signals. Prediction positions exit at a 90¢ held-side bid, the default
+   Quotient signals. Prediction positions exit on convergence, the default
    seven-day maximum hold, or resolution. The recommended allocation has no position-count
    cap, prioritizes the widest eligible edges for new entries, and accepts forecast entry
    edges from 10pp through 30pp, inclusive. The 30pp maximum is configurable or removable;
@@ -143,14 +143,14 @@ Every step happens in the terminal; you only leave it to copy-paste dashboard va
    throttle in this mode. Entry and top-up eligibility also requires $2,500 of held-outcome
    bid depth within 2¢ by default, an entry-only check that can be disabled with
    `--min-exit-depth-2c-usd 0`. A position is sold once the executable held-side bid
-   reaches 90¢ (`--take-profit-price`; `off` disables it); the forecast plays no part in
-   that exit. Otherwise a prediction position exits at the seven-day maximum hold (or
+   at most 3pp of held-side edge remains (`--convergence-exit-pp`; `off` disables it),
+   with no profit floor, so a converged position sells at a gain or a loss. Otherwise a prediction position exits at the seven-day maximum hold (or
    resolution). `--scenario-exit on` wraps that in the confirmed seven-day signal-exit
-   state machine (Q collapse, confirmed adverse cross, confirmed Q flip, the 90¢
-   take-profit, time stop from the entry fill), evaluated in that precedence with one
+   state machine (Q collapse, confirmed adverse cross, confirmed Q flip, convergence,
+   time stop from the entry fill), evaluated in that precedence with one
    canonical reason per exit; it is off
-   unless an operator turns it on. The positive take-profit applies to every position the
-   same way whatever the market's resolution date. The 24h-volume floor and the minimum-notional floor
+   unless an operator turns it on. Convergence needs no confirmations and uses a wider
+   threshold than the adverse cross, so it subsumes that branch in practice. The 24h-volume floor and the minimum-notional floor
    apply to entries, never exits; exit slippage and executable depth still apply. An
    accepted entry stays reserved against market and event caps until the venue position or
    a resting order shows it, so a fill lag cannot admit a duplicate entry. The legacy
@@ -160,7 +160,7 @@ Every step happens in the terminal; you only leave it to copy-paste dashboard va
    positions. Hyperliquid keeps this legacy mode as its recommendation.
    The engine re-reads venue odds for held positions every 60 seconds. Every 5 minutes it
    separately refreshes entry signals and batches the latest Q forecasts for held markets,
-   so stale or unpublished entry signals do not suppress take-profit checks or hold-deadline
+   so stale or unpublished entry signals do not suppress convergence checks or hold-deadline
    exits. Held-market forecast lookups cost $0.005 per batch of up to 10 markets per refresh.
    Declining the recommendation asks for an optional position cap, allocation mode and its
    mode-specific parameters, minimum and maximum entry edges, minimum viable entry, tick
@@ -495,7 +495,7 @@ pnpm exec vitest run packages/core/test/engine-e2e.test.ts
 ```
 
 The test enters YES with size capped by the thin test book, then holds through a
-signal-side flip that is nowhere near the take-profit. The fixture venue and signal source are test doubles, not
+signal-side flip that converges the held side and sells it. The fixture venue and signal source are test doubles, not
 product options.
 
 ## 8. Trade reporting (opt-in, Polymarket only)
@@ -614,8 +614,8 @@ Confidence maps to an entry-spread threshold (low 12pp / medium 10pp / high 7pp)
 reuses min(fixed-fractional, quarter-Kelly) with `p` = model probability and `b` implied by
 the share price. When a fresh live Quotient signal covers the market, the CLI takes `p`
 from it automatically (mirrored if the signal's side differs from the thesis side);
-otherwise it asks the operator. Flip-flat owns exits: the 90¢ take-profit at the
-executable held-side bid, the default seven-day maximum hold, or resolution; with
+otherwise it asks the operator. Flip-flat owns exits: convergence at 3pp of remaining
+edge, the default seven-day maximum hold, or resolution; with
 `--scenario-exit on`, the confirmed signal-exit state machine.
 
 ## 10. Rules for the agent operating cassie

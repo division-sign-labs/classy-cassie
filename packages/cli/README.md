@@ -265,9 +265,10 @@ not topped up and are not automatically trimmed. New entries and top-ups also re
 $2,500 of held-outcome bid depth within 2¢ by default; `--min-exit-depth-2c-usd 0`
 disables that entry-only gate.
 
-A position is sold once the executable held-side bid reaches 90¢; the forecast plays no
-part in that exit. Otherwise the default maximum hold is seven days. Tune those with
-`--take-profit-price` (`off` disables it) and `--max-hold-days`.
+A position is sold once at most 3pp of held-side forecast edge remains. There is no
+profit floor, so a converged position goes out at whatever the market pays. Otherwise the
+default maximum hold is seven days. Tune those with `--convergence-exit-pp` (`off`
+disables it) and `--max-hold-days`.
 The 24-hour volume floor remains an entry filter but never blocks an exit; exit slippage
 and executable depth still apply.
 

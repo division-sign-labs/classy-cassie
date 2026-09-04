@@ -38,8 +38,8 @@ describe("signals recommended allocation", () => {
     });
     expect(recommendedStrategySummary("kalshi")).toContain("2.5% per market and 5% per event");
     expect(recommendedStrategySummary("kalshi")).toContain("25% smaller within 3 days of resolution");
-    expect(RECOMMENDED_STRATEGY.takeProfitPrice).toBe(0.9);
-    expect(recommendedStrategySummary("kalshi")).toContain("sell at a 90¢ bid or 7-day max hold");
+    expect(RECOMMENDED_STRATEGY.convergenceExitPp).toBe(3);
+    expect(recommendedStrategySummary("kalshi")).toContain("3pp convergence or 7-day max hold");
   });
 
   it("displays the recommended AUM caps for an empty prediction strategy config", async () => {
@@ -64,7 +64,7 @@ describe("signals recommended allocation", () => {
     expect(output).toMatch(/per-market cap:\s+2\.5% of portfolio equity/);
     expect(output).toMatch(/per-event cap:\s+5% of portfolio equity/);
     expect(output).toMatch(/near resolution:\s+25% smaller when the market resolves within 3 days/);
-    expect(output).toMatch(/take profit:\s+sell once the held-side bid reaches \$0\.90/);
+    expect(output).toMatch(/convergence exit:\s+sell once remaining edge falls to 3pp/);
   });
 
   it("accepts the near-resolution flags and reports the window as off when disabled", async () => {
@@ -87,10 +87,9 @@ describe("signals recommended allocation", () => {
     expect(lines.join("\n")).toMatch(/near resolution:\s+50% smaller when the market resolves within 2 days/);
 
     lines.length = 0;
-    await runStrategy("near-resolution", { nearResolutionDays: "off", takeProfitPrice: "off" });
+    await runStrategy("near-resolution", { nearResolutionDays: "off", convergenceExitPp: "off" });
     expect(lines.join("\n")).toMatch(/near resolution:\s+off/);
-    expect(lines.join("\n")).toMatch(/take profit:\s+off/);
+    expect(lines.join("\n")).toMatch(/convergence exit:\s+off/);
     await expect(runStrategy("near-resolution", { nearResolutionSizeCutPct: "101" })).rejects.toThrow(/at most 100%/);
-    await expect(runStrategy("near-resolution", { takeProfitPrice: "1.5" })).rejects.toThrow(/between 0 and 1/);
   });
 });

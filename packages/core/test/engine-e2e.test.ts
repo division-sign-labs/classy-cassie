@@ -1,13 +1,13 @@
 // packages/core/test/engine-e2e.test.ts
 // Offline strategy e2e: entry with visible capacity cap, fill reconciliation,
-// then a signal-side flip that is held: exits are the price floor or the deadline.
+// then a signal-side flip that converges the held side and sells it at a loss.
 
 import { describe, expect, it } from "vitest";
 import { StateKeys } from "@quotient-forecasting/cassie-core";
 import { buildFixtureEngine } from "./helpers.js";
 
 describe("flip-flat against fixtures (offline e2e)", () => {
-  it("enters capped and holds through a signal-side flip", async () => {
+  it("enters capped, then sells the converged side after a signal flip", async () => {
     const { engine, venue, alerter, state } = buildFixtureEngine();
 
     // Tick 1: flat + YES signal (spread 15pp ≥ 10) → entry, size capped by depth.
@@ -38,17 +38,15 @@ describe("flip-flat against fixtures (offline e2e)", () => {
     positions = await venue.positions();
     expect(positions[0]!.size).toBe(8);
 
-    // Tick 3: the signal moves to NO at 0.70, valuing the held YES at 0.30.
-    // The executable YES bid is nowhere near the 90¢ take-profit and the hold
-    // deadline is days away, so nothing sells.
+    // Tick 3: the signal moves to NO at 0.70, valuing the held YES at 0.30
+    // against a market well above it. Remaining edge is deeply negative, so
+    // plain convergence sells: there is no profit floor to hold it back, and
+    // the 0.56 cost basis makes this a realized loss by design.
     const t3 = await engine.tick();
-    expect(t3.ordersPlaced).toBe(0);
-    expect(alerter.ofKind("exit")).toHaveLength(0);
+    expect(t3.ordersPlaced).toBe(1);
+    expect(alerter.ofKind("exit")).toHaveLength(1);
+    expect(alerter.ofKind("exit")[0]!.message).toMatch(/converged/);
     expect(alerter.ofKind("entry")).toHaveLength(1);
-    positions = await venue.positions();
-    expect(positions).toHaveLength(1);
-    expect(positions[0]!.side).toBe("YES");
-    expect(positions[0]!.size).toBe(8);
     // No error alerts anywhere in the run.
     expect(alerter.ofKind("error")).toHaveLength(0);
   });

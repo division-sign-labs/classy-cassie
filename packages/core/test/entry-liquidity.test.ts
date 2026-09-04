@@ -74,7 +74,7 @@ function context(input: {
       kellyFraction: 0.25,
       marketCapPct: 2.5,
       eventCapPct: 5,
-      takeProfitPrice: null,
+      convergenceExitPp: null,
       ...input.config,
     },
     signals: { latest: async () => [input.signal ?? signal()] },
@@ -218,7 +218,7 @@ describe("flip-flat entry-side unwind liquidity", () => {
         signal: signal("YES", 0.54),
         mid: 0.91,
         positions: [{ marketRef: MARKET, side: "YES", size: 10, avgPrice: 0.5 }],
-        config: { takeProfitPrice: 0.9, minExitDepth2cUsd: 2_500 },
+        config: { convergenceExitPp: 3, minExitDepth2cUsd: 2_500 },
         book: book({
           bids: [{ price: 0.9, size: 1 }],
           asks: [{ price: 0.92, size: 1 }],

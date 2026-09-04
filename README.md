@@ -109,7 +109,7 @@ droplet. Keys and venue balances are untouched.
 | `packages/core`        | venue adapters, wallet/keystore, strategy engine, risk module, signal client, alerts, thesis sizing |
 | `packages/cli`         | the `cassie` binary: wizard, wallet, fund, run, deploy, status, logs, portfolio, trade, orders, ticket |
 | `packages/runtime-node` | the bot process: engine loop, SQLite state, unix-socket control API. Same code for `cassie run` and a droplet |
-| `strategies/flip-flat` | the `signals` strategy: follow Quotient signals; prediction positions exit at a 90¢ held-side bid or the seven-day maximum hold |
+| `strategies/flip-flat` | the `signals` strategy: follow Quotient signals; prediction positions exit on convergence or the seven-day maximum hold |
 | `skills/cassie`        | agent-facing operator manual ([SKILL.md](skills/cassie/SKILL.md)) + thesis policy (`thesis/mappings.json`) |
 | `fixtures/`            | signal + order-book fixtures for the offline e2e                     |
 
@@ -158,7 +158,7 @@ their latest Q forecasts.
 
 The runtime separates the two cadences: every five minutes it refreshes the entry-signal
 snapshot and batches Q forecast lookups for held markets; every 60 seconds it re-reads
-venue odds and checks the take-profit price and hold deadlines. Entry-signal freshness never gates
+venue odds and checks convergence and hold deadlines. Entry-signal freshness never gates
 an exit. Held-market lookups cost $0.005 per batch of up to 10 markets per refresh.
 Configure the cadences with
 `cassie strategy <botId> --signal-check-minutes 5 --position-check-seconds 60`.
@@ -188,10 +188,11 @@ of the best bid, so the strategy checks its ability to unwind before buying. Set
 `--min-exit-depth-2c-usd 0` to remove that entry-only eligibility gate. Actual orders are
 still sized against live entry-side depth and a slippage band.
 
-A position is sold once the executable held-outcome bid reaches 90¢; the forecast plays
-no part in that exit. Otherwise the position remains open until the default seven-day
-deadline (or resolution). Low 24-hour volume never blocks an exit; executable depth and
-slippage still bound it.
+A position is sold once the market has priced the forecast in, meaning at most 3pp of
+held-side edge remains. There is no profit floor, so a converged position is sold at
+whatever the market pays, gain or loss. Otherwise it remains open until the default
+seven-day deadline (or resolution). Low 24-hour volume never blocks an exit; executable
+depth and slippage still bound it.
 
 ```sh
 cassie strategy <botId> --allocation-mode portfolio-kelly \
