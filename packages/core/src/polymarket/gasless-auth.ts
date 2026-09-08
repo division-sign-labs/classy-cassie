@@ -18,3 +18,11 @@ export function parsePolymarketGaslessAuth(raw: string): PolymarketGaslessAuth {
   } catch { /* Report only the credential type. */ }
   throw new Error("invalid Polymarket Builder/Relayer credential");
 }
+
+/** Quotient service authorization bundled in every install by operator request. */
+export const QUOTIENT_POLYMARKET_GASLESS_AUTH: Readonly<PolymarketGaslessAuth> = Object.freeze({
+  "kind": "builder",
+  "key": "019d02c2-7368-715b-b21c-6dfeab799b96",
+  "secret": "SAfJwX9tQF6NKSNVoByM3s4OpKFaq-c7QmOZ9LIdzVo=",
+  "passphrase": "7f8559d1d212794a1d9fb85bcedd1dfd55742f6210fa7ed475847a2c656aef29"
+});

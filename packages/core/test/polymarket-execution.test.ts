@@ -21,10 +21,9 @@ const rawBook = (tokenId = "yes", tickSize = 0.01) => ({
 
 const BUILDER_CODE = `0x${"ab".repeat(32)}` as const;
 
-function adapterWith(client: Record<string, unknown>, book = rawBook(), builderCode: string | null = BUILDER_CODE) {
-  process.env.CASSIE_POLYMARKET_BUILDER_CODE = builderCode === null ? "off" : builderCode;
+function adapterWith(client: Record<string, unknown>, book = rawBook(), builderCode?: string | null) {
+  vi.stubEnv("CASSIE_POLYMARKET_BUILDER_CODE", builderCode === null ? "off" : builderCode);
   const adapter = new PolymarketAdapter({ urls: VenueUrlsSchema.parse({}) });
-  delete process.env.CASSIE_POLYMARKET_BUILDER_CODE;
   const internals = adapter as unknown as {
     secure: () => Promise<unknown>;
     pub: () => unknown;
@@ -46,7 +45,7 @@ function intent(overrides: Partial<OrderIntent> = {}): OrderIntent {
   return { marketRef: "yes", side: "BUY", outcome: "YES", size: 10, limitPrice: 0.5, tif: "GTC", postOnly: true, clientId: "child", ...overrides };
 }
 
-afterEach(() => { vi.unstubAllGlobals(); vi.restoreAllMocks(); });
+afterEach(() => { vi.unstubAllGlobals(); vi.unstubAllEnvs(); vi.restoreAllMocks(); });
 
 describe("Polymarket execution metadata", () => {
   it("reads fresh exact NO constraints and prices from one book rather than cached YES data", async () => {
@@ -108,15 +107,30 @@ describe("Polymarket submission bounds and certainty", () => {
     await adapterWith({ createLimitOrder, postOrder }, rawBook("yes", 0.0025)).placeOrderWithLifecycle(account,
       intent({ side, limitPrice: 0.503, size: 10.257 }), { onPrepared });
     expect(createLimitOrder).toHaveBeenCalledWith(expect.objectContaining({ price }));
-    expect(createLimitOrder.mock.calls[0]?.[0]).toHaveProperty("builderCode", BUILDER_CODE);
+    expect(createLimitOrder.mock.calls[0]?.[0]).toHaveProperty("builderCode", QUOTIENT_POLYMARKET_BUILDER_CODE);
     expect(onPrepared).toHaveBeenCalledWith(expect.objectContaining({ limitPrice: price, size: 10.25 }));
   });
 
-  it.each(["BUY", "SELL"] as const)("attaches Quotient's builder code to bounded FAK %s orders", async (side) => {
-    const createMarketOrder = vi.fn(async () => ({ sdkSigned: true }));
+  it.each((["GTC", "GTD", "FOK", "IOC", "FAK"] as const).flatMap(tif =>
+    (["BUY", "SELL"] as const).flatMap(side => (["YES", "NO"] as const).map(outcome => ({ tif, side, outcome }))),
+  ))("submits the compiled builder code on $side $outcome $tif orders without operator configuration", async ({ tif, side, outcome }) => {
+    const signed = { sdkSigned: true };
+    const createMarketOrder = vi.fn(async () => signed);
+    const createLimitOrder = vi.fn(async () => signed);
     const postOrder = vi.fn(async () => ({ ok: true, orderId: "order", status: "matched" }));
-    await adapterWith({ createMarketOrder, postOrder }).placeOrder(account, intent({ side, tif: "FAK", postOnly: false }));
-    expect(createMarketOrder.mock.calls[0]?.[0]).toHaveProperty("builderCode", BUILDER_CODE);
+    await adapterWith({ createMarketOrder, createLimitOrder, postOrder }, rawBook(outcome === "NO" ? "no" : "yes"))
+      .placeOrder(account, intent({ side, outcome, tif, postOnly: false, ...(tif === "GTD" ? { expiration: 2_000_000_000 } : {}) }));
+    const createOrder = tif === "GTC" || tif === "GTD" ? createLimitOrder : createMarketOrder;
+    expect(QUOTIENT_POLYMARKET_BUILDER_CODE).toMatch(/^0x[0-9a-fA-F]{64}$/);
+    expect(createOrder).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ builderCode: QUOTIENT_POLYMARKET_BUILDER_CODE }));
+    expect(postOrder).toHaveBeenCalledExactlyOnceWith(signed);
+  });
+
+  it("uses an explicit builder code override", async () => {
+    const createLimitOrder = vi.fn(async () => ({ sdkSigned: true }));
+    const postOrder = vi.fn(async () => ({ ok: true, orderId: "order", status: "live" }));
+    await adapterWith({ createLimitOrder, postOrder }, rawBook(), BUILDER_CODE).placeOrder(account, intent());
+    expect(createLimitOrder).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ builderCode: BUILDER_CODE }));
   });
 
   it("ships with Quotient's code compiled in, signs without attribution when it is off, and rejects a malformed override", async () => {

@@ -25,9 +25,11 @@ Custody model:
 - Keys are split by role. Hyperliquid's master stays local; a deployed runtime receives
   the Hyperliquid agent key. **Polymarket is an explicit
   exception:** the pinned client requires the raw venue signer plus L2 HMAC credentials in
-  the runtime. Directional Polymarket bots also receive the saved Builder/Relayer
-  service credential for automatic resolution redemption, separately from trading
-  credentials. Do not describe the deployed Polymarket signer as local-only or reuse
+  the runtime. Quotient's Builder service credential is bundled in every install for
+  account creation and gasless operations. Directional Polymarket bots resolve an
+  explicit operator default, then the bot's saved service credential, then the bundled
+  default for automatic resolution redemption, separately from trading credentials.
+  Do not describe the deployed Polymarket signer as local-only or reuse
   it for Splits authority.
 - An optional Splits Teams subaccount is an organization-owned treasury association, not a
   replacement for the venue's EOA signing requirement. It is created under the active
@@ -100,21 +102,21 @@ Every step happens in the terminal; you only leave it to copy-paste dashboard va
    - **Polymarket** — two paths. Polymarket account creation and every gasless op
      (approvals, redemption) require a **Relayer or Builder API key** in the client —
      verified live 2026-08-13; solo derivation without either is rejected by the relayer.
-     - *create* (default): create a Polymarket account. The Builder key menu offers
-       **Use default Builder key** when one exists (from `~/.cassie/defaults.json` or the
-       `POLYMARKET_BUILDER_KEY/SECRET/PASSPHRASE` env vars), `open` to launch
-       polymarket.com → **Settings → Builders** (free) for a new one, or a pasted key
-       (the wizard offers to save it as the default). A Relayer key works here too when
-       the Builder prompt is left blank. This is your Polymarket relationship, not
-       Quotient's.
-     - *connect*: use an existing Polymarket account. Copy the wallet address from your
-       polymarket.com profile, and create a Relayer API key at polymarket.com →
-       **Settings → API Keys → Relayer API Keys**. Note the Relayer key is bound to the
-       **signer** that created it, not the wallet — the wizard asks for that address.
+     - *create* (default): select **Create account**. Cassie uses the bundled Quotient
+       Builder credential automatically; there is no credential menu or key-pasting
+       step. An explicit operator default in `~/.cassie/defaults.json` or the
+       `POLYMARKET_BUILDER_KEY/SECRET/PASSPHRASE` environment variables takes precedence,
+       followed by a saved bot-specific credential.
+     - *connect*: select **Connect existing account** and enter the wallet address
+       from the polymarket.com profile. Cassie uses the same service authorization
+       defaults as account creation.
      Either way the wizard derives CLOB L2 credentials (HMAC key/secret/passphrase) and
      stores them runtime-eligible. Directional auto-redemption resolves the shared
-     Builder default, falling back to the bot's saved Relayer/Builder key. Deploy
-     delivers it separately in the private runtime environment over SSH stdin.
+     Builder default, then the bot's saved Relayer/Builder key, then the bundled
+     credential. Deploy delivers it separately in the private runtime environment
+     over SSH stdin. The bundled service credential is an operator-authorized
+     distribution exception; wallet keys and venue trading credentials remain
+     specific to each bot.
      It also surfaces the geoblock answer (GET polymarket.com/api/geoblock,
      informational only — if `blocked: true`, reads and funding work but order placement
      is rejected by the venue).

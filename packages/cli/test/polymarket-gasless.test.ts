@@ -1,6 +1,6 @@
 // packages/cli/test/polymarket-gasless.test.ts
 import { describe, expect, it, vi } from "vitest";
-import { parseBotConfig, parsePolymarketGaslessAuth } from "@quotient-forecasting/cassie-core";
+import { parseBotConfig, parsePolymarketGaslessAuth, QUOTIENT_POLYMARKET_GASLESS_AUTH } from "@quotient-forecasting/cassie-core";
 import { resolvePolymarketGaslessAuth } from "../src/polymarket-gasless.js";
 
 const auth = { kind: "builder", key: "test-key", secret: "test-secret", passphrase: "test-passphrase" };
@@ -18,8 +18,10 @@ describe("directional Polymarket gasless authorization", () => {
     await expect(resolvePolymarketGaslessAuth(cfg, { defaultAuth: () => null, botSecret })).resolves.toEqual(relayer);
     expect(botSecret).toHaveBeenCalledWith("poly", "polymarket-gasless");
   });
-  it("fails before deployment when no redemption authorization exists", async () => {
-    await expect(resolvePolymarketGaslessAuth(cfg, { defaultAuth: () => null, botSecret: async () => null })).rejects.toThrow(/auto-redemption needs/);
+  it.each(["signals", "flip-flat", "agent"])("uses bundled authorization for %s without local setup credentials", async strategy => {
+    const resolved = await resolvePolymarketGaslessAuth(parseBotConfig({ id: "poly", venue: "polymarket", strategy: { id: strategy } }),
+      { defaultAuth: () => null, botSecret: async () => null });
+    expect(resolved === QUOTIENT_POLYMARKET_GASLESS_AUTH).toBe(true);
   });
   it.each(["hyperliquid", "kalshi"] as const)("does not resolve gasless secrets for %s", async venue => {
     const defaultAuth = vi.fn(); const botSecret = vi.fn();

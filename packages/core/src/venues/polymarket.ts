@@ -156,6 +156,7 @@ import type {
   VenueAdapter,
 } from "../types.js";
 import { registerAdapter, type AdapterOpts } from "./registry.js";
+import { parsePolymarketGaslessAuth, QUOTIENT_POLYMARKET_GASLESS_AUTH, type PolymarketGaslessAuth } from "../polymarket/gasless-auth.js";
 
 type PmSecureClient = Awaited<ReturnType<typeof createSecureClient>>;
 type PmPublicClient = ReturnType<typeof createPmPublicClient>;
@@ -178,9 +179,7 @@ export class PolymarketOrderRejectedError extends Error {
   }
 }
 
-type GaslessAuthDesc =
-  | { kind: "relayer"; key: string; address: string }
-  | { kind: "builder"; key: string; secret: string; passphrase: string };
+type GaslessAuthDesc = PolymarketGaslessAuth;
 
 function apiKeyFromDesc(desc: GaslessAuthDesc): ApiKeyAuthorization {
   return desc.kind === "relayer"
@@ -255,7 +254,7 @@ export class PolymarketAdapter implements VenueAdapter {
       ...this.environment,
       signer: privateKey(this.creds.signerPk),
       wallet: this.creds.funder,
-      ...(this.opts.polymarketGaslessAuth ? { apiKey: apiKeyFromDesc(this.opts.polymarketGaslessAuth) } : {}),
+      apiKey: apiKeyFromDesc(this.opts.polymarketGaslessAuth ?? QUOTIENT_POLYMARKET_GASLESS_AUTH),
       credentials: {
         key: this.creds.l2.apiKey,
         secret: this.creds.l2.secret,
@@ -280,36 +279,22 @@ export class PolymarketAdapter implements VenueAdapter {
       ])
       : (await ctx.ask("Account (create/connect)", { default: "create" })).trim().toLowerCase();
 
-    let apiKey: ApiKeyAuthorization | undefined;
     let wallet: string | undefined;
-    let gaslessAuth: GaslessAuthDesc | undefined;
+    const savedAuth = (await ctx.getOperatorDefault?.("polymarket-builder")) ?? await ctx.getSecret(GASLESS_AUTH_ROLE);
+    const gaslessAuth = savedAuth ? parsePolymarketGaslessAuth(savedAuth) : QUOTIENT_POLYMARKET_GASLESS_AUTH;
     if (path === "connect") {
       wallet = (await ctx.ask("Wallet address (polymarket.com profile)")).trim();
-      const relayerKey = (await ctx.ask("Relayer API key", { secret: true })).trim();
-      // The Relayer key is bound to the SIGNER that created it, not the wallet
-      // (the relayer rejects "from X does not match auth Y" otherwise).
-      const { privateKeyToAccount } = await import("viem/accounts");
-      const signerAddr = privateKeyToAccount(pk as `0x${string}`).address;
-      const relayerAddr = (await ctx.ask("Relayer key's signer address", { default: signerAddr })).trim();
-      gaslessAuth = { kind: "relayer", key: relayerKey, address: relayerAddr };
-    } else {
-      // Deposit Wallet deployment and all gasless ops (approvals, redeem,
-      // withdrawals) require a Relayer or Builder API key in the client
-      // configuration (verified live 2026-08-13). Either works here.
-      gaslessAuth = await this.elicitBuilderAuth(ctx);
     }
-    if (gaslessAuth) {
-      apiKey = apiKeyFromDesc(gaslessAuth);
-      // Keep service auth outside RuntimeCreds; directional deploy resolves it separately.
-      await ctx.putSecret(GASLESS_AUTH_ROLE, JSON.stringify(gaslessAuth), { runtimeEligible: false });
-    }
+    const apiKey = apiKeyFromDesc(gaslessAuth);
+    // Retain the selected service auth for subsequent funding and withdrawals.
+    await ctx.putSecret(GASLESS_AUTH_ROLE, JSON.stringify(gaslessAuth), { runtimeEligible: false });
 
     ctx.print("Connecting Polymarket…");
     const client = await createSecureClient({
       ...this.environment,
       signer: privateKey(pk),
       ...(wallet ? { wallet } : {}),
-      ...(apiKey ? { apiKey } : {}),
+      apiKey,
     });
     this.secureClient = client;
 
@@ -553,79 +538,16 @@ export class PolymarketAdapter implements VenueAdapter {
     return BigInt(match?.[1] ?? "0");
   }
 
-  /**
-   * Elicit the gasless credential (Builder or Relayer key) that Deposit Wallet
-   * deployment needs. A menu rather than one overloaded text field: the old
-   * prompt made blank-vs-'open'-vs-a-key four different outcomes typed into a
-   * masked box, where the operator could not see what they had typed.
-   */
-  private async elicitBuilderAuth(ctx: SetupContext): Promise<GaslessAuthDesc | undefined> {
-    const defaultAuth = (await ctx.getOperatorDefault?.("polymarket-builder")) ?? null;
-
-    for (;;) {
-      const choice = await this.askAuthChoice(ctx, defaultAuth);
-      if (choice === "open") {
-        const url = "https://polymarket.com/settings";
-        if (ctx.openUrl) ctx.openUrl(url);
-        ctx.print("Create a key in the Builders tab");
-        ctx.print(url);
-        continue;
-      }
-      if (choice === "default" && defaultAuth) return JSON.parse(defaultAuth) as GaslessAuthDesc;
-      if (choice === "builder") {
-        const key = (await ctx.ask("Builder key", { secret: true })).trim();
-        if (!key) {
-          ctx.print("Key required.");
-          continue;
-        }
-        const secret = (await ctx.ask("Builder secret", { secret: true })).trim();
-        const passphrase = (await ctx.ask("Builder passphrase", { secret: true })).trim();
-        const desc: GaslessAuthDesc = { kind: "builder", key, secret, passphrase };
-        if (ctx.setOperatorDefault && (await ctx.confirm("Save as default Builder key?", true))) {
-          await ctx.setOperatorDefault("polymarket-builder", JSON.stringify(desc));
-        }
-        return desc;
-      }
-      if (choice === "relayer") {
-        const rKey = (await ctx.ask("Relayer API key", { secret: true })).trim();
-        if (!rKey) {
-          ctx.print("Key required.");
-          continue;
-        }
-        const rAddr = (await ctx.ask("Relayer key's signer address")).trim();
-        return { kind: "relayer", key: rKey, address: rAddr };
-      }
-      return undefined;
-    }
-  }
-
-  /** The menu, with a text fallback for hosts that implement no `select`. */
-  private async askAuthChoice(ctx: SetupContext, defaultAuth: string | null): Promise<string> {
-    const choices = [
-      ...(defaultAuth ? [{ value: "default", title: "Use saved Builder key" }] : []),
-      { value: "builder", title: defaultAuth ? "Paste a different Builder key" : "Paste a Builder key" },
-      { value: "open", title: "Create Builder key" },
-      { value: "relayer", title: "Use a Relayer key instead" },
-      { value: "skip", title: "Skip account creation" },
-    ];
-    if (ctx.select) return ctx.select("Authenticate with", choices);
-    const menu = choices.map((c, i) => `  ${i + 1}) ${c.title}`).join("\n");
-    ctx.print(menu);
-    const raw = (await ctx.ask("Choose", { default: "1" })).trim();
-    const idx = Number(raw) - 1;
-    return choices[idx]?.value ?? "builder";
-  }
-
   /** Secure client carrying the operator's relayer/builder key for gasless ops. */
   private async gaslessClient(ctx: SetupContext, a: PmAccount): Promise<PmSecureClient> {
     await this.ensureCredsFromKeystore(ctx, a);
-    const gaslessRaw = await ctx.getSecret(GASLESS_AUTH_ROLE);
+    const gaslessRaw = (await ctx.getOperatorDefault?.("polymarket-builder")) ?? await ctx.getSecret(GASLESS_AUTH_ROLE);
     if (!gaslessRaw) return this.secure();
     return createSecureClient({
       ...this.environment,
       signer: privateKey(this.creds!.signerPk),
       wallet: a.funder,
-      apiKey: apiKeyFromDesc(JSON.parse(gaslessRaw) as GaslessAuthDesc),
+      apiKey: apiKeyFromDesc(parsePolymarketGaslessAuth(gaslessRaw)),
       credentials: {
         key: this.creds!.l2.apiKey,
         secret: this.creds!.l2.secret,
