@@ -41,3 +41,6 @@ next-env.d.ts
 
 # Local research artifacts (large data, not part of the package)
 research/
+
+# Local git worktrees
+.claude/worktrees/
