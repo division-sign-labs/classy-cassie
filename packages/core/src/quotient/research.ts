@@ -14,6 +14,7 @@
 
 import { z } from "zod";
 import { boundFetch } from "../http.js";
+import { QuotientApiError } from "./retry.js";
 
 /** Per-call prices, USD — used for cost telemetry. */
 export const QUOTIENT_CALL_COST_USD = {
@@ -147,7 +148,7 @@ export class QuotientResearchClient {
     if (Number.isFinite(credits)) this.creditsRemaining = credits;
     if (!res.ok) {
       const detail = await res.text().catch(() => "");
-      throw new Error(`quotient ${method} ${url.pathname} → ${res.status}${detail ? `: ${detail.slice(0, 300)}` : ""}`);
+      throw new QuotientApiError(res.status, `${method} ${url.pathname}`, detail.slice(0, 300));
     }
     return res.json();
   }

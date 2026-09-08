@@ -262,4 +262,5 @@ export const KeyRoles = {
   quotientToken: "quotient-token", // signal API token (runtime-eligible)
   kalshiApi: "kalshi-api", // Kalshi RSA private key, single-line base64 PKCS#8 DER (runtime-eligible)
   surplusApiKey: "surplus-api-key", // Surplus Intelligence LLM key, inf_… (runtime-eligible)
+  strategyKey: "strategy-key", // Quotient strategy-scoped key, qsk_… (runtime-eligible)
 } as const;

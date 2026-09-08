@@ -5,6 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { parseBotConfig, type BotConfig } from "@quotient-forecasting/cassie-core";
+import { stripFlipFlatRules } from "@quotient-forecasting/strategy-flip-flat";
 import { runStrategy, type StrategyOptions } from "../src/commands/strategy.js";
 import { botConfigPath, loadBotConfig, saveBotConfig } from "../src/paths.js";
 
@@ -87,7 +88,9 @@ describe("directional execution settings", () => {
     const after = loadBotConfig(before.id);
     expect(after.execution).toEqual({ ...before.execution, mode: "adaptive" });
     expect(after.risk).toEqual({ ...before.risk, slippagePct: 1 });
-    expect(after.strategy.config).toMatchObject({ ...before.strategy.config, topN: 4 });
+    expect(after.strategy.config).toMatchObject({ ...stripFlipFlatRules(before.strategy.config as Record<string, unknown>), topN: 4 });
+    // Rule keys are served by Quotient and never persisted by the CLI.
+    expect(after.strategy.config).not.toHaveProperty("entrySpreadPp");
     expect(after.alerts).toEqual(before.alerts);
     expect(after.tickIntervalMin).toBe(before.tickIntervalMin);
   });
@@ -115,7 +118,7 @@ describe("directional execution settings", () => {
     expect(readFileSync(botConfigPath(before.id), "utf8")).toBe(persisted);
   });
 
-  it.each(["agent", "market-make", "quotient-swing"])("rejects execution flags for %s", async (id) => {
+  it.each(["agent", "quotient-swing"])("rejects execution flags for %s", async (id) => {
     const before = bot({ venue: id === "quotient-swing" ? "hyperliquid" : "polymarket", strategy: { id, config: {} } });
     const persisted = readFileSync(botConfigPath(before.id), "utf8");
 

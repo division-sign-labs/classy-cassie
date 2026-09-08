@@ -80,6 +80,28 @@ export function pinsKeyToKeystore(botId: string): boolean {
   }
 }
 
+/**
+ * The strategy-scoped key (qsk_…) a strategy bot runs on. Nearest .local.env
+ * → exported env → this bot's keystore. It never falls back to a developer
+ * key: a strategy without its own key does not run.
+ */
+export async function resolveStrategyKey(botId: string): Promise<ResolvedToken | null> {
+  const direct = localEnvValue(["QUOTIENT_STRATEGY_KEY"]) ?? environmentValue(["QUOTIENT_STRATEGY_KEY"]);
+  if (direct) return { token: direct.value, source: direct.source, origin: direct.origin };
+  const stored = await getKeystoreSecret(botId, KeyRoles.strategyKey);
+  if (stored) return { token: stored, source: "keystore", origin: `bot ${botId} keystore entry ${KeyRoles.strategyKey}` };
+  return null;
+}
+
+/** The remediation text shown when a strategy bot has no strategy key. */
+export function missingStrategyKeyMessage(botId: string): string {
+  return (
+    `no strategy key found for ${botId}. The signals strategy runs only on a strategy-scoped key (qsk_…) issued from ` +
+    "the Quotient admin console. Set QUOTIENT_STRATEGY_KEY in the environment or nearest .local.env, or store it with:\n" +
+    `cassie strategy-key ${botId} <key>`
+  );
+}
+
 /** Full resolution chain, for the commands that need a token to run. */
 export async function resolveQuotientToken(botId: string): Promise<ResolvedToken | null> {
   const pinned = pinsKeyToKeystore(botId);

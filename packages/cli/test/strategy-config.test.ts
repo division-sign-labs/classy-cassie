@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { parseBotConfig } from "@quotient-forecasting/cassie-core";
-import { saveBotConfig } from "../src/paths.js";
+import { loadBotConfig, saveBotConfig } from "../src/paths.js";
 import {
   RECOMMENDED_STRATEGY,
   elicitRecommendedStrategyConfig,
@@ -33,13 +33,13 @@ describe("signals recommended allocation", () => {
       allocationMode: "portfolio-kelly",
       marketCapPct: 2.5,
       eventCapPct: 5,
-      nearResolutionDays: 3,
-      nearResolutionSizeCutPct: 25,
     });
+    // Entry and exit rules are served by Quotient, never written by the CLI.
+    expect(recommended).not.toHaveProperty("entrySpreadPp");
+    expect(recommended).not.toHaveProperty("convergenceExitPp");
+    expect(recommended).not.toHaveProperty("maxHoldDays");
     expect(recommendedStrategySummary("kalshi")).toContain("2.5% per market and 5% per event");
-    expect(recommendedStrategySummary("kalshi")).toContain("25% smaller within 3 days of resolution");
-    expect(RECOMMENDED_STRATEGY.convergenceExitPp).toBe(3);
-    expect(recommendedStrategySummary("kalshi")).toContain("3pp convergence or 7-day max hold");
+    expect(recommendedStrategySummary("kalshi")).toContain("served by Quotient");
   });
 
   it("displays the recommended AUM caps for an empty prediction strategy config", async () => {
@@ -63,33 +63,29 @@ describe("signals recommended allocation", () => {
     const output = lines.join("\n");
     expect(output).toMatch(/per-market cap:\s+2\.5% of portfolio equity/);
     expect(output).toMatch(/per-event cap:\s+5% of portfolio equity/);
-    expect(output).toMatch(/near resolution:\s+25% smaller when the market resolves within 3 days/);
-    expect(output).toMatch(/convergence exit:\s+sell once remaining edge falls to 3pp/);
+    expect(output).toMatch(/entry and exit rules:\s+served by Quotient/);
+    expect(output).toMatch(/Quotient fee:\s+0\.75% of notional per fill/);
+    expect(output).not.toMatch(/convergence exit/);
   });
 
-  it("accepts the near-resolution flags and reports the window as off when disabled", async () => {
+  it("strips rule keys an older CLI saved and never writes them back", async () => {
     const root = mkdtempSync(join(tmpdir(), "cassie-strategy-config-"));
     roots.push(root);
     process.env.CASSIE_HOME = root;
     saveBotConfig(
       parseBotConfig({
-        id: "near-resolution",
+        id: "legacy-rules",
         venue: "polymarket",
-        strategy: { id: "signals", config: {} },
+        strategy: { id: "signals", config: { entrySpreadPp: 4, convergenceExitPp: 1, maxHoldDays: 30, marketCapPct: 2 } },
       }),
     );
-    const lines: string[] = [];
-    vi.spyOn(console, "log").mockImplementation((...parts: unknown[]) => {
-      lines.push(parts.map(String).join(" "));
-    });
+    vi.spyOn(console, "log").mockImplementation(() => {});
 
-    await runStrategy("near-resolution", { nearResolutionDays: "2", nearResolutionSizeCutPct: "50" });
-    expect(lines.join("\n")).toMatch(/near resolution:\s+50% smaller when the market resolves within 2 days/);
-
-    lines.length = 0;
-    await runStrategy("near-resolution", { nearResolutionDays: "off", convergenceExitPp: "off" });
-    expect(lines.join("\n")).toMatch(/near resolution:\s+off/);
-    expect(lines.join("\n")).toMatch(/convergence exit:\s+off/);
-    await expect(runStrategy("near-resolution", { nearResolutionSizeCutPct: "101" })).rejects.toThrow(/at most 100%/);
+    await runStrategy("legacy-rules", { marketCapPct: "3" });
+    const saved = loadBotConfig("legacy-rules").strategy.config as Record<string, unknown>;
+    expect(saved).toMatchObject({ marketCapPct: 3 });
+    expect(saved).not.toHaveProperty("entrySpreadPp");
+    expect(saved).not.toHaveProperty("convergenceExitPp");
+    expect(saved).not.toHaveProperty("maxHoldDays");
   });
 });

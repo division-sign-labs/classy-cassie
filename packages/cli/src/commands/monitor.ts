@@ -144,11 +144,6 @@ function compactNumber(value: number): string {
 }
 
 export function statusCadence(cfg: BotConfig): string {
-  if (cfg.strategy.id === "market-make" && cfg.strategy.config.two_sided) {
-    const reconciliation = cfg.strategy.config.reconciliation as { rest_reconcile_seconds?: number } | undefined;
-    const seconds = Math.max(60, reconciliation?.rest_reconcile_seconds ?? cfg.tickIntervalMin * 60);
-    return `two-sided quotes on book updates, routine account checks every ${compactNumber(seconds)}s; fills trigger reconciliation`;
-  }
   const signalMin = Number(
     (cfg.strategy.config as Record<string, unknown>).signalPollIntervalMin ?? 5,
   );

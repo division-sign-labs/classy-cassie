@@ -7,7 +7,7 @@
 import { existsSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { parseBotConfig, parsePolymarketGaslessAuth, consoleLogger, type RuntimeCreds } from "@quotient-forecasting/cassie-core";
+import { parseBotConfig, parsePolymarketGaslessAuth, consoleLogger, usesStrategyKey, type RuntimeCreds } from "@quotient-forecasting/cassie-core";
 import { BotService } from "./service.js";
 import { serveControl } from "./control.js";
 import { requireRegion } from "./region.js";
@@ -70,7 +70,11 @@ async function main(): Promise<void> {
     deploymentId: process.env.CASSIE_DEPLOYMENT_ID,
     version: VERSION,
     buildId: installedBuildId(),
-    quotientToken: required("QUOTIENT_API_TOKEN"),
+    // The signals strategy runs on its strategy-scoped key alone. The other
+    // strategies still need a developer key for research; buildStrategy and
+    // buildSignalSource throw targeted errors when it is missing.
+    quotientToken: process.env.QUOTIENT_API_TOKEN,
+    strategyKey: usesStrategyKey(config.strategy.id) ? required("QUOTIENT_STRATEGY_KEY") : process.env.QUOTIENT_STRATEGY_KEY,
     telegramToken: process.env.TELEGRAM_BOT_TOKEN,
     // Required only when the bot runs the agent strategy; buildStrategy throws
     // a targeted error there, so a plain signals bot keeps booting without it.

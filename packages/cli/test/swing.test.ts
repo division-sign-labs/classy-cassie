@@ -172,7 +172,7 @@ describe("swing configuration boundaries", () => {
 });
 
 describe("swing identity and native-stop protection", () => {
-  it.each(["signals", "agent", "market-make"])("requires a new id when switching %s to or from swing", strategy => {
+  it.each(["signals", "agent"])("requires a new id when switching %s to or from swing", strategy => {
     expect(() => requireSafeStrategyTransition(strategy, "quotient-swing")).toThrow(/separate bot id/);
     expect(() => requireSafeStrategyTransition("quotient-swing", strategy)).toThrow(/separate bot id/);
   });

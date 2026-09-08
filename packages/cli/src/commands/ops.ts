@@ -164,19 +164,13 @@ export async function showOrders(botId: string, opts: { cancel?: string; cancelA
   printOrders(await adapter.openOrders(account));
 }
 
-/** Market-maker cancels must update its durable reservations through its controller. */
+/** Swing cancels go through the swing controller so native stops survive. */
 export function assertGenericOrderMutationAllowed(
   cfg: ReturnType<typeof loadBotConfig>,
   opts: { cancel?: string; cancelAll?: boolean },
 ): void {
   if (cfg.strategy.id === "quotient-swing" && (opts.cancel !== undefined || opts.cancelAll === true)) {
     throw new Error(`Generic cancellation is disabled for swing bots. Halt entries without removing native stops:\ncassie swing halt ${cfg.id}`);
-  }
-  if (cfg.strategy.id === "market-make" && (opts.cancel !== undefined || opts.cancelAll === true)) {
-    throw new Error(
-      `Generic order cancellation bypasses market-make reservations. Use its controller:\n` +
-        `cassie market-make halt ${cfg.id}\ncassie market-make reconcile ${cfg.id}`,
-    );
   }
 }
 

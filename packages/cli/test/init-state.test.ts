@@ -100,12 +100,3 @@ describe("kalshi init journal", () => {
     clearInitState("bot-k");
   });
 });
-
-describe("market-make strategy transition", () => {
-  it("keeps an existing market-maker bound to its durable bot id", () => {
-    expect(() => requireSafeStrategyTransition("market-make", "signals")).toThrow(/cannot switch.*in place/);
-    expect(() => requireSafeStrategyTransition("market-make", "agent")).toThrow(/separate bot id/);
-    expect(() => requireSafeStrategyTransition("market-make", "market-make")).not.toThrow();
-    expect(() => requireSafeStrategyTransition("signals", "market-make")).not.toThrow();
-  });
-});

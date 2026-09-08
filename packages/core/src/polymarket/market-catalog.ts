@@ -1,6 +1,6 @@
 // packages/core/src/polymarket/market-catalog.ts
-// Strict Gamma metadata lookup and independent discovery for the market-make
-// runtime. Outcome tokens are mapped by label, never by array position alone.
+// Strict Gamma metadata lookup and independent market discovery.
+// Outcome tokens are mapped by label, never by array position alone.
 
 import { z } from "zod";
 import { boundFetch } from "../http.js";

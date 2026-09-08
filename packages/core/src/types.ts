@@ -443,6 +443,12 @@ export interface StrategyContext {
   venueId: VenueId;
   /** The strategy's own config block (validated by the strategy). */
   config: unknown;
+  /**
+   * Served strategy rules (validated by the strategy). Present when the
+   * runtime holds a strategy-scoped key; they override any rule-shaped keys
+   * in `config`, so the operator config cannot loosen the strategy.
+   */
+  rules?: unknown;
   signals: SignalSource;
   venue: VenueReadApi;
   positions: Position[];
@@ -460,6 +466,11 @@ export interface StrategyContext {
 export interface StrategyMemory {
   get<T>(key: string): Promise<T | undefined>;
   set<T>(key: string, value: T): Promise<void>;
+}
+
+/** Served strategy rules; `current()` may return a cached document during an outage. */
+export interface StrategyRulesSource {
+  current(): Promise<{ version: number; rules: Record<string, unknown> } | undefined>;
 }
 
 export interface Strategy {

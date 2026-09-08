@@ -25,6 +25,7 @@ import type {
   StrategyActionResult,
   StrategyContext,
   StrategyMemory,
+  StrategyRulesSource,
   VenueAccount,
   VenueAdapter,
   VenueReadApi,
@@ -90,6 +91,8 @@ export interface EngineDeps {
   account: VenueAccount;
   strategy: Strategy;
   signals: SignalSource;
+  /** Served strategy rules; absent for strategies that carry their own. */
+  rules?: StrategyRulesSource;
   alerter: Alerter;
   state: StateStore;
   log: Logger;
@@ -278,9 +281,11 @@ export class Engine {
         const ctx = await this.buildStrategyContext();
         const actions = await this.d.strategy.tick(ctx);
         if (this.predictions) {
+          // Quotient reads already retried inside the signal source. A final
+          // failure must not abandon the tick: entries stop (no fresh signals)
+          // while held positions are still supervised and exits still execute.
           const signals = await this.d.signals.latest({ venue: this.d.config.venue }).catch(error => {
-            if (this.d.config.strategy.id !== "kalshi-commodities") throw error;
-            log.warn("commodity research unavailable; canceling entries while supervising exits");
+            log.warn(`quotient unavailable after retries; canceling entries while supervising exits: ${(error as Error).message}`);
             return [];
           });
           this.predictionSignals = { signals, refreshedAt: this.d.signals.refreshedAt?.() ?? this.now() };
@@ -372,9 +377,10 @@ export class Engine {
 
   private async buildStrategyContext(): Promise<StrategyContext> {
     const { adapter, account, botId, config, signals, log } = this.d;
+    const rules = (await this.d.rules?.current())?.rules;
     if (this.perps) {
       const snapshot = await this.perps.snapshot();
-      return { botId, venueId: adapter.id, config: config.strategy.config, signals, venue: this.readApi(), positions: snapshot.positions,
+      return { botId, venueId: adapter.id, config: config.strategy.config, rules, signals, venue: this.readApi(), positions: snapshot.positions,
         openOrders: snapshot.openOrders, equity: snapshot.equity, perpAccount: snapshot, perpExecution: await this.perps.status(), log,
         now: this.now, memory: this.strategyMemory() };
     }
@@ -389,6 +395,7 @@ export class Engine {
       botId,
       venueId: adapter.id,
       config: config.strategy.config,
+      rules,
       signals,
       venue: this.readApi(),
       positions,
@@ -513,7 +520,7 @@ export class Engine {
       }
       case "place":
         throw new Error(
-          "explicit market-making orders require the market-make controller and passive risk executor",
+          "explicit resting orders are not supported by the engine",
         );
     }
   }

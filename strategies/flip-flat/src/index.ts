@@ -130,6 +130,74 @@ export const FlipFlatConfigSchema = z.preprocess((raw) => {
 }, FlipFlatConfigObjectSchema);
 export type FlipFlatConfig = z.output<typeof FlipFlatConfigSchema>;
 
+/**
+ * Rule-shaped keys. Quotient serves these behind the strategy key; whatever
+ * the operator config carries for them is overridden, so `cassie strategy`
+ * can tune sizing and cadence but not the entry and exit rules themselves.
+ * The schema defaults above are fallbacks for tests and fixtures only; a
+ * deployed bot refuses to start without a served document.
+ */
+export const FLIP_FLAT_RULE_KEYS = [
+  "entrySpreadPp",
+  "maxEntrySpreadPp",
+  "nearResolutionDays",
+  "nearResolutionSizeCutPct",
+  "refPriceSanityPct",
+  "convergenceExitPp",
+  "maxHoldDays",
+  "scenarioExitEnabled",
+  "adverseCrossEdgePp",
+  "adverseCrossMaxPnlPct",
+  "adverseCrossConfirmations",
+  "qCollapsePp",
+  "qCollapseMaxRemainingEdgePp",
+  "flipConfirmations",
+  "flipExitMaxRemainingEdgePp",
+  "exitFeeBps",
+  "exitRetrySec",
+  "pendingEntryReservationSec",
+] as const;
+export type FlipFlatRuleKey = (typeof FLIP_FLAT_RULE_KEYS)[number];
+
+/** A served rules document: any subset of the rule keys; unknown keys are ignored. */
+export const FlipFlatRulesSchema = z.object({
+  entrySpreadPp: z.number().optional(),
+  maxEntrySpreadPp: z.number().positive().nullable().optional(),
+  nearResolutionDays: z.number().positive().nullable().optional(),
+  nearResolutionSizeCutPct: z.number().nonnegative().max(100).optional(),
+  refPriceSanityPct: z.number().positive().optional(),
+  convergenceExitPp: z.number().nullable().optional(),
+  maxHoldDays: z.number().positive().nullable().optional(),
+  scenarioExitEnabled: z.boolean().optional(),
+  adverseCrossEdgePp: z.number().optional(),
+  adverseCrossMaxPnlPct: z.number().optional(),
+  adverseCrossConfirmations: z.number().int().positive().optional(),
+  qCollapsePp: z.number().positive().optional(),
+  qCollapseMaxRemainingEdgePp: z.number().optional(),
+  flipConfirmations: z.number().int().positive().optional(),
+  flipExitMaxRemainingEdgePp: z.number().optional(),
+  exitFeeBps: z.number().nonnegative().optional(),
+  exitRetrySec: z.number().positive().optional(),
+  pendingEntryReservationSec: z.number().positive().optional(),
+});
+export type FlipFlatRules = z.output<typeof FlipFlatRulesSchema>;
+
+/** Operator config merged with served rules; rules win on every rule key. */
+export function resolveFlipFlatConfig(ctx: Pick<StrategyContext, "config" | "rules">): FlipFlatConfig {
+  const operator = (ctx.config ?? {}) as Record<string, unknown>;
+  if (ctx.rules === undefined) return FlipFlatConfigSchema.parse(operator);
+  const rules = FlipFlatRulesSchema.parse(ctx.rules);
+  const served = Object.fromEntries(Object.entries(rules).filter(([, value]) => value !== undefined));
+  return FlipFlatConfigSchema.parse({ ...operator, ...served });
+}
+
+/** Operator config with every rule key removed, for saving and display. */
+export function stripFlipFlatRules(config: Record<string, unknown>): Record<string, unknown> {
+  const out = { ...config };
+  for (const key of FLIP_FLAT_RULE_KEYS) delete out[key];
+  return out;
+}
+
 export const DAILY_BUDGET_MEMORY_KEY = "daily-entry-budget";
 export const SCENARIO_EXIT_MEMORY_KEY = "scenario-exit-positions";
 export const PENDING_ENTRIES_MEMORY_KEY = "pending-entry-reservations";
@@ -598,9 +666,15 @@ export class FlipFlatStrategy implements Strategy {
   readonly id = "flip-flat";
 
   async tick(ctx: StrategyContext): Promise<Action[]> {
-    const cfg = FlipFlatConfigSchema.parse(ctx.config ?? {});
+    const cfg = resolveFlipFlatConfig(ctx);
     const actions: Action[] = [];
-    const signals = await ctx.signals.latest({ venue: ctx.venueId });
+    // The signal source already retried. A final failure means no fresh
+    // entries this tick; held positions are still evaluated below on the last
+    // committed forecast, so exit conditions that fire still close positions.
+    const signals = await ctx.signals.latest({ venue: ctx.venueId }).catch((error: unknown): Signal[] => {
+      ctx.log.warn(`signal refresh failed; no entries this tick, exits evaluated on the last committed forecast: ${(error as Error).message}`);
+      return [];
+    });
     const now = ctx.now();
     const reservations = await this.syncPendingEntries(ctx, cfg, now);
     await this.syncAdaptiveEntries(ctx, reservations);

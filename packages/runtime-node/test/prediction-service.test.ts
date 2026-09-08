@@ -48,7 +48,8 @@ describe("adaptive execution runtime lanes", () => {
     service = new BotService({ config: BotConfigSchema.parse({ id: "adaptive-test", venue: "polymarket",
       strategy: { id: "signals", config: {} }, tickIntervalMin: 1,
       reporting: { provider: "ares", builderCode: "0x" + "a".repeat(64) } }),
-      account, statePath: join(dir, "bot.sqlite"), runtime: "local", quotientToken: "test-token",
+      account, statePath: join(dir, "bot.sqlite"), runtime: "local", strategyKey: "qsk_test",
+      strategyRules: { current: async () => ({ version: 7, rules: {} }) },
       log: { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() } });
   });
   afterEach(async () => {
@@ -69,6 +70,7 @@ describe("adaptive execution runtime lanes", () => {
     expect(engine.supervisePredictions).toHaveBeenCalledTimes(2);
     expect(engine.heartbeatIfResting).toHaveBeenCalledTimes(2);
     expect(service!.status()).toHaveProperty("execution.blocked", false);
+    expect(service!.status()).toHaveProperty("rulesVersion", 7);
     expect(doubles.adapter.mock.calls[0]![1]).not.toHaveProperty("builderCode");
   });
 

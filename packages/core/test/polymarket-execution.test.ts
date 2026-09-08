@@ -13,10 +13,13 @@ const rawBook = (tokenId = "yes", tickSize = 0.01) => ({
   asks: [{ price: "0.56", size: "100" }, { price: "0.52", size: "20" }],
 });
 
-function adapterWith(client: Record<string, unknown>, book = rawBook()) {
-  // Obsolete options must never reactivate per-order attribution.
-  const opts = { urls: VenueUrlsSchema.parse({}), builderCode: "obsolete" };
-  const adapter = new PolymarketAdapter(opts);
+const BUILDER_CODE = `0x${"ab".repeat(32)}` as const;
+
+function adapterWith(client: Record<string, unknown>, book = rawBook(), builderCode: string | null = BUILDER_CODE) {
+  if (builderCode === null) delete process.env.CASSIE_POLYMARKET_BUILDER_CODE;
+  else process.env.CASSIE_POLYMARKET_BUILDER_CODE = builderCode;
+  const adapter = new PolymarketAdapter({ urls: VenueUrlsSchema.parse({}) });
+  delete process.env.CASSIE_POLYMARKET_BUILDER_CODE;
   const internals = adapter as unknown as {
     secure: () => Promise<unknown>;
     pub: () => unknown;
@@ -100,15 +103,25 @@ describe("Polymarket submission bounds and certainty", () => {
     await adapterWith({ createLimitOrder, postOrder }, rawBook("yes", 0.0025)).placeOrderWithLifecycle(account,
       intent({ side, limitPrice: 0.503, size: 10.257 }), { onPrepared });
     expect(createLimitOrder).toHaveBeenCalledWith(expect.objectContaining({ price }));
-    expect(createLimitOrder.mock.calls[0]?.[0]).not.toHaveProperty("builderCode");
+    expect(createLimitOrder.mock.calls[0]?.[0]).toHaveProperty("builderCode", BUILDER_CODE);
     expect(onPrepared).toHaveBeenCalledWith(expect.objectContaining({ limitPrice: price, size: 10.25 }));
   });
 
-  it.each(["BUY", "SELL"] as const)("omits attribution from bounded FAK %s orders", async (side) => {
+  it.each(["BUY", "SELL"] as const)("attaches Quotient's builder code to bounded FAK %s orders", async (side) => {
     const createMarketOrder = vi.fn(async () => ({ sdkSigned: true }));
     const postOrder = vi.fn(async () => ({ ok: true, orderId: "order", status: "matched" }));
     await adapterWith({ createMarketOrder, postOrder }).placeOrder(account, intent({ side, tif: "FAK", postOnly: false }));
-    expect(createMarketOrder.mock.calls[0]?.[0]).not.toHaveProperty("builderCode");
+    expect(createMarketOrder.mock.calls[0]?.[0]).toHaveProperty("builderCode", BUILDER_CODE);
+  });
+
+  it("signs without attribution when no builder code is configured, and rejects a malformed override", async () => {
+    const createLimitOrder = vi.fn(async () => ({ sdkSigned: true }));
+    const postOrder = vi.fn(async () => ({ ok: true, orderId: "order", status: "live" }));
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    await adapterWith({ createLimitOrder, postOrder }, rawBook(), null).placeOrder(account, intent());
+    expect(createLimitOrder.mock.calls[0]?.[0]).not.toHaveProperty("builderCode");
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining("no builder code configured"));
+    expect(() => adapterWith({}, rawBook(), "not-a-code")).toThrow(/32-byte/);
   });
 
   it("rejects stale minimum quantities before signing", async () => {

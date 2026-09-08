@@ -1,6 +1,6 @@
 {
   "name": "@quotient-forecasting/cassie-runtime-node",
-  "version": "0.4.11",
+  "version": "0.4.12",
   "type": "module",
   "license": "Apache-2.0",
   "description": "Node runtime for Cassie trading bots: engine loop, SQLite state, and a unix-socket control API",
@@ -42,7 +42,6 @@
     "@quotient-forecasting/cassie-core": "workspace:*",
     "@quotient-forecasting/strategy-agent": "workspace:*",
     "@quotient-forecasting/strategy-flip-flat": "workspace:*",
-    "@quotient-forecasting/strategy-market-make": "workspace:*",
     "@quotient-forecasting/strategy-quotient-swing": "workspace:*",
     "better-sqlite3": "13.0.3",
     "zod": "4.4.3"

@@ -21,6 +21,8 @@ export interface LocalRunOpts {
   /** Contributor-test hook for a deterministic signal file. */
   signalsFixturePath?: string;
   quotientToken?: string;
+  /** Strategy-scoped Quotient key (qsk_…). Required by the signals strategy. */
+  strategyKey?: string;
   telegramToken?: string;
   /** Surplus Intelligence key. Required by the agent strategy only. */
   surplusApiKey?: string;

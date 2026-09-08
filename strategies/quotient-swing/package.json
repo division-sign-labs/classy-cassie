@@ -1,6 +1,6 @@
 {
   "name": "@quotient-forecasting/strategy-quotient-swing",
-  "version": "0.4.11",
+  "version": "0.4.12",
   "type": "module",
   "license": "Apache-2.0",
   "description": "Source-aware equity and commodity perpetual swing strategy for Cassie",

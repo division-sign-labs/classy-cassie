@@ -2,7 +2,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { parseBotConfig, type BotConfig } from "@quotient-forecasting/cassie-core";
 import type { Droplet } from "../src/digitalocean.js";
-import { marketMakeStateSource, preserveRuntimeState, quiesce, restoreRuntimeState } from "../src/commands/deploy.js";
+import { preservedStateSource, preserveRuntimeState, quiesce, restoreRuntimeState } from "../src/commands/deploy.js";
 
 const CONFIG: BotConfig = parseBotConfig({
   id: "swing-deploy", venue: "hyperliquid", strategy: { id: "quotient-swing", config: { mode: "live" } },
@@ -20,16 +20,16 @@ afterEach(() => vi.restoreAllMocks());
 
 describe("swing deployment durability", () => {
   it("preserves execution state for same-droplet redeploys and replacements", () => {
-    expect(marketMakeStateSource(CONFIG, true, null)).toBe(CONFIG);
-    expect(marketMakeStateSource(CONFIG, false, null)).toBe(CONFIG);
+    expect(preservedStateSource(CONFIG, true, null)).toBe(CONFIG);
+    expect(preservedStateSource(CONFIG, false, null)).toBe(CONFIG);
   });
 
   it("preserves a same-name swing droplet even when the local deployment pointer is absent", () => {
     const { deployment: _deployment, ...local } = CONFIG;
     const droplet = { id: 456, created_at: "2026-09-05T01:00:00.000Z", region: { slug: "sgp1" },
       size_slug: "s-1vcpu-1gb", networks: { v4: [{ type: "public", ip_address: "203.0.113.9" }] } } as unknown as Droplet;
-    expect(marketMakeStateSource(local, false, droplet)?.deployment).toMatchObject({ dropletId: 456, host: "203.0.113.9" });
-    expect(marketMakeStateSource(local, false, null)).toBeNull();
+    expect(preservedStateSource(local, false, droplet)?.deployment).toMatchObject({ dropletId: 456, host: "203.0.113.9" });
+    expect(preservedStateSource(local, false, null)).toBeNull();
   });
 
   it("accepts the engine's native-protection proof without demanding empty protective orders", () => {

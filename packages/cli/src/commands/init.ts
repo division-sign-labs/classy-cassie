@@ -9,6 +9,7 @@ import {
   KeyRoles,
   CommodityConfigSchema,
   TelegramAlerter,
+  checkStrategyKeyAccess,
   createAdapter,
   generateEoa,
   isPredictionVenue,
@@ -19,22 +20,18 @@ import { ask, confirm, getPassphrase, keystore, makeSetupContext, select, withOp
 import { clearInitState, loadInitState, saveInitState, type InitState } from "../init-state.js";
 import { botConfigPath, loadBotConfig, saveBotConfig } from "../paths.js";
 import { createSplitsTreasury } from "../splits-init.js";
-import { discoverQuotientToken } from "../quotient-token.js";
-import { recommendedStrategySummary, elicitRecommendedStrategyConfig, elicitStrategyConfig } from "./strategy.js";
+import { discoverQuotientToken, resolveStrategyKey } from "../quotient-token.js";
+import { POLYMARKET_FEE_DISCLOSURE, recommendedStrategySummary, elicitRecommendedStrategyConfig, elicitStrategyConfig } from "./strategy.js";
 import { AGENT_STRATEGY_SUMMARY, elicitAgentConfig, fetchAndStorePersona } from "./agent.js";
 import { discoverSurplusApiKey, verifySurplusApiKey } from "../surplus-config.js";
 import { runDeploy } from "./deploy.js";
 import { runFund } from "./fund.js";
 import { QuotientSwingConfigSchema } from "@quotient-forecasting/strategy-quotient-swing";
-import {
-  MARKET_MAKE_PRESET,
-  MarketMakeConfigSchema,
-} from "@quotient-forecasting/strategy-market-make";
 
 /**
- * An in-place switch would orphan the market-maker's durable reservations and
- * can also remove the CLI surface needed to halt its still-running runtime.
- * V1 therefore requires a separate bot id for a different strategy.
+ * An in-place switch would orphan a strategy's durable exposure state and can
+ * remove the CLI surface needed to halt its still-running runtime, so strategies
+ * with durable ledgers require a separate bot id.
  */
 export function requireSafeStrategyTransition(existingStrategyId: string | undefined, nextStrategyId: string): void {
   if (existingStrategyId && existingStrategyId !== nextStrategyId && [existingStrategyId, nextStrategyId].includes("kalshi-commodities")) {
@@ -42,11 +39,6 @@ export function requireSafeStrategyTransition(existingStrategyId: string | undef
   }
   if (existingStrategyId && existingStrategyId !== nextStrategyId && (existingStrategyId === "quotient-swing" || nextStrategyId === "quotient-swing")) {
     throw new Error("quotient-swing requires a separate bot id so existing exposure and protection cannot be orphaned");
-  }
-  if (existingStrategyId === "market-make" && nextStrategyId !== "market-make") {
-    throw new Error(
-      "cannot switch an existing market-make bot to another strategy in place; keep this bot id for halt/status/reconciliation and create a separate bot id",
-    );
   }
 }
 
@@ -481,15 +473,16 @@ export async function runInit(): Promise<void> {
   }
   if (!account) throw new Error("venue setup returned no account");
 
-  // Quotient key first: both strategies need it (signals feed; the agent's
-  // research and persona calls). A key may already be exported, in .local.env,
-  // or owned by the Quotient CLI. Say exactly which source won without
-  // displaying any key material.
+  // Developer key first: the agent, commodities and swing strategies run their
+  // research on it. The signals strategy runs on a strategy key instead, asked
+  // for below, so this one may be skipped. A key may already be exported, in
+  // .local.env, or owned by the Quotient CLI. Say exactly which source won
+  // without displaying any key material.
   const discovered = discoverQuotientToken();
   if (discovered) console.log(`Quotient credential: ${discovered.origin}`);
   const token = discovered && (await confirm("Use this Quotient key?", true))
     ? discovered.token
-    : (await ask("Quotient API key", { secret: true })).trim();
+    : (await ask("Quotient API key (Enter to skip for the signals strategy)", { secret: true })).trim();
   if (token) ks.putEntry(botId, KeyRoles.quotientToken, token, pass, { runtimeEligible: true });
 
   // Strategy choice. Market making is intentionally Polymarket-only because
@@ -506,13 +499,6 @@ export async function runInit(): Promise<void> {
       title: existing?.strategy.id === "agent" ? "agent (current)" : "agent",
       description: AGENT_STRATEGY_SUMMARY,
     },
-    ...(venue === "polymarket"
-      ? [{
-          value: "market-make",
-          title: existing?.strategy.id === "market-make" ? "market-make (current)" : "market-make",
-          description: "Q-directed passive inventory: maker entry, convergence/risk/time exits",
-        }]
-      : []),
   ];
   if (venue === "kalshi") strategyChoices.unshift({ value: "kalshi-commodities", title: "kalshi-commodities", description: "oil, gold, BTC, copper and silver; diversified exact-contract Q with bounded limits" });
   if (venue === "hyperliquid") strategyChoices.splice(0, strategyChoices.length,
@@ -522,12 +508,6 @@ export async function runInit(): Promise<void> {
     const swing = strategyChoices.find(choice => choice.value === "quotient-swing");
     if (!swing) throw new Error("an existing quotient-swing bot must remain on Hyperliquid");
     strategyChoices.splice(0, strategyChoices.length, swing);
-  }
-  if (existing?.strategy.id === "market-make") {
-    const marketMake = strategyChoices.find((choice) => choice.value === "market-make");
-    if (!marketMake) throw new Error("an existing market-make bot must remain on Polymarket");
-    strategyChoices.splice(0, strategyChoices.length, marketMake);
-    console.log("Changing strategies requires a new bot ID.");
   }
   const currentStrategy = strategyChoices.findIndex((choice) =>
     choice.value === (existing?.strategy.id === "flip-flat" ? "signals" : existing?.strategy.id),
@@ -587,22 +567,27 @@ export async function runInit(): Promise<void> {
     }
     // Engine ticks stay cheap housekeeping between paid wakes.
     tickIntervalMin = 15;
-  } else if (strategyId === "market-make") {
-    console.log("Market-make strategy: Q-directed passive inventory.");
-    console.log("Sizing follows funded capital.");
-    strategyConfig = structuredClone(
-      existing?.strategy.id === "market-make"
-        ? MarketMakeConfigSchema.parse(existingStrategy)
-        : MARKET_MAKE_PRESET,
-    ) as unknown as Record<string, unknown>;
-    tickIntervalMin = MarketMakeConfigSchema.parse(strategyConfig).reconciliation.rest_reconcile_seconds / 60;
   } else {
     console.log("Signals strategy: published Quotient signals.");
     for (const rule of recommendedStrategySummary(venue).split(", ")) console.log(rule);
+    if (venue === "polymarket") console.log(POLYMARKET_FEE_DISCLOSURE);
     strategyConfig = (await confirm("Use recommended allocation rules?", true))
       ? await elicitRecommendedStrategyConfig(existingStrategy, venue)
       : await elicitStrategyConfig(existingStrategy, venue);
     tickIntervalMin = Number(strategyConfig.tickIntervalMin ?? 1);
+
+    // The strategy runs only on its strategy-scoped key (qsk_…), issued per
+    // strategy from the Quotient admin console. Verify it live before saving.
+    const foundStrategyKey = await resolveStrategyKey(botId);
+    if (foundStrategyKey) console.log(`Strategy credential: ${foundStrategyKey.origin}`);
+    const strategyKey = foundStrategyKey && (await confirm("Use this strategy key?", true))
+      ? foundStrategyKey.token
+      : (await ask("Strategy key (qsk_…)", { secret: true })).trim();
+    if (!strategyKey) throw new Error("the signals strategy requires a strategy key; ask Quotient to issue one for this strategy");
+    const probe = parseBotConfig({ id: botId, venue, venueUrls: venueUrlsOverride });
+    const { version } = await checkStrategyKeyAccess(probe.signals, strategyId, strategyKey);
+    console.log(`Strategy key verified (rules version ${version}).`);
+    ks.putEntry(botId, KeyRoles.strategyKey, strategyKey, pass, { runtimeEligible: true });
   }
 
   // Alerts: Telegram only in MVP.

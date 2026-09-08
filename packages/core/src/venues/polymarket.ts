@@ -38,6 +38,31 @@ const CONDITIONAL = "CONDITIONAL" as AssetType;
 /** pUSD on Polygon — fallback when the client doesn't expose its environment. */
 const PUSD_ADDRESS = "0xC011a7E12a19f7B1f670d46F03B03f3342E82DFB";
 
+/**
+ * Quotient's Polymarket builder code. Every order cassie signs carries it, so
+ * the exchange collects Quotient's builder fee (0.75% of notional on taker
+ * fills) alongside its own and pays it to the builder profile wallet. The
+ * code is part of the signed V2 order struct; the fee rate itself lives on the
+ * builder profile at polymarket.com → Settings → Builders.
+ *
+ * Fill this in from that profile before release. `CASSIE_POLYMARKET_BUILDER_CODE`
+ * overrides it for staging.
+ */
+export const QUOTIENT_POLYMARKET_BUILDER_CODE: `0x${string}` | undefined = undefined;
+export const QUOTIENT_POLYMARKET_BUILDER_FEE_PCT = 0.75;
+
+const BUILDER_CODE_PATTERN = /^0x[0-9a-fA-F]{64}$/;
+
+/** The builder code in force: the environment override, else the compiled constant. */
+export function polymarketBuilderCode(env: NodeJS.ProcessEnv = process.env): `0x${string}` | undefined {
+  const override = env.CASSIE_POLYMARKET_BUILDER_CODE?.trim();
+  if (override) {
+    if (!BUILDER_CODE_PATTERN.test(override)) throw new Error("CASSIE_POLYMARKET_BUILDER_CODE must be a 32-byte 0x-prefixed hex string");
+    return override as `0x${string}`;
+  }
+  return QUOTIENT_POLYMARKET_BUILDER_CODE;
+}
+
 // Public Polygon RPCs for read-only approval verification. Ordered fallback:
 // a dead endpoint moves to the next, and a total outage degrades to "cannot
 // verify" (treated as unapproved so the flow errs on the side of retrying).
@@ -163,9 +188,13 @@ export class PolymarketAdapter implements VenueAdapter {
   private readonly conditionalAllowanceSynced = new Set<string>();
   private volumeCache = new Map<string, { v: number; at: number }>();
   private readonly eventRefCache = new Map<string, string>();
+  /** Attached to every signed order; undefined only when no code is configured. */
+  readonly builderCode: `0x${string}` | undefined;
+  private builderCodeWarned = false;
 
   constructor(private readonly opts: AdapterOpts) {
     if (opts.creds && opts.creds.venue === "polymarket") this.creds = opts.creds;
+    this.builderCode = polymarketBuilderCode();
   }
 
   private get urls() {
@@ -939,6 +968,13 @@ export class PolymarketAdapter implements VenueAdapter {
     }
 
     const side = intent.side === "BUY" ? PmOrderSide.BUY : PmOrderSide.SELL;
+    // Builder attribution is serialized into the signed order, so the fee is
+    // exchange-enforced and needs no second transaction.
+    const attribution = this.builderCode ? { builderCode: this.builderCode } : {};
+    if (!this.builderCode && !this.builderCodeWarned) {
+      this.builderCodeWarned = true;
+      console.warn("[polymarket] no builder code configured; orders carry no Quotient attribution");
+    }
     let signed: PmSignedOrder;
     try {
       if (intent.tif === "FOK" || intent.tif === "IOC" || intent.tif === "FAK") {
@@ -946,8 +982,8 @@ export class PolymarketAdapter implements VenueAdapter {
         const orderType = intent.tif === "FOK" ? PmOrderType.FOK : PmOrderType.FAK;
         signed =
           intent.side === "BUY"
-            ? await client.createMarketOrder({ tokenId, side: PmOrderSide.BUY, amount: Math.floor(size * price * 100) / 100, maxPrice: price, orderType })
-            : await client.createMarketOrder({ tokenId, side: PmOrderSide.SELL, shares: size, minPrice: price, orderType });
+            ? await client.createMarketOrder({ tokenId, side: PmOrderSide.BUY, amount: Math.floor(size * price * 100) / 100, maxPrice: price, orderType, ...attribution })
+            : await client.createMarketOrder({ tokenId, side: PmOrderSide.SELL, shares: size, minPrice: price, orderType, ...attribution });
       } else {
         signed = await client.createLimitOrder({
           tokenId,
@@ -956,6 +992,7 @@ export class PolymarketAdapter implements VenueAdapter {
           side,
           postOnly: intent.postOnly ?? false,
           ...(intent.expiration ? { expiration: intent.expiration } : {}),
+          ...attribution,
         });
       }
     } catch (err) {

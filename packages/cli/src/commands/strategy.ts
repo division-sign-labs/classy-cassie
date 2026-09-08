@@ -1,8 +1,17 @@
 // packages/cli/src/commands/strategy.ts
 // Configure the signals strategy; other strategies use their own command groups.
+//
+// Only operator settings live here: sizing, caps, cadence, universe. The
+// entry and exit rules themselves are served by Quotient behind the bot's
+// strategy key and override anything rule-shaped in the saved config.
 
 import pc from "picocolors";
-import { PredictionExecutionConfigSchema, type PredictionExecutionConfig } from "@quotient-forecasting/cassie-core";
+import {
+  PredictionExecutionConfigSchema,
+  QUOTIENT_POLYMARKET_BUILDER_FEE_PCT,
+  type PredictionExecutionConfig,
+} from "@quotient-forecasting/cassie-core";
+import { stripFlipFlatRules } from "@quotient-forecasting/strategy-flip-flat";
 import { ask, confirm } from "../context.js";
 import { loadBotConfig, saveBotConfig } from "../paths.js";
 
@@ -13,13 +22,7 @@ export const RECOMMENDED_STRATEGY = {
   marketCapPct: 2.5,
   eventCapPct: 5,
   minExitDepth2cUsd: 2_500,
-  nearResolutionDays: 3,
-  nearResolutionSizeCutPct: 25,
-  entrySpreadPp: 10,
-  maxEntrySpreadPp: 30,
   minEntryNotional: 1,
-  convergenceExitPp: 3,
-  maxHoldDays: 7,
   universe: "from-signals",
   tickIntervalMin: 1,
   signalPollIntervalMin: 5,
@@ -27,21 +30,15 @@ export const RECOMMENDED_STRATEGY = {
 
 export const RECOMMENDED_SUMMARY =
   "no position-count cap, widest eligible edges first, quarter-Kelly targets with same-side top-ups, " +
-  "capped at 2.5% per market and 5% per event, 25% smaller within 3 days of resolution, " +
-  "$2.5k exit depth within 2¢, 10–30pp entry edge, 3pp convergence or 7-day max hold";
+  "capped at 2.5% per market and 5% per event, $2.5k exit depth within 2¢; " +
+  "entry and exit rules are served by Quotient";
 
 const LEGACY_DAILY_BUDGET_STRATEGY = {
   topN: null,
   allocationMode: "daily-budget",
   dailyBudgetUsd: 100,
   positionBudgetPct: 25,
-  nearResolutionDays: 3,
-  nearResolutionSizeCutPct: 25,
-  entrySpreadPp: 10,
-  maxEntrySpreadPp: 30,
   minEntryNotional: 1,
-  convergenceExitPp: 3,
-  maxHoldDays: 7,
   universe: "from-signals",
   tickIntervalMin: 1,
   signalPollIntervalMin: 5,
@@ -49,7 +46,11 @@ const LEGACY_DAILY_BUDGET_STRATEGY = {
 
 const LEGACY_DAILY_BUDGET_SUMMARY =
   "no position-count cap, widest eligible edges first, $100 daily budget, 25% requested per entry, " +
-  "10–30pp entry edge, positions every 60s, signals every 5m";
+  "positions every 60s, signals every 5m; entry and exit rules are served by Quotient";
+
+/** Shown wherever a Polymarket signals bot is configured, run, or deployed. */
+export const POLYMARKET_FEE_DISCLOSURE =
+  `Quotient charges ${QUOTIENT_POLYMARKET_BUILDER_FEE_PCT}% of notional on each Polymarket fill, collected by Polymarket as a builder fee.`;
 
 type AllocationMode = "portfolio-kelly" | "daily-budget";
 
@@ -123,28 +124,9 @@ export async function elicitStrategyConfig(
             await ask("Daily budget per position (%)", { default: d("positionBudgetPct", "25") }),
           ),
         };
-  const entrySpreadPp = positiveNumber("entry spread", await ask("Minimum entry edge (pp)", { default: d("entrySpreadPp", "10") }));
-  const maxEntrySpreadPp = optionalPositiveNumber(
-    "maximum entry edge",
-    await ask("Maximum entry edge (pp or unlimited)", {
-      default: current.maxEntrySpreadPp === null ? "unlimited" : d("maxEntrySpreadPp", "30"),
-    }),
-  );
   const minEntryNotional = nonnegativeNumber(
     "minimum entry",
     await ask("Minimum viable entry after risk caps ($)", { default: d("minEntryNotional", "1") }),
-  );
-  const convergenceExitPp = optionalSignedNumber(
-    "convergence edge",
-    await ask("Convergence exit: remaining edge in pp (or off)", {
-      default: current.convergenceExitPp === null ? "off" : d("convergenceExitPp", "3"),
-    }),
-  );
-  const maxHoldDays = optionalPositiveNumber(
-    "maximum hold",
-    await ask("Maximum hold (days or unlimited)", {
-      default: current.maxHoldDays === null ? "unlimited" : d("maxHoldDays", "7"),
-    }),
   );
   const positionCheckSeconds = positiveNumber(
     "position check interval",
@@ -161,11 +143,7 @@ export async function elicitStrategyConfig(
     topN,
     allocationMode,
     ...allocationConfig,
-    entrySpreadPp,
-    maxEntrySpreadPp,
     minEntryNotional,
-    convergenceExitPp,
-    maxHoldDays,
     universe: universeRaw === "from-signals" ? "from-signals" : universeRaw.split(",").map((s) => s.trim()),
     tickIntervalMin: positionCheckSeconds / 60,
     signalPollIntervalMin,
@@ -181,49 +159,18 @@ export interface StrategyOptions {
   kellyFraction?: string;
   marketCapPct?: string;
   eventCapPct?: string;
-  nearResolutionDays?: string;
-  nearResolutionSizeCutPct?: string;
   minExitDepth2cUsd?: string;
   dailyBudget?: string;
   positionBudgetPct?: string;
-  maxEntryEdge?: string;
   minEntryNotional?: string;
-  convergenceExitPp?: string;
-  maxHoldDays?: string;
   positionCheckSeconds?: string;
   signalCheckMinutes?: string;
   signalMaxAgeHours?: string;
   slippage?: string;
   maxOrderNotional?: string;
-  scenarioExit?: string;
-  adverseCrossEdgePp?: string;
-  adverseCrossMaxPnlPct?: string;
-  adverseCrossConfirmations?: string;
-  qCollapsePp?: string;
-  qCollapseMaxRemainingEdgePp?: string;
-  flipConfirmations?: string;
-  flipExitMaxRemainingEdgePp?: string;
-  exitFeeBps?: string;
-  exitRetrySeconds?: string;
-  pendingEntryReservationSeconds?: string;
 }
 
-/** Defaults of the opt-in seven-day signal-exit state machine, mirrored from the strategy schema. */
-export const SCENARIO_EXIT_DEFAULTS = {
-  scenarioExitEnabled: false,
-  adverseCrossEdgePp: 0,
-  adverseCrossMaxPnlPct: 0,
-  adverseCrossConfirmations: 2,
-  qCollapsePp: 30,
-  qCollapseMaxRemainingEdgePp: 0,
-  flipConfirmations: 2,
-  flipExitMaxRemainingEdgePp: 5,
-  exitFeeBps: 0,
-  exitRetrySec: 300,
-  pendingEntryReservationSec: 900,
-} as const;
-
-/** `cassie strategy <botId>`: view and tune the bot's strategy and signal guardrails. */
+/** `cassie strategy <botId>`: view and tune the bot's operator settings and guardrails. */
 export async function runStrategy(botId: string, opts: StrategyOptions = {}): Promise<void> {
   const cfg = loadBotConfig(botId);
   const executionOptions = ["execution", "entryDeadlineSeconds", "exitPassiveSeconds"] as const;
@@ -234,11 +181,6 @@ export async function runStrategy(botId: string, opts: StrategyOptions = {}): Pr
   if (cfg.strategy.id === "agent") {
     throw new Error(
       `${botId} uses the agent strategy.\ncassie agent prompt ${botId}\ncassie agent persona ${botId}\ncassie agent status ${botId}`,
-    );
-  }
-  if (cfg.strategy.id === "market-make") {
-    throw new Error(
-      `${botId} uses the market-make strategy.\ncassie market-make configure ${botId}`,
     );
   }
   if (cfg.strategy.id === "quotient-swing") {
@@ -302,12 +244,6 @@ export async function runStrategy(botId: string, opts: StrategyOptions = {}): Pr
     }
     if (opts.marketCapPct !== undefined) strategyConfig.marketCapPct = percentage("market cap", opts.marketCapPct);
     if (opts.eventCapPct !== undefined) strategyConfig.eventCapPct = percentage("event cap", opts.eventCapPct);
-    if (opts.nearResolutionDays !== undefined) {
-      strategyConfig.nearResolutionDays = optionalPositiveNumber("near-resolution window", opts.nearResolutionDays);
-    }
-    if (opts.nearResolutionSizeCutPct !== undefined) {
-      strategyConfig.nearResolutionSizeCutPct = cutPercentage("near-resolution size cut", opts.nearResolutionSizeCutPct);
-    }
     if (opts.minExitDepth2cUsd !== undefined) {
       strategyConfig.minExitDepth2cUsd = nonnegativeNumber(
         "minimum exit depth within 2 cents",
@@ -318,17 +254,8 @@ export async function runStrategy(botId: string, opts: StrategyOptions = {}): Pr
     if (opts.positionBudgetPct !== undefined) {
       strategyConfig.positionBudgetPct = percentage("budget per position", opts.positionBudgetPct);
     }
-    if (opts.maxEntryEdge !== undefined) {
-      strategyConfig.maxEntrySpreadPp = optionalPositiveNumber("maximum entry edge", opts.maxEntryEdge);
-    }
     if (opts.minEntryNotional !== undefined) {
       strategyConfig.minEntryNotional = nonnegativeNumber("minimum entry notional", opts.minEntryNotional);
-    }
-    if (opts.convergenceExitPp !== undefined) {
-      strategyConfig.convergenceExitPp = optionalSignedNumber("convergence edge", opts.convergenceExitPp);
-    }
-    if (opts.maxHoldDays !== undefined) {
-      strategyConfig.maxHoldDays = optionalPositiveNumber("maximum hold", opts.maxHoldDays);
     }
     if (opts.positionCheckSeconds !== undefined) {
       tickIntervalMin = positiveNumber("position check interval", opts.positionCheckSeconds) / 60;
@@ -337,7 +264,6 @@ export async function runStrategy(botId: string, opts: StrategyOptions = {}): Pr
     if (opts.signalCheckMinutes !== undefined) {
       strategyConfig.signalPollIntervalMin = positiveNumber("signal check interval", opts.signalCheckMinutes);
     }
-    applyScenarioExitOptions(strategyConfig, opts);
     const maxAgeSec =
       opts.signalMaxAgeHours === undefined
         ? cfg.signals.maxAgeSec
@@ -349,7 +275,6 @@ export async function runStrategy(botId: string, opts: StrategyOptions = {}): Pr
         ? {}
         : { maxOrderNotional: positiveNumber("maximum order notional", opts.maxOrderNotional) }),
     };
-    validateEntryEdgeRange(strategyConfig);
     saveBotConfig({
       ...cfg,
       strategy: { ...cfg.strategy, config: strategyConfig },
@@ -374,43 +299,6 @@ export async function runStrategy(botId: string, opts: StrategyOptions = {}): Pr
   saveStrategy(botId, config);
 }
 
-function onOff(label: string, raw: string): boolean {
-  const normalized = raw.trim().toLowerCase();
-  if (["on", "true", "yes", "1", "enabled"].includes(normalized)) return true;
-  if (["off", "false", "no", "0", "disabled"].includes(normalized)) return false;
-  throw new Error(`${label} must be on or off`);
-}
-
-function signedNumber(label: string, raw: string): number {
-  const value = Number(raw);
-  if (!Number.isFinite(value)) throw new Error(`${label} must be a number`);
-  return value;
-}
-
-function applyScenarioExitOptions(config: Record<string, unknown>, opts: StrategyOptions): void {
-  if (opts.scenarioExit !== undefined) config.scenarioExitEnabled = onOff("scenario exit", opts.scenarioExit);
-  if (opts.adverseCrossEdgePp !== undefined) config.adverseCrossEdgePp = signedNumber("adverse cross edge", opts.adverseCrossEdgePp);
-  if (opts.adverseCrossMaxPnlPct !== undefined) {
-    config.adverseCrossMaxPnlPct = signedNumber("adverse cross maximum P&L", opts.adverseCrossMaxPnlPct);
-  }
-  if (opts.adverseCrossConfirmations !== undefined) {
-    config.adverseCrossConfirmations = positiveInteger("adverse cross confirmations", opts.adverseCrossConfirmations);
-  }
-  if (opts.qCollapsePp !== undefined) config.qCollapsePp = positiveNumber("Q collapse", opts.qCollapsePp);
-  if (opts.qCollapseMaxRemainingEdgePp !== undefined) {
-    config.qCollapseMaxRemainingEdgePp = signedNumber("Q collapse maximum remaining edge", opts.qCollapseMaxRemainingEdgePp);
-  }
-  if (opts.flipConfirmations !== undefined) config.flipConfirmations = positiveInteger("flip confirmations", opts.flipConfirmations);
-  if (opts.flipExitMaxRemainingEdgePp !== undefined) {
-    config.flipExitMaxRemainingEdgePp = signedNumber("flip exit maximum remaining edge", opts.flipExitMaxRemainingEdgePp);
-  }
-  if (opts.exitFeeBps !== undefined) config.exitFeeBps = nonnegativeNumber("exit fee", opts.exitFeeBps);
-  if (opts.exitRetrySeconds !== undefined) config.exitRetrySec = positiveNumber("exit retry window", opts.exitRetrySeconds);
-  if (opts.pendingEntryReservationSeconds !== undefined) {
-    config.pendingEntryReservationSec = positiveNumber("pending entry reservation window", opts.pendingEntryReservationSeconds);
-  }
-}
-
 function positiveNumber(label: string, raw: string): number {
   const value = Number(raw);
   if (!Number.isFinite(value) || value <= 0) throw new Error(`${label} must be greater than zero`);
@@ -433,18 +321,6 @@ function positionLimit(raw: string): number | null {
   const normalized = raw.trim().toLowerCase();
   if (normalized === "unlimited" || normalized === "none" || normalized === "off") return null;
   return positiveInteger("position limit", raw);
-}
-
-function optionalSignedNumber(label: string, raw: string): number | null {
-  const normalized = raw.trim().toLowerCase();
-  if (normalized === "off" || normalized === "none" || normalized === "unlimited") return null;
-  return signedNumber(label, raw);
-}
-
-function optionalPositiveNumber(label: string, raw: string): number | null {
-  const normalized = raw.trim().toLowerCase();
-  if (normalized === "unlimited" || normalized === "none" || normalized === "off") return null;
-  return positiveNumber(label, raw);
 }
 
 function parseAllocationMode(raw: string): AllocationMode {
@@ -491,30 +367,20 @@ function kellyFraction(label: string, raw: string): number {
   return value;
 }
 
-function validateEntryEdgeRange(config: Record<string, unknown>): void {
-  const minimum = Number(config.entrySpreadPp ?? RECOMMENDED_STRATEGY.entrySpreadPp);
-  const configuredMaximum =
-    config.maxEntrySpreadPp === undefined ? RECOMMENDED_STRATEGY.maxEntrySpreadPp : config.maxEntrySpreadPp;
-  if (configuredMaximum !== null && Number(configuredMaximum) < minimum) {
-    throw new Error(`maximum entry edge must be at least the ${minimum}pp minimum entry edge`);
-  }
-}
-
 function percentage(label: string, raw: string): number {
   const value = positiveNumber(label, raw);
   if (value > 100) throw new Error(`${label} must be at most 100%`);
   return value;
 }
 
-function cutPercentage(label: string, raw: string): number {
-  const value = nonnegativeNumber(label, raw);
-  if (value > 100) throw new Error(`${label} must be at most 100%`);
-  return value;
-}
-
+/**
+ * Drop retired sizing keys and every rule key. Rules saved by older versions
+ * of this command are already overridden at runtime; removing them here keeps
+ * the saved config honest about what the operator controls.
+ */
 function normalizeStrategyConfig(config: Record<string, unknown>): Record<string, unknown> {
   const { sizing: _sizing, maxPositionNotional: _maxPositionNotional, maxOpenPositions: _maxOpenPositions, ...current } = config;
-  return current;
+  return stripFlipFlatRules(current);
 }
 
 function printStrategy(
@@ -545,43 +411,8 @@ function printStrategy(
     console.log(`  daily entry budget:   $${dailyBudgetUsd.toFixed(2)} (resets 00:00 UTC)`);
     console.log(`  budget per entry:     ${positionBudgetPct}% = $${perEntryUsd.toFixed(2)} before liquidity/risk caps`);
   }
-  const nearResolution =
-    current.nearResolutionDays === null
-      ? "off"
-      : `${current.nearResolutionSizeCutPct}% smaller when the market resolves within ${current.nearResolutionDays} days`;
-  console.log(`  near resolution:      ${nearResolution}`);
-  console.log(`  minimum entry edge:   ${current.entrySpreadPp}pp`);
-  console.log(
-    `  maximum entry edge:   ${current.maxEntrySpreadPp === null ? "unlimited" : `${current.maxEntrySpreadPp}pp`}`,
-  );
   console.log(`  minimum viable entry: $${Number(current.minEntryNotional).toFixed(2)} (entries only; exits are never floored)`);
-  const scenario = { ...SCENARIO_EXIT_DEFAULTS, ...normalized } as Record<string, unknown>;
-  const maxHold = current.maxHoldDays === null ? "unlimited" : `${current.maxHoldDays} days`;
-  const convergence =
-    current.convergenceExitPp === null
-      ? "off"
-      : `sell once remaining edge falls to ${current.convergenceExitPp}pp (no profit floor)`;
-  console.log(`  convergence exit:     ${convergence}`);
-  if (scenario.scenarioExitEnabled === true) {
-    console.log("  exit model:           seven-day signal state machine (scenarioExitEnabled)");
-    console.log(
-      `  adverse cross:        edge <= ${scenario.adverseCrossEdgePp}pp and P&L <= ${scenario.adverseCrossMaxPnlPct}% on ` +
-        `${scenario.adverseCrossConfirmations} distinct forecasts`,
-    );
-    console.log(
-      `  Q collapse:           retreat >= ${scenario.qCollapsePp}pp with edge <= ${scenario.qCollapseMaxRemainingEdgePp}pp, immediate`,
-    );
-    console.log(
-      `  Q flip:               ${scenario.flipConfirmations} distinct forecasts below 50%, exit at edge <= ${scenario.flipExitMaxRemainingEdgePp}pp`,
-    );
-    console.log(`  time stop:            ${maxHold} from the entry fill, regardless of P&L`);
-    console.log(`  exit fee assumed:     ${scenario.exitFeeBps}bps on executable proceeds`);
-    console.log(`  exit retry window:    ${scenario.exitRetrySec}s before an invisible exit is re-evaluated`);
-  } else {
-    console.log("  exit model:           take-profit and maximum hold (scenarioExitEnabled off)");
-    console.log(`  maximum hold:         ${maxHold}`);
-  }
-  console.log(`  entry handoff hold:   ${scenario.pendingEntryReservationSec}s reservation while a fill is not yet visible`);
+  console.log("  entry and exit rules: served by Quotient for the signals strategy; the bot's strategy key selects them");
   console.log(`  slippage:             ${risk.slippagePct}% from best executable price`);
   const executionConfig = PredictionExecutionConfigSchema.parse(execution ?? {});
   const executionMode = venue === "polymarket" ? executionConfig.mode : "legacy";
@@ -590,6 +421,7 @@ function printStrategy(
     const inactive = executionMode === "legacy" ? " (inactive in legacy mode)" : "";
     console.log(`  entry deadline:       ${compactNumber(executionConfig.entryDeadlineSec)} sec${inactive}`);
     console.log(`  exit passive phase:   ${compactNumber(executionConfig.exitPassiveSec)} sec${inactive}`);
+    console.log(`  Quotient fee:         ${QUOTIENT_POLYMARKET_BUILDER_FEE_PCT}% of notional per fill, collected by Polymarket as a builder fee`);
   }
   console.log(`  hard per-order cap:   $${risk.maxOrderNotional.toFixed(2)} (risk module)`);
   console.log(`  signal max age:       ${(maxAgeSec / 3600).toFixed(2)}h`);
@@ -605,7 +437,6 @@ function compactNumber(value: number): string {
 function saveStrategy(botId: string, config: Record<string, unknown>): void {
   const cfg = loadBotConfig(botId);
   const normalized = normalizeStrategyConfig(config);
-  validateEntryEdgeRange(normalized);
   const tickIntervalMin = Number(normalized.tickIntervalMin ?? cfg.tickIntervalMin);
   saveBotConfig({
     ...cfg,

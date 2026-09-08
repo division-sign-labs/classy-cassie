@@ -25,10 +25,7 @@ export const AGENT_STRATEGY_SUMMARY =
 
 function requireAgentBot(cfg: BotConfig): void {
   if (cfg.strategy.id !== "agent") {
-    const guidance = cfg.strategy.id === "market-make"
-      ? "Create a separate agent bot; market-make state cannot be reused."
-      : "Choose the agent strategy in setup.";
-    throw new Error(`${cfg.id} uses ${cfg.strategy.id}. ${guidance}\ncassie init`);
+    throw new Error(`${cfg.id} uses ${cfg.strategy.id}. Choose the agent strategy in setup.\ncassie init`);
   }
 }
 

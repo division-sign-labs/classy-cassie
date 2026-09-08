@@ -31,7 +31,11 @@ vi.mock("../src/paths.js", () => ({
   saveBotConfig: (cfg: unknown) => { f.cfg = cfg; f.events.push("save-config"); },
   atomicWritePrivateFile: () => { f.events.push("preserve-state"); },
 }));
-vi.mock("../src/quotient-token.js", () => ({ resolveQuotientToken: async () => ({ token: "test-token", origin: "test" }) }));
+vi.mock("../src/quotient-token.js", () => ({
+  resolveQuotientToken: async () => ({ token: "test-token", origin: "test" }),
+  resolveStrategyKey: async () => ({ token: "qsk_test", origin: "test" }),
+  missingStrategyKeyMessage: (botId: string) => `no strategy key found for ${botId}`,
+}));
 vi.mock("../src/polymarket-gasless.js", () => ({ resolvePolymarketGaslessAuth: async () => ({ kind: "builder", key: "gasless-key", secret: "gasless-secret", passphrase: "gasless-passphrase" }) }));
 vi.mock("../src/surplus-config.js", () => ({ resolveSurplusApiKey: async () => f.surplusReady ? { value: "fixture-surplus-key", origin: "test" } : null, verifySurplusApiKey: async () => {} }));
 vi.mock("../src/version.js", () => ({ cliVersion: () => "1.2.3" }));

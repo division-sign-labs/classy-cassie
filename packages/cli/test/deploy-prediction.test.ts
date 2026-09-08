@@ -9,7 +9,7 @@ import { ControlApiError } from "../src/ssh.js";
 import {
   deploymentIdFor,
   isAdaptivePredictionDeployment,
-  marketMakeStateSource,
+  preservedStateSource,
   preparePredictionModeChange,
   preserveRuntimeState,
   quiesce,
@@ -71,11 +71,10 @@ describe("adaptive prediction deployment", () => {
       expect(isAdaptivePredictionDeployment(bot({ strategy, venue: "kalshi", mode: "adaptive" }))).toBe(false);
     }
     expect(isAdaptivePredictionDeployment(bot({ strategy: "agent" }))).toBe(false);
-    expect(isAdaptivePredictionDeployment(bot({ strategy: "market-make" }))).toBe(false);
   });
 
   it("keeps protected runtimes stopped until preflights finish", () => {
-    for (const strategy of ["signals", "flip-flat", "market-make"]) {
+    for (const strategy of ["signals", "flip-flat"]) {
       expect(runtimeAutostartBeforePreflights(bot({ strategy }))).toBe("0");
     }
     expect(runtimeAutostartBeforePreflights(bot({ strategy: "quotient-swing", venue: "hyperliquid" }))).toBe("0");
@@ -86,15 +85,15 @@ describe("adaptive prediction deployment", () => {
 
   it("preserves the saved source for both same-host and replacement deployments", () => {
     const cfg = bot({ deployed: true });
-    expect(marketMakeStateSource(cfg, true, null)).toBe(cfg);
-    expect(marketMakeStateSource(cfg, false, orphan())).toBe(cfg);
-    expect(marketMakeStateSource(bot(), true, null)).toBeNull();
+    expect(preservedStateSource(cfg, true, null)).toBe(cfg);
+    expect(preservedStateSource(cfg, false, orphan())).toBe(cfg);
+    expect(preservedStateSource(bot(), true, null)).toBeNull();
     const legacy = bot({ deployed: true, mode: "legacy" });
-    expect(marketMakeStateSource(legacy, false, orphan())).toBe(legacy);
+    expect(preservedStateSource(legacy, false, orphan())).toBe(legacy);
   });
 
   it("recovers a same-name orphan's address when no deployment was saved", () => {
-    const source = marketMakeStateSource(bot(), false, orphan());
+    const source = preservedStateSource(bot(), false, orphan());
     expect(source?.deployment).toMatchObject({
       dropletId: 5678,
       host: "203.0.113.9",
@@ -102,8 +101,8 @@ describe("adaptive prediction deployment", () => {
       deployedAt: "2026-09-03T12:00:00.000Z",
     });
     expect(source?.execution).toBeUndefined();
-    expect(marketMakeStateSource(bot(), false, null)).toBeNull();
-    expect(() => marketMakeStateSource(bot(), false, {
+    expect(preservedStateSource(bot(), false, null)).toBeNull();
+    expect(() => preservedStateSource(bot(), false, {
       ...orphan(), networks: { v4: [] },
     })).toThrow(/public IPv4/);
   });
@@ -400,12 +399,11 @@ describe("adaptive prediction deployment", () => {
     })).toThrow(/checkpoint cannot be preserved/);
   });
 
-  it("preserves the market-maker missing-state exception and skips undeployed bots", () => {
+  it("skips undeployed bots without touching the droplet", () => {
     const exec = vi.fn(() => executed(true, "__CASSIE_NO_RUNTIME_STATE__"));
     const write = vi.fn();
     expect(preserveRuntimeState(bot(), { exec, write })).toBeNull();
     expect(exec).not.toHaveBeenCalled();
-    expect(preserveRuntimeState(bot({ strategy: "market-make", deployed: true }), { exec, write })).toBeNull();
     expect(write).not.toHaveBeenCalled();
   });
 

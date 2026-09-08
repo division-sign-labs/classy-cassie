@@ -3,13 +3,13 @@
 
 import { join } from "node:path";
 import pc from "picocolors";
-import { KeyRoles, consoleLogger } from "@quotient-forecasting/cassie-core";
+import { KeyRoles, consoleLogger, usesStrategyKey } from "@quotient-forecasting/cassie-core";
 import { runLocal } from "@quotient-forecasting/cassie-runtime-node";
 import { buildRuntimeCreds, getKeystoreSecret, requireAccount } from "../context.js";
 import { dirs, loadBotConfig, statePath } from "../paths.js";
-import { resolveQuotientToken } from "../quotient-token.js";
+import { missingStrategyKeyMessage, resolveQuotientToken, resolveStrategyKey } from "../quotient-token.js";
+import { POLYMARKET_FEE_DISCLOSURE } from "./strategy.js";
 import { resolveSurplusApiKey } from "../surplus-config.js";
-import { MarketMakeConfigSchema } from "@quotient-forecasting/strategy-market-make";
 import { QuotientSwingConfigSchema } from "@quotient-forecasting/strategy-quotient-swing";
 import { resolvePolymarketGaslessAuth } from "../polymarket-gasless.js";
 
@@ -26,8 +26,16 @@ export async function runBot(botId: string, opts: RunOpts): Promise<void> {
   const account = requireAccount(cfg);
   const creds = await buildRuntimeCreds(cfg);
   const polymarketGaslessAuth = await resolvePolymarketGaslessAuth(cfg);
-  const twoSidedMaker = cfg.strategy.id === "market-make" && Boolean(cfg.strategy.config.two_sided) && !MarketMakeConfigSchema.parse(cfg.strategy.config).two_sided?.adaptive;
-  const quotientToken = twoSidedMaker ? undefined : (await resolveQuotientToken(botId))?.token;
+  const strategyKeyed = usesStrategyKey(cfg.strategy.id);
+  const resolvedStrategyKey = strategyKeyed ? await resolveStrategyKey(botId) : null;
+  if (strategyKeyed && !resolvedStrategyKey) throw new Error(missingStrategyKeyMessage(botId));
+  if (resolvedStrategyKey) console.log(pc.dim(`strategy credential: ${resolvedStrategyKey.origin}`));
+  const strategyKey = resolvedStrategyKey?.token;
+  // A strategy bot no longer needs a developer key; keep resolving it for the
+  // strategies whose research calls still run on one.
+  const quotientToken = strategyKeyed
+    ? (await resolveQuotientToken(botId).catch(() => null))?.token
+    : (await resolveQuotientToken(botId))?.token;
   const telegramToken =
     process.env.TELEGRAM_BOT_TOKEN ?? (await getKeystoreSecret(botId, KeyRoles.telegramToken)) ?? undefined;
   let surplusApiKey: string | undefined;
@@ -40,19 +48,7 @@ export async function runBot(botId: string, opts: RunOpts): Promise<void> {
     surplusApiKey = resolved.value;
   }
 
-  if (cfg.strategy.id === "market-make") {
-    const maker = MarketMakeConfigSchema.parse(cfg.strategy.config);
-    console.log(`Starting ${botId}: market-make on Polymarket.`);
-    console.log(`Position checks: ${Number((cfg.tickIntervalMin * 60).toFixed(4))}s`);
-    if (maker.two_sided?.adaptive) console.log(`Forecast refresh: ${maker.two_sided.adaptive.forecast_refresh_seconds}s`);
-    else if (!maker.two_sided) console.log(`Forecast refresh: ${maker.quotient_feed.active_poll_seconds}s active / ${maker.quotient_feed.idle_poll_seconds}s idle`);
-    console.log("New configurations require reviewed activation.");
-    if (!maker.two_sided) {
-      console.log(`cassie market-make reconcile ${botId}`);
-      console.log(`cassie market-make reconcile ${botId} --apply`);
-      console.log(`cassie market-make resume ${botId}`);
-    }
-  } else if (cfg.strategy.id === "quotient-swing") {
+  if (cfg.strategy.id === "quotient-swing") {
     const swing = QuotientSwingConfigSchema.parse(cfg.strategy.config);
     console.log(`Starting ${botId}: quotient-swing on Hyperliquid.`);
     console.log(`Decisions: ${Number((swing.tickIntervalMin * 60).toFixed(4))}s`);
@@ -77,6 +73,7 @@ export async function runBot(botId: string, opts: RunOpts): Promise<void> {
     statePath: statePath(botId),
     controlSocket: join(dirs.run(), `${botId}.sock`),
     quotientToken,
+    strategyKey,
     telegramToken,
     surplusApiKey,
     log: consoleLogger(botId, opts.debug ? "debug" : "info"),

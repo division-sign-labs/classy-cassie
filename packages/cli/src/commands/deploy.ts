@@ -6,12 +6,12 @@
 import { createHash } from "node:crypto";
 import { join } from "node:path";
 import pc from "picocolors";
-import { MarketMakeConfigSchema } from "@quotient-forecasting/strategy-market-make";
 import { QuotientSwingConfigSchema } from "@quotient-forecasting/strategy-quotient-swing";
-import { KeyRoles, type BotConfig } from "@quotient-forecasting/cassie-core";
+import { KeyRoles, usesStrategyKey, type BotConfig } from "@quotient-forecasting/cassie-core";
 import { buildRuntimeCreds, confirm, getKeystoreSecret } from "../context.js";
 import { atomicWritePrivateFile, dirs, loadBotConfig, saveBotConfig } from "../paths.js";
-import { resolveQuotientToken } from "../quotient-token.js";
+import { missingStrategyKeyMessage, resolveQuotientToken, resolveStrategyKey } from "../quotient-token.js";
+import { POLYMARKET_FEE_DISCLOSURE } from "./strategy.js";
 import { resolveSurplusApiKey, verifySurplusApiKey } from "../surplus-config.js";
 import {
   DEFAULT_REGION,
@@ -50,8 +50,7 @@ type Deployment = NonNullable<BotConfig["deployment"]>;
 
 /**
  * Stable identity for one exact saved deployment. A redeploy updates
- * `deployedAt`, so even reuse of the same droplet receives a new identity and
- * must pass the market-maker activation gates again.
+ * `deployedAt`, so even reuse of the same droplet receives a new identity.
  */
 export function deploymentIdFor(deployment: Deployment): string {
   const canonical = JSON.stringify({
@@ -69,7 +68,6 @@ export function deploymentIdFor(deployment: Deployment): string {
 
 export interface RuntimeStartResult {
   started: Record<string, unknown>;
-  marketMakeStatus?: Record<string, unknown>;
   swingStatus?: Record<string, unknown>;
   executionStatus?: Record<string, unknown>;
 }
@@ -83,7 +81,7 @@ function isPredictionDeployment(cfg: BotConfig): boolean {
 }
 
 export function runtimeAutostartBeforePreflights(cfg: BotConfig): "0" | "1" {
-  return isPredictionDeployment(cfg) || ["market-make", "quotient-swing"].includes(cfg.strategy.id) ? "0" : "1";
+  return isPredictionDeployment(cfg) || cfg.strategy.id === "quotient-swing" ? "0" : "1";
 }
 
 interface ReconciliationWaitDeps { sleep: (milliseconds: number) => Promise<void> }
@@ -181,19 +179,8 @@ export async function startRuntimeAfterPreflights(
     }
     return { started, executionStatus: execution };
   }
-  if (cfg.strategy.id !== "market-make") {
-    call("POST", "/resume");
-    return { started: asRecord(call("POST", "/init"), "/init") };
-  }
-
-  const started = asRecord(call("POST", "/init"), "/init");
-  const status = asRecord(call("GET", "/market-make/status"), "/market-make/status");
-  if (status.lifecycle !== "HALTED") {
-    throw new Error(
-      `refusing market-make deployment: expected HALTED after startup, got ${String(status.lifecycle ?? "unknown")}`,
-    );
-  }
-  return { started, marketMakeStatus: status };
+  call("POST", "/resume");
+  return { started: asRecord(call("POST", "/init"), "/init") };
 }
 
 function predictionExecutionStatus(value: unknown): Record<string, unknown> {
@@ -298,7 +285,7 @@ export function quiesce(
   const prediction = isPredictionDeployment(cfg);
   const swing = cfg.strategy.id === "quotient-swing";
   strict ||= prediction || swing;
-  const kind = swing ? "swing" : prediction ? "prediction" : "market-make";
+  const kind = swing ? "swing" : prediction ? "prediction" : "running";
   const target: Target = { host: cfg.deployment.host, user: cfg.deployment.user };
   if (!deps.exec(target, "true").ok) {
     if (strict) {
@@ -359,7 +346,7 @@ export function quiesce(
         console.log(pc.green("running bot already stopped; resting orders were canceled previously"));
       } else {
       throw new Error(
-        `refusing to replace the market-make runtime: shutdown cancellation was not verified (${(error as Error).message.slice(0, 220)})`,
+        `refusing to replace the ${kind} runtime: shutdown cancellation was not verified (${(error as Error).message.slice(0, 220)})`,
       );
       }
     } else {
@@ -476,15 +463,15 @@ function configAtDroplet(cfg: BotConfig, droplet: Droplet): BotConfig {
 }
 
 /**
- * Market makers, swing and prediction bots preserve their closed database, including
- * execution-mode changes and same-droplet replacements. Keep the exported name.
+ * Swing and prediction bots preserve their closed database, including
+ * execution-mode changes and same-droplet replacements.
  */
-export function marketMakeStateSource(
+export function preservedStateSource(
   cfg: BotConfig,
   reuse: boolean,
   namedExisting: Droplet | null,
 ): BotConfig | null {
-  if (!["market-make", "quotient-swing"].includes(cfg.strategy.id) && !isPredictionDeployment(cfg)) return null;
+  if (cfg.strategy.id !== "quotient-swing" && !isPredictionDeployment(cfg)) return null;
   if (reuse) return cfg.deployment ? cfg : null;
   if (cfg.deployment) return cfg;
   return namedExisting ? configAtDroplet(cfg, namedExisting) : null;
@@ -537,9 +524,22 @@ export async function runDeploy(botId: string, opts: DeployOpts = {}): Promise<v
 
   const creds = await buildRuntimeCreds(cfg);
   const polymarketGaslessAuth = await resolvePolymarketGaslessAuth(cfg);
-  const twoSidedMaker = cfg.strategy.id === "market-make" && Boolean(cfg.strategy.config.two_sided) && !MarketMakeConfigSchema.parse(cfg.strategy.config).two_sided?.adaptive;
-  const resolvedQuotient = twoSidedMaker ? undefined : await resolveQuotientToken(botId);
-  if (!twoSidedMaker && !resolvedQuotient) {
+  // A strategy bot runs on its strategy-scoped key alone. Resolve it before any
+  // droplet work so a missing or revoked key stops here, not as a 401 loop.
+  const strategyKeyed = usesStrategyKey(cfg.strategy.id);
+  const resolvedStrategyKey = strategyKeyed ? await resolveStrategyKey(botId) : null;
+  if (strategyKeyed && !resolvedStrategyKey) {
+    throw new Error(
+      `${missingStrategyKeyMessage(botId)}
+Deployment stopped so the droplet cannot come up without the credential its strategy runs on.`,
+    );
+  }
+  const strategyKey = resolvedStrategyKey?.token ?? null;
+  if (resolvedStrategyKey) console.log(pc.dim(`strategy credential: ${resolvedStrategyKey.origin}`));
+  const resolvedQuotient = strategyKeyed
+    ? await resolveQuotientToken(botId).catch(() => null)
+    : await resolveQuotientToken(botId);
+  if (!strategyKeyed && !resolvedQuotient) {
     throw new Error(
       "no Quotient signals key found — set QUOTIENT_API_TOKEN/QUOTIENT_API_KEY in the environment or nearest .local.env, " +
         "store quotient-token in this bot's keystore, or log in with the quotient CLI. Deployment stopped so the droplet " +
@@ -594,7 +594,7 @@ export async function runDeploy(botId: string, opts: DeployOpts = {}): Promise<v
   const { publicKey } = ensureKeypair();
   const sshKeyId = await client.upsertSshKey("cassie", publicKey);
 
-  const replacementStateSource = marketMakeStateSource(cfg, reuse, namedExisting);
+  const replacementStateSource = preservedStateSource(cfg, reuse, namedExisting);
   if ((isPredictionDeployment(cfg) || cfg.strategy.id === "quotient-swing") && replacementStateSource?.deployment && namedExisting &&
     replacementStateSource.deployment.dropletId !== namedExisting.id) {
     const kind = cfg.strategy.id === "quotient-swing" ? "swing" : "adaptive";
@@ -717,6 +717,7 @@ export async function runDeploy(botId: string, opts: DeployOpts = {}): Promise<v
     ["CASSIE_AUTOSTART", workspaceArtifact ? "0" : runtimeAutostartBeforePreflights(deployedCfg)],
     ["CASSIE_REQUIRED_REGION", droplet.region.slug],
     ["QUOTIENT_API_TOKEN", quotientToken],
+    ["QUOTIENT_STRATEGY_KEY", strategyKey],
     ["TELEGRAM_BOT_TOKEN", telegramToken],
     ["SURPLUS_API_KEY", surplusApiKey],
   ];
@@ -786,10 +787,11 @@ export async function runDeploy(botId: string, opts: DeployOpts = {}): Promise<v
     console.log(pc.green(`Kalshi API access verified from ${chosen.name}`));
   }
 
-  const signals = controlCall(target, botId, "GET", "/signals/check") as { count?: number; required?: boolean };
+  const signals = controlCall(target, botId, "GET", "/signals/check") as { count?: number; required?: boolean; rulesVersion?: number };
   console.log(signals.required === false
     ? "Quotient credential not required."
     : `Quotient verified: ${signals.count ?? 0} published rows.`);
+  if (signals.rulesVersion !== undefined) console.log(`Strategy rules: version ${signals.rulesVersion}.`);
 
   if (deployedCfg.strategy.id === "agent") {
     const agent = controlCall(target, botId, "GET", "/agent/check") as {
@@ -807,9 +809,6 @@ export async function runDeploy(botId: string, opts: DeployOpts = {}): Promise<v
     deployedCfg,
     (method, path, body) => controlCall(target, botId, method, path, body),
   );
-  if (deployedCfg.strategy.id === "market-make") {
-    console.log("Market-make running; entries halted.");
-  }
   if (workspaceArtifact || runtimeAutostartBeforePreflights(deployedCfg) === "0") {
     // First boot waits for preflights and reconciliation. Later process restarts
     // can start their loops; durable pause/activation state still governs trading.
@@ -824,7 +823,7 @@ export async function runDeploy(botId: string, opts: DeployOpts = {}): Promise<v
       "cassie:cassie",
     );
   }
-  if (!["market-make", "quotient-swing"].includes(deployedCfg.strategy.id)) {
+  if (deployedCfg.strategy.id !== "quotient-swing") {
     const tickIntervalMin =
       typeof startup.started.tickIntervalMin === "number"
         ? startup.started.tickIntervalMin
@@ -838,6 +837,7 @@ export async function runDeploy(botId: string, opts: DeployOpts = {}): Promise<v
     console.log(`Position checks: ${positionCheckSeconds}s`);
     console.log(`Signal refresh: ${signalCheckMinutes}m`);
   }
+  if (deployedCfg.venue === "polymarket" && strategyKeyed) console.log(POLYMARKET_FEE_DISCLOSURE);
 
   console.log("");
   if (deployedCfg.strategy.id === "kalshi-commodities") {
@@ -859,17 +859,8 @@ export async function runDeploy(botId: string, opts: DeployOpts = {}): Promise<v
     console.log(`cassie logs ${botId}`);
     return;
   }
-  if (deployedCfg.strategy.id === "market-make") {
-    console.log(`${botId} installed; trading halted.`);
-    console.log(`cassie market-make reconcile ${botId}`);
-    console.log(`cassie market-make reconcile ${botId} --apply`);
-    console.log(`cassie market-make dry-run ${botId}`);
-    console.log(`cassie market-make status ${botId}`);
-    console.log(`cassie market-make resume ${botId}`);
-  } else {
-    console.log(`${botId} live on ${name}.`);
-    console.log(`cassie status ${botId}`);
-  }
+  console.log(`${botId} live on ${name}.`);
+  console.log(`cassie status ${botId}`);
   console.log(`cassie logs ${botId}`);
   console.log(`cassie destroy ${botId}`);
 }

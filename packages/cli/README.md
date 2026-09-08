@@ -3,7 +3,7 @@
 Self-hosted, non-custodial trading bots for prediction markets and perps. A bot is one
 wallet, one venue, one strategy. Strategies can follow published
 [Quotient](https://dev.quotient.social) forecasts, run a prompt-driven monitoring agent,
-or manage Q-directed passive inventory on Polymarket.
+or trade one-to-five-day perps on Hyperliquid.
 
 Keys stay in an encrypted keystore on your machine. Quotient publishes the signals and
 holds neither keys nor funds.
@@ -40,9 +40,6 @@ offers to save the confirmed passphrase in the native system
 credential store so later agent-driven commands do not prompt. Everything happens in the
 terminal.
 
-For the market-maker, choose `polymarket`, then `market-make`. It is a dedicated strategy,
-not an option layered onto `signals` or `agent`.
-
 Ctrl-C cancels resting orders before the process exits.
 
 ## Commands
@@ -51,7 +48,7 @@ Ctrl-C cancels resting orders before the process exits.
 |---|---|
 | `cassie init` | Create a bot. Resumable if interrupted. |
 | `cassie fund <bot>` | Run or re-run the funding flow. |
-| `cassie withdraw <bot> <amount>` | Send collateral out. Market-makers must be freshly reconciled, settlement-quiescent, HALTED, and flat. |
+| `cassie withdraw <bot> <amount>` | Send collateral out. |
 | `cassie run <bot>` | Run the bot here. |
 | `cassie deploy <bot>` | Run the bot on a droplet. |
 | `cassie status <bot>` | Droplet, service, and engine on one screen. |
@@ -62,14 +59,8 @@ Ctrl-C cancels resting orders before the process exits.
 | `cassie orders <bot>` | List or cancel open orders. |
 | `cassie trade <bot> buy\|sell <market>` | Place one order. |
 | `cassie trade <bot> --thesis` | Six questions to a sized, stopped, approvable order. |
-| `cassie strategy <bot>` | View or tune position count, allocation, exits, and guardrails. |
-| `cassie market-make configure <bot>` | View or tune the Q-directed market-maker. |
-| `cassie market-make status <bot>` | Lifecycle, config identity, inventory, orders, and loss stops. |
-| `cassie market-make dry-run <bot>` | Read live inputs and propose actions without placing orders or changing trading state; metered API spend is recorded. |
-| `cassie market-make reconcile <bot>` | Report exact sanitized cancellations and filtered residual mismatches with their SHA-256; `--apply` confirms only that reviewed proposal. |
-| `cassie market-make halt <bot>` | Stop additions; `--liquidate` requests bounded urgent exits. |
-| `cassie market-make resume <bot>` | Explicitly activate a reconciled market-maker. |
-| `cassie market-make replay --input <file>` | Replay a normalized event bundle offline. |
+| `cassie strategy <bot>` | View or tune position count, allocation, and guardrails. |
+| `cassie strategy-key <bot> [key]` | Store the strategy-scoped Quotient key the signals strategy runs on. |
 | `cassie agent prompt <bot>` | View or change the separate monitoring-agent mandate. |
 | `cassie wallet list` | Bots and key roles. |
 | `cassie passphrase change <bot>` | Atomically re-encrypt every local keystore entry under a new passphrase. |
@@ -135,91 +126,24 @@ Redeployment preserves the execution database in both modes. A switch to `legacy
 pauses the old adaptive runtime and waits for its orders and settlements to reconcile.
 An unreachable host or unresolved submission stops deployment with the old state intact.
 
-## Market make
+## Strategy keys and fees
 
-`market-make` is Polymarket-only and deterministic. It is not a symmetric, always-on
-dealer: it passively acquires one outcome only when live Q has a qualifying edge, then
-reduces inventory on forecast change, convergence, risk, or time. It does not poll X or
-news; Quotient updates provide the thesis and CLOB movement provides shock detection.
-
-The $500 preset is a ratio template applied automatically to funded strategy capital. At
-the $500 reference size it allows at most $350 of inventory plus pending entries across
-six markets. It starts with $12.50 tickets, a $20 per-order cap, $40 NO and $20 YES targets, 10–30pp
-NO edges, and 10–30pp YES edges (YES at half size). Six hours is review-only. Cassie reacts immediately to
-new `latest_q`, exits at 5pp remaining edge or 75% of the first-fill gap captured, uses a
-24-hour normal ceiling, and permits one qualifying same-direction forecast to extend the
-position to at most 36 hours.
-
-Entry liquidity is measured on the selected outcome's exit-side bids. Defaults require
-$1,000 within 1¢ and $2,500 within 2¢. One order may use at most 2%/0.8% of those
-respective depth bands, and total inventory in one market may use at most 4%/1.6%. At the
-minimum floors, that means at most a $20 order and $40 in one market. Both floors are
-configurable. A resting entry is canceled if refreshed depth participation no longer
-supports its remaining size:
+The signals strategy runs on a strategy-scoped key (`qsk_…`) issued from the Quotient
+admin console. It reads the signal feed, market lookups, and the strategy's served rules,
+draws no credits, and stops on its next request once revoked. `cassie run` and
+`cassie deploy` refuse to start a signals bot without one.
 
 ```sh
-cassie market-make configure bot-1 \
-  --min-depth-1c-usd 1000 \
-  --min-depth-2c-usd 2500 \
-  --max-order-depth-1c-pct 2 \
-  --max-order-depth-2c-pct 0.8 \
-  --max-market-depth-1c-pct 4 \
-  --max-market-depth-2c-pct 1.6
+cassie strategy-key bot-1 <key>      # verifies against the gateway, stores it runtime-eligible
+cassie strategy-key bot-1 --status   # which source the next run or deployment would use
 ```
 
-No bankroll flag is required: funding the bot changes sizing automatically. Decreases
-apply immediately; increases require two matching clean snapshots by default to avoid a
-non-atomic balance/position race. Resting adds are paused/canceled when needed to create
-a clean post-settlement refresh window; exits remain supervised. `--bankroll-ceiling-usd` optionally caps the funded-capital sizing base, while
-depth floors and participation fractions stay fixed. A $10,000 effective bankroll raises the hard per-order cap
-to $400, but the normal base requests become $250 NO and $125 YES; scaling alone does not
-request $400. A custom $400 NO request, for example from a `--base-order-usd` override,
-still requires at least $20,000 within 1¢ and $50,000 within 2¢. YES remains half the
-configured base unless its direction configuration changes. Configure an optional ceiling with:
+`QUOTIENT_STRATEGY_KEY` in the environment or nearest `.local.env` also works. Entry and
+exit rules are served by Quotient, refreshed hourly, and override any rule keys in the
+saved bot config; `cassie strategy` tunes sizing, caps, and cadence only.
 
-```sh
-cassie market-make configure bot-1 --bankroll-ceiling-usd 10000
-```
-
-`--bankroll-usd 10000` remains as an explicit fixed-sizing compatibility mode.
-
-A first local run and every new deployment remain halted until reviewed. Startup runs
-preflights but does not apply or authorize venue reconciliation. Reconcile in report-only
-mode first; it prints every exact sanitized cancellation plus only residual-inventory
-rows with an actual mismatch. Each residual row includes its `reason` and
-`application: 'observe-and-authorize-repeated-reconciliation'`; `inventoryApplication`
-describes the repeated-snapshot gate. The complete proposal has a SHA-256:
-
-```sh
-cassie market-make reconcile bot-1          # report only
-cassie market-make reconcile bot-1 --apply  # confirm and submit that exact proposal hash
-cassie market-make dry-run bot-1
-cassie market-make status bot-1
-# If still HALTED, repeat report-only reconcile/status review before resuming.
-cassie market-make resume bot-1
-```
-
-Review every proposed cancellation and residual mismatch before `--apply`. Apply
-authorizes the exact cancellations and observation under that hash; it does not
-immediately adopt or correct residual inventory. Mutation waits for the configured
-matching-snapshot count and late-fill protections. If the authoritative venue snapshot
-has changed, apply refuses rather than substituting a new proposal; rerun the report and
-review its new hash. Run `dry-run` and inspect `status` after apply. The bot may remain
-halted while those gates are pending, in which case run a subsequent reconcile/status
-review and do not resume yet. After the current deployment has been explicitly authorized
-and resumed, ordinary ticks may auto-reconcile. A new deployment or configuration
-identity starts halted and requires a fresh proposal.
-
-`halt` cancels additions and resting orders while mandatory exits continue;
-`halt --liquidate` requests bounded urgent exits. Manual `cassie trade` orders are
-disabled for market-make bots because they would bypass durable inventory reservations.
-Use a separate bot id for discretionary trading.
-
-Configuration changes are not hot-reloaded. Redeploy a remote bot, or restart
-`cassie run` locally, before reconciling and explicitly resuming the new configuration.
-
-Prompt-driven monitoring remains the separate `agent` strategy, configured with
-`cassie agent prompt <bot> --set "..."`. It is not an overlay on market-make in v1.
+Quotient charges 0.75% of notional on each Polymarket fill. Every signed order carries
+Quotient's builder code and Polymarket collects the fee with its own.
 
 ## Deploy
 
@@ -251,11 +175,9 @@ bot-1 is live on cassie-bot-1 in Bangalore 1.
   cassie destroy bot-1
 ```
 
-Non-market-make bots start trading only after the droplet proves its region to
-DigitalOcean's metadata service, the venue accepts orders from there, and the signal
-credential checks out. Market-make completes those checks and starts `HALTED`,
-as described above. A failure at any step stops the deploy with the reason and leaves the
-bot idle.
+Bots start trading only after the droplet proves its region to DigitalOcean's metadata
+service, the venue accepts orders from there, and the signal credential checks out. A
+failure at any step stops the deploy with the reason and leaves the bot idle.
 
 `--region <slug>` picks somewhere else. The default is `blr1`.
 
@@ -353,8 +275,7 @@ cassie strategy <bot> --max-entry-edge unlimited
 ```
 
 The signals strategy does not cap quoted bid/ask spread; slippage and in-band depth
-constrain execution. Market-make separately uses a 4pp operational selected-token spread
-ceiling and a 30pp hard sanity ceiling.
+constrain execution.
 
 While orders rest, the runtime heartbeats every five seconds. If it dies, the venue cancels
 those orders about ten seconds later.

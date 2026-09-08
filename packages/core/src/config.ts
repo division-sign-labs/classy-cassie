@@ -263,13 +263,6 @@ export const BotConfigSchema = z
     if (config.strategy.id === "quotient-swing" && config.venue !== "hyperliquid") {
       ctx.addIssue({ code: "custom", path: ["strategy", "id"], message: "quotient-swing requires Hyperliquid" });
     }
-    if (config.strategy.id === "market-make" && config.venue !== "polymarket") {
-      ctx.addIssue({
-        code: "custom",
-        path: ["strategy", "id"],
-        message: "the market-make strategy is supported only on Polymarket",
-      });
-    }
     const treasurySigner = config.treasury?.signers.eoa;
     if (
       treasurySigner &&

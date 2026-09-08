@@ -90,11 +90,6 @@ async function localEngine(botId: string): Promise<{ engine: Engine; close: () =
 async function placeManual(botId: string, params: ManualOrderParams): Promise<ManualOrderResult> {
   const cfg = loadBotConfig(botId);
   if (cfg.strategy.id === "quotient-swing") throw new Error("manual orders bypass protected swing reservations; use a separate bot id");
-  if (cfg.strategy.id === "market-make") {
-    throw new Error(
-      "Manual orders bypass market-make reservations. Use a separate bot ID.",
-    );
-  }
   if (isDeployed(cfg)) {
     return (await controlFetch(cfg, "/trade", { method: "POST", body: JSON.stringify(params) })) as ManualOrderResult;
   }
@@ -109,11 +104,6 @@ async function placeManual(botId: string, params: ManualOrderParams): Promise<Ma
 export async function runTrade(botId: string, sideArg: string | undefined, marketRef: string | undefined, opts: TradeOpts): Promise<void> {
   const configuredBot = loadBotConfig(botId);
   if (configuredBot.strategy.id === "quotient-swing") throw new Error("manual orders bypass protected swing reservations; use a separate bot id");
-  if (configuredBot.strategy.id === "market-make") {
-    throw new Error(
-      "Manual orders bypass market-make reservations. Use a separate bot ID.",
-    );
-  }
   if (opts.thesis) {
     const thesis = await elicitTicket({ venue: configuredBot.venue });
     if (opts.save) saveThesis(thesis, opts.save, opts.mappings);
