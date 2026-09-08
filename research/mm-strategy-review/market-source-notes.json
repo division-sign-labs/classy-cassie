@@ -1,0 +1,46 @@
+{
+  "verifiedDateUtc": "2026-09-05",
+  "sources": [
+    {
+      "url": "https://docs.polymarket.com/trading/market-making",
+      "relevance": "Official two-sided bid/ask definition; complementary NO bid can represent YES ask; midpoint is descriptive, not necessarily fair value; post-only, inventory skew, real-time market/fill updates and cancel/reconcile are standard operating guidance."
+    },
+    {
+      "url": "https://docs.polymarket.com/trading/fees",
+      "relevance": "Makers pay no venue trading fee. Taker fees and rates depend on market configuration; use actual feeSchedule rather than historical makerBaseFee/takerBaseFee fields."
+    },
+    {
+      "url": "https://docs.polymarket.com/programs/maker-rebates",
+      "relevance": "Rebates require executed maker liquidity, are fee-curve-weighted per market and have a $1 payout minimum. Rates can change. This current page supersedes older /market-makers/maker-rebates search results."
+    },
+    {
+      "url": "https://docs.polymarket.com/programs/liquidity-rewards",
+      "relevance": "Qualifying resting orders compete for the market allocation via relative size/spread scores. Both sides improve scoring; outside the middle probability range both sides are required. $1 minimum payout; no income guaranteed by merely quoting."
+    },
+    {
+      "url": "https://docs.polymarket.com/market-data/market-details",
+      "relevance": "rewardsMinSize is shares; rewardsMaxSpread is distance from midpoint in cents; clobRewards entries are dated whole-market allocations. feeSchedule specifies rate, exponent, takerOnly and rebateRate."
+    },
+    {
+      "url": "https://docs.polymarket.com/api-reference/market-data/get-order-book",
+      "relevance": "Public GET /book?token_id=<exact token> returns bids, asks, tick and minimum share size. Snapshot script validates exact returned asset_id and sorts prices numerically."
+    },
+    {
+      "url": "https://docs.polymarket.com/api-reference/core/get-trades-for-a-user-or-markets",
+      "relevance": "Public Data API /trades supports condition-ID market filters, start/end epochs and takerOnly=true. Sample uses at most latest1000 rows within24h, flags truncated windows, strips trader identities and aggregates recent flow."
+    },
+    {
+      "url": "https://docs.polymarket.com/api-reference/markets/get-clob-market-info",
+      "relevance": "Public /clob-markets/{condition_id} provides execution minimums, fee details and rewards constraints independently of Gamma."
+    }
+  ],
+  "interpretationConstraints": [
+    "Static screen eligibility is not proof of maker fills, realized spread capture, profitability, queue position or adequate queue turnover.",
+    "Books on separate outcome requests are not an atomic snapshot. Cross-outcome pair arithmetic is illustrative, not an executable two-leg guarantee.",
+    "Public taker rows are observations, not unique global matches or the bot's own fills. No trade identities, balances or private account data were used.",
+    "Gamma reported volume and Data API sum(size*price) are separately reported measures; they are not assumed equal. Venue-reported volume alone is a weak proxy for recent two-way flow.",
+    "A market reward pool is not the bot's reward. Meeting minimum share size alone does not prove full reward eligibility or predict competitive reward share.",
+    "Original historical requested screen uses YES20pp/NO10pp minima; the working tree's modified strategy JSON has YES10pp. Static findings must not be labeled a full replay of either runtime.",
+    "The snapshot initially marked gameStartTime as sports metadata; WTI finance markets populate that field too. The screening script explicitly corrects finance markets, and new snapshots use actual sports classification rather than gameStartTime alone."
+  ]
+}

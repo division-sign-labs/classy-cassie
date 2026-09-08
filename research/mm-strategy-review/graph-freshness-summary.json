@@ -1,0 +1,71 @@
+{
+  "as_of": "2026-09-05T05:32:46.258285+00:00",
+  "active_graph_markets_with_committed_forecasts": 589,
+  "age_counts": {
+    "<6h": 69,
+    "6-24h": 85,
+    "24-72h": 103,
+    ">72h": 332
+  },
+  "active_signal_keys_observed": 54,
+  "active_signal_matched_age_counts": {
+    "<6h": 1,
+    "6-24h": 6,
+    "24-72h": 43,
+    ">72h": 4
+  },
+  "not_in_active_signal_age_counts": {
+    "<6h": 68,
+    "6-24h": 79,
+    "24-72h": 60,
+    ">72h": 328
+  },
+  "by_category": {
+    "Business": {
+      "24-72h": 3,
+      ">72h": 7
+    },
+    "Crypto": {
+      ">72h": 1
+    },
+    "Economics": {
+      "<6h": 63,
+      "6-24h": 83,
+      "24-72h": 7,
+      ">72h": 24
+    },
+    "Entertainment": {
+      "24-72h": 2,
+      ">72h": 7
+    },
+    "Equities": {
+      "<6h": 5,
+      "24-72h": 2
+    },
+    "Geopolitics": {
+      "<6h": 1,
+      "24-72h": 21,
+      ">72h": 176
+    },
+    "Global Elections": {
+      "6-24h": 2,
+      "24-72h": 59,
+      ">72h": 83
+    },
+    "Legal": {
+      ">72h": 2
+    },
+    "Politics": {
+      "24-72h": 2,
+      ">72h": 16
+    },
+    "Science & Tech": {
+      "24-72h": 5,
+      ">72h": 14
+    },
+    "Unknown": {
+      "24-72h": 2,
+      ">72h": 2
+    }
+  }
+}

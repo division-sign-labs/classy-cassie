@@ -1,0 +1,2381 @@
+{
+  "coverage": [
+    {
+      "asset": "Bitcoin",
+      "n": 1676,
+      "markets": 193,
+      "first": "2026-08-13 21:55:39.461000+00:00",
+      "last": "2026-09-05 06:20:40.444000+00:00",
+      "settled_forecast_rows": 1542
+    },
+    {
+      "asset": "Copper",
+      "n": 1414,
+      "markets": 141,
+      "first": "2026-08-08 12:06:45.837000+00:00",
+      "last": "2026-09-05 04:25:13.947000+00:00",
+      "settled_forecast_rows": 1365
+    },
+    {
+      "asset": "Gold",
+      "n": 2101,
+      "markets": 188,
+      "first": "2026-08-08 12:06:21.546000+00:00",
+      "last": "2026-09-05 04:28:31.183000+00:00",
+      "settled_forecast_rows": 2038
+    },
+    {
+      "asset": "Silver",
+      "n": 1649,
+      "markets": 157,
+      "first": "2026-08-08 12:10:05.955000+00:00",
+      "last": "2026-09-05 04:27:42.832000+00:00",
+      "settled_forecast_rows": 1614
+    },
+    {
+      "asset": "WTI Crude Oil",
+      "n": 2429,
+      "markets": 196,
+      "first": "2026-08-13 12:11:20.004000+00:00",
+      "last": "2026-09-05 06:10:10.253000+00:00",
+      "settled_forecast_rows": 1159
+    }
+  ],
+  "total_forecasts": 9269,
+  "missing_snapshot_quote": 1205,
+  "post_anchor_rows": 1,
+  "excluded_asset_links": [
+    {
+      "marketId": "kalshi:KXAKCRUDEOIL-27MAR01-T153.607",
+      "asset": "WTI Crude Oil"
+    },
+    {
+      "marketId": "kalshi:KXBRENTW-26SEP0417-T92.99",
+      "asset": "WTI Crude Oil"
+    },
+    {
+      "marketId": "kalshi:KXBRENTW-26SEP0417-T94.99",
+      "asset": "WTI Crude Oil"
+    }
+  ],
+  "scores": [
+    {
+      "sample": "all",
+      "asset": "Bitcoin",
+      "n": 1218,
+      "markets": 174,
+      "clusters": 16,
+      "q_brier": 0.18442026143178378,
+      "market_brier": 0.17079753694581282,
+      "q_minus_market": 0.01362272448597095,
+      "delta_ci95": [
+        -0.000808075453357934,
+        0.03685355199000284
+      ],
+      "yes_outcome": 0.555008210180624,
+      "q_mean": 0.5229377614585863,
+      "market_mean": 0.5009934318555008,
+      "yes_side_share": 0.5295566502463054
+    },
+    {
+      "sample": "all",
+      "asset": "Copper",
+      "n": 1221,
+      "markets": 134,
+      "clusters": 13,
+      "q_brier": 0.17052006555670066,
+      "market_brier": 0.16544373464373463,
+      "q_minus_market": 0.005076330912966002,
+      "delta_ci95": [
+        -0.01514054691062782,
+        0.03151857661033746
+      ],
+      "yes_outcome": 0.5331695331695332,
+      "q_mean": 0.48672589527700477,
+      "market_mean": 0.4833497133497134,
+      "yes_side_share": 0.4438984438984439
+    },
+    {
+      "sample": "all",
+      "asset": "Gold",
+      "n": 1707,
+      "markets": 177,
+      "clusters": 14,
+      "q_brier": 0.1610680578671366,
+      "market_brier": 0.1361596367896895,
+      "q_minus_market": 0.024908421077447097,
+      "delta_ci95": [
+        -0.012190779403224862,
+        0.05892824375213766
+      ],
+      "yes_outcome": 0.4100761570005858,
+      "q_mean": 0.550680763348606,
+      "market_mean": 0.4822437024018746,
+      "yes_side_share": 0.7469244288224957
+    },
+    {
+      "sample": "all",
+      "asset": "Silver",
+      "n": 1473,
+      "markets": 149,
+      "clusters": 13,
+      "q_brier": 0.14038367116690756,
+      "market_brier": 0.12171305159538356,
+      "q_minus_market": 0.01867061957152399,
+      "delta_ci95": [
+        -0.020570913674058354,
+        0.059151034881463734
+      ],
+      "yes_outcome": 0.3985064494229464,
+      "q_mean": 0.5184896692137211,
+      "market_mean": 0.44489816700611,
+      "yes_side_share": 0.7623896809232859
+    },
+    {
+      "sample": "all",
+      "asset": "WTI Crude Oil",
+      "n": 1048,
+      "markets": 123,
+      "clusters": 12,
+      "q_brier": 0.19248414967097227,
+      "market_brier": 0.20124184160305345,
+      "q_minus_market": -0.008757691932081186,
+      "delta_ci95": [
+        -0.01728727609413132,
+        0.010636453067368153
+      ],
+      "yes_outcome": 0.8072519083969466,
+      "q_mean": 0.5843375284280976,
+      "market_mean": 0.5484064885496184,
+      "yes_side_share": 0.6812977099236641
+    },
+    {
+      "sample": "first",
+      "asset": "Bitcoin",
+      "n": 174,
+      "markets": 174,
+      "clusters": 16,
+      "q_brier": 0.19757816786224297,
+      "market_brier": 0.19418706896551724,
+      "q_minus_market": 0.003391098896725755,
+      "delta_ci95": [
+        -0.033012928944856426,
+        0.040086477971768404
+      ],
+      "yes_outcome": 0.5574712643678161,
+      "q_mean": 0.5568181250410376,
+      "market_mean": 0.4683333333333334,
+      "yes_side_share": 0.735632183908046
+    },
+    {
+      "sample": "first",
+      "asset": "Copper",
+      "n": 134,
+      "markets": 134,
+      "clusters": 13,
+      "q_brier": 0.1869608748798577,
+      "market_brier": 0.1947727611940299,
+      "q_minus_market": -0.007811886314172133,
+      "delta_ci95": [
+        -0.03645891249707655,
+        0.02569761212612219
+      ],
+      "yes_outcome": 0.48507462686567165,
+      "q_mean": 0.5298571494335403,
+      "market_mean": 0.48917910447761204,
+      "yes_side_share": 0.7014925373134329
+    },
+    {
+      "sample": "first",
+      "asset": "Gold",
+      "n": 177,
+      "markets": 177,
+      "clusters": 14,
+      "q_brier": 0.22406627777904964,
+      "market_brier": 0.20877316384180788,
+      "q_minus_market": 0.015293113937241738,
+      "delta_ci95": [
+        -0.03180225138794547,
+        0.059402627948543875
+      ],
+      "yes_outcome": 0.4858757062146893,
+      "q_mean": 0.6162014030430523,
+      "market_mean": 0.5026553672316384,
+      "yes_side_share": 0.8983050847457628
+    },
+    {
+      "sample": "first",
+      "asset": "Silver",
+      "n": 149,
+      "markets": 149,
+      "clusters": 13,
+      "q_brier": 0.1893488540915679,
+      "market_brier": 0.1861159395973154,
+      "q_minus_market": 0.0032329144942524674,
+      "delta_ci95": [
+        -0.04523199595636155,
+        0.042203912156131035
+      ],
+      "yes_outcome": 0.5234899328859061,
+      "q_mean": 0.6160060313567925,
+      "market_mean": 0.4939261744966443,
+      "yes_side_share": 0.9060402684563759
+    },
+    {
+      "sample": "first",
+      "asset": "WTI Crude Oil",
+      "n": 123,
+      "markets": 123,
+      "clusters": 12,
+      "q_brier": 0.2551302666017433,
+      "market_brier": 0.24807378048780485,
+      "q_minus_market": 0.007056486113938441,
+      "delta_ci95": [
+        -0.022228810016778098,
+        0.040505753082373565
+      ],
+      "yes_outcome": 0.6097560975609756,
+      "q_mean": 0.5136477978975278,
+      "market_mean": 0.4303658536585365,
+      "yes_side_share": 0.7886178861788617
+    },
+    {
+      "sample": "random",
+      "asset": "Bitcoin",
+      "n": 174,
+      "markets": 174,
+      "clusters": 16,
+      "q_brier": 0.16250942718940156,
+      "market_brier": 0.15990718390804598,
+      "q_minus_market": 0.002602243281355586,
+      "delta_ci95": [
+        -0.028689279794931216,
+        0.033056595730216666
+      ],
+      "yes_outcome": 0.5574712643678161,
+      "q_mean": 0.576443584775072,
+      "market_mean": 0.508448275862069,
+      "yes_side_share": 0.6666666666666666
+    },
+    {
+      "sample": "random",
+      "asset": "Copper",
+      "n": 134,
+      "markets": 134,
+      "clusters": 13,
+      "q_brier": 0.15036007943423005,
+      "market_brier": 0.15898339552238805,
+      "q_minus_market": -0.008623316088157982,
+      "delta_ci95": [
+        -0.03411477509735713,
+        0.025436452700684658
+      ],
+      "yes_outcome": 0.48507462686567165,
+      "q_mean": 0.5212164788811613,
+      "market_mean": 0.47861940298507466,
+      "yes_side_share": 0.6567164179104478
+    },
+    {
+      "sample": "random",
+      "asset": "Gold",
+      "n": 177,
+      "markets": 177,
+      "clusters": 14,
+      "q_brier": 0.15552021224980606,
+      "market_brier": 0.15204816384180792,
+      "q_minus_market": 0.0034720484079981424,
+      "delta_ci95": [
+        -0.03532058980838572,
+        0.03913595175400451
+      ],
+      "yes_outcome": 0.4858757062146893,
+      "q_mean": 0.5734231222361372,
+      "market_mean": 0.4826271186440679,
+      "yes_side_share": 0.7909604519774012
+    },
+    {
+      "sample": "random",
+      "asset": "Silver",
+      "n": 149,
+      "markets": 149,
+      "clusters": 13,
+      "q_brier": 0.14618310331877526,
+      "market_brier": 0.13988489932885909,
+      "q_minus_market": 0.006298203989916224,
+      "delta_ci95": [
+        -0.03832011031139106,
+        0.046550436956703634
+      ],
+      "yes_outcome": 0.5234899328859061,
+      "q_mean": 0.5981413770894534,
+      "market_mean": 0.48093959731543623,
+      "yes_side_share": 0.8657718120805369
+    },
+    {
+      "sample": "random",
+      "asset": "WTI Crude Oil",
+      "n": 123,
+      "markets": 123,
+      "clusters": 12,
+      "q_brier": 0.21131788284502218,
+      "market_brier": 0.20421788617886177,
+      "q_minus_market": 0.007099996666160399,
+      "delta_ci95": [
+        -0.019736181629763695,
+        0.040785738641841165
+      ],
+      "yes_outcome": 0.6097560975609756,
+      "q_mean": 0.5517392216904635,
+      "market_mean": 0.4820325203252032,
+      "yes_side_share": 0.6991869918699187
+    }
+  ],
+  "all_by_horizon": [
+    {
+      "asset": "Bitcoin",
+      "horizon": "0-6h",
+      "n": 159,
+      "markets": 74,
+      "clusters": 15,
+      "q_brier": 0.12051683456963654,
+      "market_brier": 0.11062798742138366,
+      "q_minus_market": 0.009888847148252895,
+      "delta_ci95": [
+        -0.00400518376364531,
+        0.026661953054812438
+      ],
+      "yes_outcome": 0.5345911949685535,
+      "q_mean": 0.5538605124636515,
+      "market_mean": 0.5471698113207547,
+      "yes_side_share": 0.44654088050314467
+    },
+    {
+      "asset": "Bitcoin",
+      "horizon": "6-24h",
+      "n": 595,
+      "markets": 138,
+      "clusters": 15,
+      "q_brier": 0.20150360881271204,
+      "market_brier": 0.1912664285714286,
+      "q_minus_market": 0.010237180241283473,
+      "delta_ci95": [
+        -0.008290296256452298,
+        0.029456203524887203
+      ],
+      "yes_outcome": 0.573109243697479,
+      "q_mean": 0.5325045113793746,
+      "market_mean": 0.5109831932773109,
+      "yes_side_share": 0.5310924369747899
+    },
+    {
+      "asset": "Bitcoin",
+      "horizon": "1-3d",
+      "n": 231,
+      "markets": 48,
+      "clusters": 4,
+      "q_brier": 0.19601192039870804,
+      "market_brier": 0.1828077922077922,
+      "q_minus_market": 0.013204128190915857,
+      "delta_ci95": [
+        -0.03057710310206238,
+        0.06939267946408541
+      ],
+      "yes_outcome": 0.5454545454545454,
+      "q_mean": 0.46884881557179764,
+      "market_mean": 0.4618614718614719,
+      "yes_side_share": 0.44155844155844154
+    },
+    {
+      "asset": "Bitcoin",
+      "horizon": "3-7d",
+      "n": 218,
+      "markets": 36,
+      "clusters": 3,
+      "q_brier": 0.1724136094542007,
+      "market_brier": 0.14890516055045872,
+      "q_minus_market": 0.02350844890374199,
+      "delta_ci95": [
+        -0.00292918513040829,
+        0.0776431051923501
+      ],
+      "yes_outcome": 0.5688073394495413,
+      "q_mean": 0.5397822261302627,
+      "market_mean": 0.492454128440367,
+      "yes_side_share": 0.6467889908256881
+    },
+    {
+      "asset": "Bitcoin",
+      "horizon": "7-14d",
+      "n": 15,
+      "markets": 3,
+      "clusters": 1,
+      "q_brier": 0.180142267377295,
+      "market_brier": 0.12987333333333334,
+      "q_minus_market": 0.05026893404396168,
+      "delta_ci95": [
+        null,
+        null
+      ],
+      "yes_outcome": 0.0,
+      "q_mean": 0.4038390673751342,
+      "market_mean": 0.342,
+      "yes_side_share": 1.0
+    },
+    {
+      "asset": "Copper",
+      "horizon": "0-6h",
+      "n": 162,
+      "markets": 78,
+      "clusters": 11,
+      "q_brier": 0.09996482721852977,
+      "market_brier": 0.09583009259259259,
+      "q_minus_market": 0.004134734625937185,
+      "delta_ci95": [
+        -0.021234528299838153,
+        0.031655076464232455
+      ],
+      "yes_outcome": 0.4567901234567901,
+      "q_mean": 0.4586956341780399,
+      "market_mean": 0.4723148148148148,
+      "yes_side_share": 0.46296296296296297
+    },
+    {
+      "asset": "Copper",
+      "horizon": "6-24h",
+      "n": 461,
+      "markets": 91,
+      "clusters": 10,
+      "q_brier": 0.20955648506261038,
+      "market_brier": 0.19391583514099783,
+      "q_minus_market": 0.01564064992161254,
+      "delta_ci95": [
+        -0.010779526973871587,
+        0.05737751638699821
+      ],
+      "yes_outcome": 0.5227765726681128,
+      "q_mean": 0.4691621274995752,
+      "market_mean": 0.48522776572668114,
+      "yes_side_share": 0.3362255965292842
+    },
+    {
+      "asset": "Copper",
+      "horizon": "1-3d",
+      "n": 439,
+      "markets": 76,
+      "clusters": 10,
+      "q_brier": 0.15653176201375082,
+      "market_brier": 0.15431947608200455,
+      "q_minus_market": 0.0022122859317462652,
+      "delta_ci95": [
+        -0.03954035752249259,
+        0.028477119173585436
+      ],
+      "yes_outcome": 0.5580865603644647,
+      "q_mean": 0.4883040722077429,
+      "market_mean": 0.4865148063781321,
+      "yes_side_share": 0.4191343963553531
+    },
+    {
+      "asset": "Copper",
+      "horizon": "3-7d",
+      "n": 121,
+      "markets": 34,
+      "clusters": 5,
+      "q_brier": 0.1649690360455568,
+      "market_brier": 0.18397086776859503,
+      "q_minus_market": -0.019001831723038237,
+      "delta_ci95": [
+        -0.053004525828856744,
+        0.029444526923553965
+      ],
+      "yes_outcome": 0.5867768595041323,
+      "q_mean": 0.5612443052125848,
+      "market_mean": 0.48962809917355377,
+      "yes_side_share": 0.743801652892562
+    },
+    {
+      "asset": "Copper",
+      "horizon": "7-14d",
+      "n": 25,
+      "markets": 5,
+      "clusters": 1,
+      "q_brier": 0.16143910058182073,
+      "market_brier": 0.17591200000000004,
+      "q_minus_market": -0.014472899418179287,
+      "delta_ci95": [
+        null,
+        null
+      ],
+      "yes_outcome": 0.52,
+      "q_mean": 0.5480825461438745,
+      "market_mean": 0.4264,
+      "yes_side_share": 1.0
+    },
+    {
+      "asset": "Copper",
+      "horizon": ">14d",
+      "n": 13,
+      "markets": 3,
+      "clusters": 1,
+      "q_brier": 0.20696030933629084,
+      "market_brier": 0.20635384615384622,
+      "q_minus_market": 0.0006064631824446762,
+      "delta_ci95": [
+        null,
+        null
+      ],
+      "yes_outcome": 0.5384615384615384,
+      "q_mean": 0.5939824873505674,
+      "market_mean": 0.4984615384615385,
+      "yes_side_share": 1.0
+    },
+    {
+      "asset": "Gold",
+      "horizon": "0-6h",
+      "n": 175,
+      "markets": 90,
+      "clusters": 11,
+      "q_brier": 0.08724447732635901,
+      "market_brier": 0.08808328571428571,
+      "q_minus_market": -0.0008388083879267084,
+      "delta_ci95": [
+        -0.013543651690480326,
+        0.02322300741172068
+      ],
+      "yes_outcome": 0.42857142857142855,
+      "q_mean": 0.49712236038791713,
+      "market_mean": 0.46654285714285704,
+      "yes_side_share": 0.5771428571428572
+    },
+    {
+      "asset": "Gold",
+      "horizon": "6-24h",
+      "n": 604,
+      "markets": 123,
+      "clusters": 10,
+      "q_brier": 0.1469677245994129,
+      "market_brier": 0.1396708609271523,
+      "q_minus_market": 0.007296863672260563,
+      "delta_ci95": [
+        -0.023754383959947712,
+        0.04674363048238067
+      ],
+      "yes_outcome": 0.41721854304635764,
+      "q_mean": 0.5192377647121368,
+      "market_mean": 0.45730132450331135,
+      "yes_side_share": 0.7599337748344371
+    },
+    {
+      "asset": "Gold",
+      "horizon": "1-3d",
+      "n": 716,
+      "markets": 103,
+      "clusters": 11,
+      "q_brier": 0.14743369174517082,
+      "market_brier": 0.12180513268156425,
+      "q_minus_market": 0.025628559063606556,
+      "delta_ci95": [
+        -0.020971381888778354,
+        0.06385578244080306
+      ],
+      "yes_outcome": 0.4092178770949721,
+      "q_mean": 0.5490304342316127,
+      "market_mean": 0.4871019553072625,
+      "yes_side_share": 0.7611731843575419
+    },
+    {
+      "asset": "Gold",
+      "horizon": "3-7d",
+      "n": 171,
+      "markets": 49,
+      "clusters": 5,
+      "q_brier": 0.30449864828335527,
+      "market_brier": 0.21877046783625734,
+      "q_minus_market": 0.08572818044709792,
+      "delta_ci95": [
+        -0.12221308776882911,
+        0.19306141581096903
+      ],
+      "yes_outcome": 0.38596491228070173,
+      "q_mean": 0.6919610747021482,
+      "market_mean": 0.5768421052631579,
+      "yes_side_share": 0.7543859649122807
+    },
+    {
+      "asset": "Gold",
+      "horizon": "7-14d",
+      "n": 28,
+      "markets": 9,
+      "clusters": 1,
+      "q_brier": 0.4245208691327941,
+      "market_brier": 0.17898571428571428,
+      "q_minus_market": 0.24553515484707986,
+      "delta_ci95": [
+        null,
+        null
+      ],
+      "yes_outcome": 0.07142857142857142,
+      "q_mean": 0.6721724429798966,
+      "market_mean": 0.40928571428571425,
+      "yes_side_share": 1.0
+    },
+    {
+      "asset": "Gold",
+      "horizon": ">14d",
+      "n": 13,
+      "markets": 5,
+      "clusters": 1,
+      "q_brier": 0.10680839287151624,
+      "market_brier": 0.23191538461538463,
+      "q_minus_market": -0.12510699174386836,
+      "delta_ci95": [
+        null,
+        null
+      ],
+      "yes_outcome": 0.9230769230769231,
+      "q_mean": 0.7033905380550116,
+      "market_mean": 0.49769230769230766,
+      "yes_side_share": 1.0
+    },
+    {
+      "asset": "Silver",
+      "horizon": "0-6h",
+      "n": 166,
+      "markets": 88,
+      "clusters": 11,
+      "q_brier": 0.08889306750271554,
+      "market_brier": 0.09027981927710843,
+      "q_minus_market": -0.0013867517743928852,
+      "delta_ci95": [
+        -0.02308065825453648,
+        0.03275513173652386
+      ],
+      "yes_outcome": 0.42771084337349397,
+      "q_mean": 0.49793400065952365,
+      "market_mean": 0.45993975903614454,
+      "yes_side_share": 0.5180722891566265
+    },
+    {
+      "asset": "Silver",
+      "horizon": "6-24h",
+      "n": 546,
+      "markets": 109,
+      "clusters": 10,
+      "q_brier": 0.12672759970011258,
+      "market_brier": 0.12405576923076922,
+      "q_minus_market": 0.0026718304693433277,
+      "delta_ci95": [
+        -0.03831016591209024,
+        0.052529852870112616
+      ],
+      "yes_outcome": 0.4249084249084249,
+      "q_mean": 0.48984387014440267,
+      "market_mean": 0.4312087912087912,
+      "yes_side_share": 0.7509157509157509
+    },
+    {
+      "asset": "Silver",
+      "horizon": "1-3d",
+      "n": 589,
+      "markets": 78,
+      "clusters": 9,
+      "q_brier": 0.11312608217221548,
+      "market_brier": 0.09902920203735145,
+      "q_minus_market": 0.01409688013486404,
+      "delta_ci95": [
+        -0.027269053826026783,
+        0.04751333325797546
+      ],
+      "yes_outcome": 0.38879456706281834,
+      "q_mean": 0.5061929523836466,
+      "market_mean": 0.4347028862478777,
+      "yes_side_share": 0.7911714770797963
+    },
+    {
+      "asset": "Silver",
+      "horizon": "3-7d",
+      "n": 133,
+      "markets": 33,
+      "clusters": 5,
+      "q_brier": 0.3297121757325715,
+      "market_brier": 0.2299904135338346,
+      "q_minus_market": 0.09972176219873691,
+      "delta_ci95": [
+        -0.08041794569568439,
+        0.22032202200132514
+      ],
+      "yes_outcome": 0.3082706766917293,
+      "q_mean": 0.6722033987810008,
+      "market_mean": 0.5322932330827069,
+      "yes_side_share": 0.9172932330827067
+    },
+    {
+      "asset": "Silver",
+      "horizon": "7-14d",
+      "n": 25,
+      "markets": 5,
+      "clusters": 1,
+      "q_brier": 0.39468967773187963,
+      "market_brier": 0.18092,
+      "q_minus_market": 0.21376967773187952,
+      "delta_ci95": [
+        null,
+        null
+      ],
+      "yes_outcome": 0.16,
+      "q_mean": 0.6668479458564281,
+      "market_mean": 0.396,
+      "yes_side_share": 1.0
+    },
+    {
+      "asset": "Silver",
+      "horizon": ">14d",
+      "n": 14,
+      "markets": 5,
+      "clusters": 1,
+      "q_brier": 0.17752894799847743,
+      "market_brier": 0.22303571428571428,
+      "q_minus_market": -0.04550676628723683,
+      "delta_ci95": [
+        null,
+        null
+      ],
+      "yes_outcome": 0.7142857142857143,
+      "q_mean": 0.6715418503739154,
+      "market_mean": 0.48642857142857154,
+      "yes_side_share": 1.0
+    },
+    {
+      "asset": "WTI Crude Oil",
+      "horizon": "0-6h",
+      "n": 93,
+      "markets": 47,
+      "clusters": 8,
+      "q_brier": 0.12110849381298604,
+      "market_brier": 0.12175564516129032,
+      "q_minus_market": -0.0006471513483042805,
+      "delta_ci95": [
+        -0.01592221008189654,
+        0.023864135182598126
+      ],
+      "yes_outcome": 0.6236559139784946,
+      "q_mean": 0.5742590877827453,
+      "market_mean": 0.5557526881720429,
+      "yes_side_share": 0.5161290322580645
+    },
+    {
+      "asset": "WTI Crude Oil",
+      "horizon": "6-24h",
+      "n": 408,
+      "markets": 103,
+      "clusters": 11,
+      "q_brier": 0.14797814058958494,
+      "market_brier": 0.15600674019607844,
+      "q_minus_market": -0.008028599606493485,
+      "delta_ci95": [
+        -0.03018646824098424,
+        0.0201415453174395
+      ],
+      "yes_outcome": 0.7279411764705882,
+      "q_mean": 0.6082914642382719,
+      "market_mean": 0.581421568627451,
+      "yes_side_share": 0.6397058823529411
+    },
+    {
+      "asset": "WTI Crude Oil",
+      "horizon": "1-3d",
+      "n": 502,
+      "markets": 80,
+      "clusters": 10,
+      "q_brier": 0.23674560817123053,
+      "market_brier": 0.24667196215139442,
+      "q_minus_market": -0.009926353980163883,
+      "delta_ci95": [
+        -0.023667575013111664,
+        0.02923952875193821
+      ],
+      "yes_outcome": 0.9023904382470119,
+      "q_mean": 0.5764090919076976,
+      "market_mean": 0.531902390438247,
+      "yes_side_share": 0.7330677290836654
+    },
+    {
+      "asset": "WTI Crude Oil",
+      "horizon": "3-7d",
+      "n": 45,
+      "markets": 19,
+      "clusters": 3,
+      "q_brier": 0.249753828179174,
+      "market_brier": 0.26884666666666673,
+      "q_minus_market": -0.019092838487492738,
+      "delta_ci95": [
+        -0.03267925617151598,
+        0.00935259339215519
+      ],
+      "yes_outcome": 0.8444444444444444,
+      "q_mean": 0.47643006848826575,
+      "market_mean": 0.418,
+      "yes_side_share": 0.8222222222222222
+    }
+  ],
+  "all_by_side": [
+    {
+      "asset": "Bitcoin",
+      "side": "NO",
+      "n": 573,
+      "markets": 98,
+      "clusters": 12,
+      "q_brier": 0.1775716122269701,
+      "market_brier": 0.1672374781849913,
+      "q_minus_market": 0.010334134041978846,
+      "delta_ci95": [
+        -0.0005572164413982996,
+        0.03322853047931765
+      ],
+      "yes_outcome": 0.525305410122164,
+      "q_mean": 0.3749029391681939,
+      "market_mean": 0.41878708551483423,
+      "yes_side_share": 0.0
+    },
+    {
+      "asset": "Bitcoin",
+      "side": "YES",
+      "n": 645,
+      "markets": 152,
+      "clusters": 16,
+      "q_brier": 0.1905044102602461,
+      "market_brier": 0.1739601937984496,
+      "q_minus_market": 0.016544216461796494,
+      "delta_ci95": [
+        -0.017001093507815784,
+        0.04976727607202839
+      ],
+      "yes_outcome": 0.5813953488372093,
+      "q_mean": 0.6544477663770278,
+      "market_mean": 0.5740232558139535,
+      "yes_side_share": 1.0
+    },
+    {
+      "asset": "Copper",
+      "side": "NO",
+      "n": 679,
+      "markets": 68,
+      "clusters": 11,
+      "q_brier": 0.17074229089166398,
+      "market_brier": 0.15703192194403534,
+      "q_minus_market": 0.013710368947628643,
+      "delta_ci95": [
+        -0.032489440039211955,
+        0.05308340590441749
+      ],
+      "yes_outcome": 0.5066273932253313,
+      "q_mean": 0.39240500757393765,
+      "market_mean": 0.46600147275405013,
+      "yes_side_share": 0.0
+    },
+    {
+      "asset": "Copper",
+      "side": "YES",
+      "n": 542,
+      "markets": 119,
+      "clusters": 13,
+      "q_brier": 0.1702416688732318,
+      "market_brier": 0.17598178044280444,
+      "q_minus_market": -0.005740111569572616,
+      "delta_ci95": [
+        -0.031292946046363714,
+        0.031958724451974785
+      ],
+      "yes_outcome": 0.566420664206642,
+      "q_mean": 0.6048880405729136,
+      "market_mean": 0.5050830258302583,
+      "yes_side_share": 1.0
+    },
+    {
+      "asset": "Gold",
+      "side": "NO",
+      "n": 432,
+      "markets": 94,
+      "clusters": 9,
+      "q_brier": 0.04617316839108385,
+      "market_brier": 0.05745167824074074,
+      "q_minus_market": -0.011278509849656894,
+      "delta_ci95": [
+        -0.024510979421110198,
+        0.0004990902258393492
+      ],
+      "yes_outcome": 0.25,
+      "q_mean": 0.30991679022519636,
+      "market_mean": 0.3510069444444444,
+      "yes_side_share": 0.0
+    },
+    {
+      "asset": "Gold",
+      "side": "YES",
+      "n": 1275,
+      "markets": 170,
+      "clusters": 14,
+      "q_brier": 0.19999714983078742,
+      "market_brier": 0.1628277450980392,
+      "q_minus_market": 0.0371694047327482,
+      "delta_ci95": [
+        -0.014735645796269226,
+        0.07849752765369862
+      ],
+      "yes_outcome": 0.46431372549019606,
+      "q_mean": 0.6322572624774789,
+      "market_mean": 0.5267098039215686,
+      "yes_side_share": 1.0
+    },
+    {
+      "asset": "Silver",
+      "side": "NO",
+      "n": 350,
+      "markets": 63,
+      "clusters": 7,
+      "q_brier": 0.04556376815727216,
+      "market_brier": 0.06148914285714286,
+      "q_minus_market": -0.015925374699870695,
+      "delta_ci95": [
+        -0.021872317612437176,
+        -0.012645508790579732
+      ],
+      "yes_outcome": 0.17714285714285713,
+      "q_mean": 0.2471044415535137,
+      "market_mean": 0.28640000000000004,
+      "yes_side_share": 0.0
+    },
+    {
+      "asset": "Silver",
+      "side": "YES",
+      "n": 1123,
+      "markets": 143,
+      "clusters": 13,
+      "q_brier": 0.16993573354747069,
+      "market_brier": 0.14048274710596617,
+      "q_minus_market": 0.029452986441504524,
+      "delta_ci95": [
+        -0.022124801922720087,
+        0.07860258210075341
+      ],
+      "yes_outcome": 0.46749777382012464,
+      "q_mean": 0.6030709957329309,
+      "market_mean": 0.4942965271593945,
+      "yes_side_share": 1.0
+    },
+    {
+      "asset": "WTI Crude Oil",
+      "side": "NO",
+      "n": 334,
+      "markets": 69,
+      "clusters": 8,
+      "q_brier": 0.30957696170528215,
+      "market_brier": 0.2930590568862276,
+      "q_minus_market": 0.0165179048190546,
+      "delta_ci95": [
+        -0.013350296725925675,
+        0.03849256285983565
+      ],
+      "yes_outcome": 0.7425149700598802,
+      "q_mean": 0.3879669294374388,
+      "market_mean": 0.42516467065868263,
+      "yes_side_share": 0.0
+    },
+    {
+      "asset": "WTI Crude Oil",
+      "side": "YES",
+      "n": 714,
+      "markets": 111,
+      "clusters": 12,
+      "q_brier": 0.13770964096024466,
+      "market_brier": 0.15829093137254902,
+      "q_minus_market": -0.020581290412304363,
+      "delta_ci95": [
+        -0.033786850087576925,
+        0.01300213943797464
+      ],
+      "yes_outcome": 0.8375350140056023,
+      "q_mean": 0.6761971643705067,
+      "market_mean": 0.6060574229691876,
+      "yes_side_share": 1.0
+    }
+  ],
+  "all_by_gap": [
+    {
+      "gapBand": "<5pp",
+      "n": 3204,
+      "markets": 460,
+      "clusters": 53,
+      "q_brier": 0.12901242840352242,
+      "market_brier": 0.12787980649188516,
+      "q_minus_market": 0.0011326219116372972,
+      "delta_ci95": [
+        -0.0002407341774412287,
+        0.0026729192241429275
+      ],
+      "yes_outcome": 0.5368289637952559,
+      "q_mean": 0.486909148273435,
+      "market_mean": 0.4847721598002497,
+      "yes_side_share": 0.49875156054931336
+    },
+    {
+      "gapBand": "5-15pp",
+      "n": 2288,
+      "markets": 545,
+      "clusters": 67,
+      "q_brier": 0.17531001507916344,
+      "market_brier": 0.1678876748251748,
+      "q_minus_market": 0.00742234025398858,
+      "delta_ci95": [
+        -0.004765184489527669,
+        0.019923521473530322
+      ],
+      "yes_outcome": 0.5572552447552448,
+      "q_mean": 0.5626693594482963,
+      "market_mean": 0.5146241258741258,
+      "yes_side_share": 0.7447552447552448
+    },
+    {
+      "gapBand": "15-25pp",
+      "n": 898,
+      "markets": 354,
+      "clusters": 60,
+      "q_brier": 0.25200545473566865,
+      "market_brier": 0.20808699888641424,
+      "q_minus_market": 0.0439184558492544,
+      "delta_ci95": [
+        0.004359629980690855,
+        0.07597416683796404
+      ],
+      "yes_outcome": 0.43429844097995546,
+      "q_mean": 0.6012330747867527,
+      "market_mean": 0.4621547884187082,
+      "yes_side_share": 0.8552338530066815
+    },
+    {
+      "gapBand": ">=25pp",
+      "n": 277,
+      "markets": 149,
+      "clusters": 49,
+      "q_brier": 0.2726157266181871,
+      "market_brier": 0.18747815884476535,
+      "q_minus_market": 0.08513756777342175,
+      "delta_ci95": [
+        -0.01017108489652741,
+        0.145929904526734
+      ],
+      "yes_outcome": 0.27075812274368233,
+      "q_mean": 0.5776602185054771,
+      "market_mean": 0.38971119133574,
+      "yes_side_share": 0.8267148014440433
+    }
+  ],
+  "all_by_kind": [
+    {
+      "kind": "day",
+      "n": 4565,
+      "markets": 596,
+      "clusters": 54,
+      "q_brier": 0.17800961655501954,
+      "market_brier": 0.171266708652793,
+      "q_minus_market": 0.006742907902226536,
+      "delta_ci95": [
+        -0.00393841388183149,
+        0.019128827752401076
+      ],
+      "yes_outcome": 0.5603504928806133,
+      "q_mean": 0.5363643907711654,
+      "market_mean": 0.4972825848849945,
+      "yes_side_share": 0.6326396495071194
+    },
+    {
+      "kind": "month",
+      "n": 1010,
+      "markets": 34,
+      "clusters": 3,
+      "q_brier": 0.11921777185413082,
+      "market_brier": 0.0900039603960396,
+      "q_minus_market": 0.029213811458091224,
+      "delta_ci95": [
+        -0.009183150772935838,
+        0.04249009911809642
+      ],
+      "yes_outcome": 0.36534653465346534,
+      "q_mean": 0.5169150624900715,
+      "market_mean": 0.4561980198019802,
+      "yes_side_share": 0.692079207920792
+    },
+    {
+      "kind": "touch",
+      "n": 72,
+      "markets": 10,
+      "clusters": 1,
+      "q_brier": 0.10490670226613547,
+      "market_brier": 0.10358611111111111,
+      "q_minus_market": 0.0013205911550243585,
+      "delta_ci95": [
+        null,
+        null
+      ],
+      "yes_outcome": 0.1527777777777778,
+      "q_mean": 0.27798085785602894,
+      "market_mean": 0.2319444444444444,
+      "yes_side_share": 0.6111111111111112
+    },
+    {
+      "kind": "week",
+      "n": 1020,
+      "markets": 117,
+      "clusters": 15,
+      "q_brier": 0.1722582921788059,
+      "market_brier": 0.14946348039215684,
+      "q_minus_market": 0.022794811786649053,
+      "delta_ci95": [
+        -0.01676201513969827,
+        0.07697015384791589
+      ],
+      "yes_outcome": 0.5117647058823529,
+      "q_mean": 0.5458444200189533,
+      "market_mean": 0.496156862745098,
+      "yes_side_share": 0.6549019607843137
+    }
+  ],
+  "all_by_cohort": [
+    {
+      "asset": "Bitcoin",
+      "cohort": "after_Aug25_snapshot",
+      "n": 1100,
+      "markets": 129,
+      "clusters": 11,
+      "q_brier": 0.18459873114635322,
+      "market_brier": 0.17084172727272728,
+      "q_minus_market": 0.013757003873625965,
+      "delta_ci95": [
+        0.0016302741170884922,
+        0.0367397682337917
+      ],
+      "yes_outcome": 0.5618181818181818,
+      "q_mean": 0.5135445711801621,
+      "market_mean": 0.505109090909091,
+      "yes_side_share": 0.4809090909090909
+    },
+    {
+      "asset": "Bitcoin",
+      "cohort": "through_Aug25_snapshot",
+      "n": 118,
+      "markets": 71,
+      "clusters": 8,
+      "q_brier": 0.18275656070274626,
+      "market_brier": 0.17038559322033897,
+      "q_minus_market": 0.012370967482407243,
+      "delta_ci95": [
+        -0.05371654744005991,
+        0.05136769434164943
+      ],
+      "yes_outcome": 0.4915254237288136,
+      "q_mean": 0.6105013996472863,
+      "market_mean": 0.46262711864406786,
+      "yes_side_share": 0.9830508474576272
+    },
+    {
+      "asset": "Copper",
+      "cohort": "after_Aug25_snapshot",
+      "n": 1059,
+      "markets": 100,
+      "clusters": 9,
+      "q_brier": 0.17285408917266407,
+      "market_brier": 0.1583084985835694,
+      "q_minus_market": 0.01454559058909465,
+      "delta_ci95": [
+        -0.003421957245892521,
+        0.04775936775504301
+      ],
+      "yes_outcome": 0.506137865911237,
+      "q_mean": 0.4683211071456101,
+      "market_mean": 0.48489140698772426,
+      "yes_side_share": 0.3616619452313503
+    },
+    {
+      "asset": "Copper",
+      "cohort": "through_Aug25_snapshot",
+      "n": 162,
+      "markets": 50,
+      "clusters": 7,
+      "q_brier": 0.15526246673382876,
+      "market_brier": 0.21208703703703707,
+      "q_minus_market": -0.05682457030320828,
+      "delta_ci95": [
+        -0.08833253740669897,
+        -0.02048877335668487
+      ],
+      "yes_outcome": 0.7098765432098766,
+      "q_mean": 0.6070386769507514,
+      "market_mean": 0.4732716049382717,
+      "yes_side_share": 0.9814814814814815
+    },
+    {
+      "asset": "Gold",
+      "cohort": "after_Aug25_snapshot",
+      "n": 1516,
+      "markets": 133,
+      "clusters": 9,
+      "q_brier": 0.1499101650972799,
+      "market_brier": 0.1275895778364116,
+      "q_minus_market": 0.022320587260868267,
+      "delta_ci95": [
+        -0.0035095439756000334,
+        0.05681239913340931
+      ],
+      "yes_outcome": 0.3951187335092348,
+      "q_mean": 0.5330201236979736,
+      "market_mean": 0.47961741424802107,
+      "yes_side_share": 0.7176781002638523
+    },
+    {
+      "asset": "Gold",
+      "cohort": "through_Aug25_snapshot",
+      "n": 191,
+      "markets": 77,
+      "clusters": 8,
+      "q_brier": 0.24963018058495232,
+      "market_brier": 0.20418167539267015,
+      "q_minus_market": 0.04544850519228215,
+      "delta_ci95": [
+        -0.08190310569825349,
+        0.15619478301765616
+      ],
+      "yes_outcome": 0.5287958115183246,
+      "q_mean": 0.6908563115703797,
+      "market_mean": 0.5030890052356021,
+      "yes_side_share": 0.9790575916230366
+    },
+    {
+      "asset": "Silver",
+      "cohort": "after_Aug25_snapshot",
+      "n": 1301,
+      "markets": 113,
+      "clusters": 9,
+      "q_brier": 0.12232236453080284,
+      "market_brier": 0.11120916602613376,
+      "q_minus_market": 0.011113198504669092,
+      "delta_ci95": [
+        -0.020861910742118267,
+        0.04497556053174298
+      ],
+      "yes_outcome": 0.3889315910837817,
+      "q_mean": 0.49349123869484185,
+      "market_mean": 0.4375826287471177,
+      "yes_side_share": 0.7317448116833205
+    },
+    {
+      "asset": "Silver",
+      "cohort": "through_Aug25_snapshot",
+      "n": 172,
+      "markets": 50,
+      "clusters": 7,
+      "q_brier": 0.2769985545016299,
+      "market_brier": 0.2011639534883721,
+      "q_minus_market": 0.07583460101325784,
+      "delta_ci95": [
+        -0.057158719451242665,
+        0.17564438271795224
+      ],
+      "yes_outcome": 0.47093023255813954,
+      "q_mean": 0.7075766349408253,
+      "market_mean": 0.5002325581395348,
+      "yes_side_share": 0.9941860465116279
+    },
+    {
+      "asset": "WTI Crude Oil",
+      "cohort": "after_Aug25_snapshot",
+      "n": 1001,
+      "markets": 104,
+      "clusters": 8,
+      "q_brier": 0.1867791020440973,
+      "market_brier": 0.2009487012987013,
+      "q_minus_market": -0.014169599254603966,
+      "delta_ci95": [
+        -0.022091134390994513,
+        -0.007346998318182671
+      ],
+      "yes_outcome": 0.8381618381618382,
+      "q_mean": 0.5850587647402659,
+      "market_mean": 0.5553746253746255,
+      "yes_side_share": 0.6663336663336663
+    },
+    {
+      "asset": "WTI Crude Oil",
+      "cohort": "through_Aug25_snapshot",
+      "n": 47,
+      "markets": 30,
+      "clusters": 7,
+      "q_brier": 0.3139895257242019,
+      "market_brier": 0.2074851063829787,
+      "q_minus_market": 0.10650441934122318,
+      "delta_ci95": [
+        0.02196192787752373,
+        0.1581246869574762
+      ],
+      "yes_outcome": 0.14893617021276595,
+      "q_mean": 0.5689767295242607,
+      "market_mean": 0.4000000000000001,
+      "yes_side_share": 1.0
+    }
+  ],
+  "terminal_min6h": [
+    {
+      "asset": "Bitcoin",
+      "n": 988,
+      "markets": 145,
+      "clusters": 15,
+      "q_brier": 0.20067343175733154,
+      "market_brier": 0.18571604251012147,
+      "q_minus_market": 0.01495738924721011,
+      "delta_ci95": [
+        -0.0025808662587397196,
+        0.04331762686928215
+      ],
+      "yes_outcome": 0.5880566801619433,
+      "q_mean": 0.5356906000388388,
+      "market_mean": 0.5129554655870446,
+      "yes_side_share": 0.5374493927125507
+    },
+    {
+      "asset": "Copper",
+      "n": 882,
+      "markets": 118,
+      "clusters": 13,
+      "q_brier": 0.19624311173108755,
+      "market_brier": 0.18803914399092972,
+      "q_minus_market": 0.008203967740157834,
+      "delta_ci95": [
+        -0.017913216779213516,
+        0.03306237208676858
+      ],
+      "yes_outcome": 0.5657596371882087,
+      "q_mean": 0.4845433925671866,
+      "market_mean": 0.48931405895691615,
+      "yes_side_share": 0.3843537414965986
+    },
+    {
+      "asset": "Gold",
+      "n": 1108,
+      "markets": 144,
+      "clusters": 14,
+      "q_brier": 0.18004208635483915,
+      "market_brier": 0.15891076263537907,
+      "q_minus_market": 0.02113132371946009,
+      "delta_ci95": [
+        -0.017290676596753696,
+        0.06739014615221071
+      ],
+      "yes_outcome": 0.4151624548736462,
+      "q_mean": 0.5504551467046815,
+      "market_mean": 0.4737048736462094,
+      "yes_side_share": 0.8194945848375451
+    },
+    {
+      "asset": "Silver",
+      "n": 960,
+      "markets": 125,
+      "clusters": 13,
+      "q_brier": 0.1572688780390917,
+      "market_brier": 0.14117486979166666,
+      "q_minus_market": 0.016094008247425042,
+      "delta_ci95": [
+        -0.023436490859324588,
+        0.06772825112832355
+      ],
+      "yes_outcome": 0.43020833333333336,
+      "q_mean": 0.5403361769534053,
+      "market_mean": 0.45965104166666665,
+      "yes_side_share": 0.79375
+    },
+    {
+      "asset": "WTI Crude Oil",
+      "n": 955,
+      "markets": 120,
+      "clusters": 12,
+      "q_brier": 0.1994348679901269,
+      "market_brier": 0.20898238219895288,
+      "q_minus_market": -0.009547514208825953,
+      "delta_ci95": [
+        -0.01945285313268972,
+        0.012355229534893939
+      ],
+      "yes_outcome": 0.8251308900523561,
+      "q_mean": 0.585318989140158,
+      "market_mean": 0.5476910994764399,
+      "yes_side_share": 0.6973821989528796
+    }
+  ],
+  "candle_replay": {
+    "all": {
+      "selected": 33,
+      "finalized": 33,
+      "clusters": 32,
+      "yes": 32,
+      "mean_return": 0.249413907677969,
+      "ci95": [
+        -0.1647538078467091,
+        0.7012198062507866
+      ],
+      "win_rate": 0.6060606060606061,
+      "paired_always_yes": -0.03443526170798898,
+      "paired_ci95": [
+        -0.09740259740259741,
+        0.0
+      ]
+    },
+    "by_asset": [
+      {
+        "asset": "Bitcoin",
+        "selected": 7,
+        "finalized": 7,
+        "clusters": 7,
+        "yes": 7,
+        "mean_return": 0.45826953979309465,
+        "ci95": [
+          -0.4396130654065836,
+          1.383085073963789
+        ],
+        "win_rate": 0.7142857142857143,
+        "paired_always_yes": 0.0,
+        "paired_ci95": [
+          0.0,
+          0.0
+        ]
+      },
+      {
+        "asset": "Copper",
+        "selected": 7,
+        "finalized": 7,
+        "clusters": 6,
+        "yes": 6,
+        "mean_return": 0.08669461050413423,
+        "ci95": [
+          -0.5417134306023195,
+          0.5832398054620277
+        ],
+        "win_rate": 0.5714285714285714,
+        "paired_always_yes": -0.16233766233766236,
+        "paired_ci95": [
+          -0.3787878787878788,
+          0.0
+        ]
+      },
+      {
+        "asset": "Gold",
+        "selected": 7,
+        "finalized": 7,
+        "clusters": 7,
+        "yes": 7,
+        "mean_return": 0.4988891719626567,
+        "ci95": [
+          -0.04998922645981474,
+          0.8870896239928959
+        ],
+        "win_rate": 0.8571428571428571,
+        "paired_always_yes": 0.0,
+        "paired_ci95": [
+          0.0,
+          0.0
+        ]
+      },
+      {
+        "asset": "Silver",
+        "selected": 6,
+        "finalized": 6,
+        "clusters": 6,
+        "yes": 6,
+        "mean_return": 0.17355545939621764,
+        "ci95": [
+          -0.6051770862536211,
+          0.9522880050460566
+        ],
+        "win_rate": 0.6666666666666666,
+        "paired_always_yes": 0.0,
+        "paired_ci95": [
+          0.0,
+          0.0
+        ]
+      },
+      {
+        "asset": "WTI Crude Oil",
+        "selected": 6,
+        "finalized": 6,
+        "clusters": 6,
+        "yes": 6,
+        "mean_return": -0.01960784313725498,
+        "ci95": [
+          -1.0,
+          1.9411764705882348
+        ],
+        "win_rate": 0.16666666666666666,
+        "paired_always_yes": 0.0,
+        "paired_ci95": [
+          0.0,
+          0.0
+        ]
+      }
+    ],
+    "previously_final": [
+      {
+        "previouslyFinal": false,
+        "selected": 12,
+        "finalized": 12,
+        "clusters": 11,
+        "yes": 11,
+        "mean_return": -0.41730767542126573,
+        "ci95": [
+          -0.8663101604278075,
+          -0.009249709046869375
+        ],
+        "win_rate": 0.3333333333333333,
+        "paired_always_yes": -0.09469696969696971,
+        "paired_ci95": [
+          -0.2435064935064935,
+          0.0
+        ]
+      },
+      {
+        "previouslyFinal": true,
+        "selected": 21,
+        "finalized": 21,
+        "clusters": 21,
+        "yes": 21,
+        "mean_return": 0.6303976694489603,
+        "ci95": [
+          0.08337414552807043,
+          1.241795417657139
+        ],
+        "win_rate": 0.7619047619047619,
+        "paired_always_yes": 0.0,
+        "paired_ci95": [
+          0.0,
+          0.0
+        ]
+      }
+    ]
+  },
+  "outlooks": {
+    "by_asset_basis": [
+      {
+        "assetKey": "commodity:copper",
+        "settlementBasis": "hl-candle-close",
+        "n": 29,
+        "independent_dates": 15,
+        "min_anchor": "2026-08-17",
+        "max_anchor": "2026-09-04",
+        "median_abs_error_pct": 0.9272318079519858,
+        "mean_error_pct": -0.5950933906239901,
+        "band50_coverage": 0.3793103448275862,
+        "band80_coverage": 0.5862068965517241,
+        "median_horizon_hours": 0.491810375,
+        "backfilled": 0,
+        "published_at_or_after_anchor": 0,
+        "with_q_rungs": 3
+      },
+      {
+        "assetKey": "commodity:copper",
+        "settlementBasis": "venue-settlement-value",
+        "n": 9,
+        "independent_dates": 5,
+        "min_anchor": "2026-08-31",
+        "max_anchor": "2026-09-04",
+        "median_abs_error_pct": 1.4250482558432946,
+        "mean_error_pct": -1.245252689512722,
+        "band50_coverage": 0.0,
+        "band80_coverage": 0.1111111111111111,
+        "median_horizon_hours": 0.49131799944444443,
+        "backfilled": 0,
+        "published_at_or_after_anchor": 0,
+        "with_q_rungs": 0
+      },
+      {
+        "assetKey": "commodity:gold",
+        "settlementBasis": "hl-candle-close",
+        "n": 28,
+        "independent_dates": 13,
+        "min_anchor": "2026-08-17",
+        "max_anchor": "2026-09-04",
+        "median_abs_error_pct": 0.7172388336642659,
+        "mean_error_pct": -0.568825621665395,
+        "band50_coverage": 0.5714285714285714,
+        "band80_coverage": 0.8571428571428571,
+        "median_horizon_hours": 0.4913871309722222,
+        "backfilled": 0,
+        "published_at_or_after_anchor": 0,
+        "with_q_rungs": 3
+      },
+      {
+        "assetKey": "commodity:gold",
+        "settlementBasis": "venue-settlement-value",
+        "n": 9,
+        "independent_dates": 5,
+        "min_anchor": "2026-08-31",
+        "max_anchor": "2026-09-04",
+        "median_abs_error_pct": 0.0764939580313786,
+        "mean_error_pct": -0.12999669946012,
+        "band50_coverage": 0.5555555555555556,
+        "band80_coverage": 0.8888888888888888,
+        "median_horizon_hours": 0.4914562625,
+        "backfilled": 0,
+        "published_at_or_after_anchor": 0,
+        "with_q_rungs": 0
+      },
+      {
+        "assetKey": "commodity:silver",
+        "settlementBasis": "hl-candle-close",
+        "n": 28,
+        "independent_dates": 13,
+        "min_anchor": "2026-08-17",
+        "max_anchor": "2026-09-04",
+        "median_abs_error_pct": 0.5156969835211401,
+        "mean_error_pct": -0.48008849455880814,
+        "band50_coverage": 0.5714285714285714,
+        "band80_coverage": 0.8571428571428571,
+        "median_horizon_hours": 0.4913871309722222,
+        "backfilled": 0,
+        "published_at_or_after_anchor": 0,
+        "with_q_rungs": 2
+      },
+      {
+        "assetKey": "commodity:silver",
+        "settlementBasis": "venue-settlement-value",
+        "n": 9,
+        "independent_dates": 5,
+        "min_anchor": "2026-08-31",
+        "max_anchor": "2026-09-04",
+        "median_abs_error_pct": 0.2855112378370115,
+        "mean_error_pct": -0.13465664419161427,
+        "band50_coverage": 0.6666666666666666,
+        "band80_coverage": 0.8888888888888888,
+        "median_horizon_hours": 0.49131799944444443,
+        "backfilled": 0,
+        "published_at_or_after_anchor": 0,
+        "with_q_rungs": 0
+      },
+      {
+        "assetKey": "commodity:wti",
+        "settlementBasis": "hl-candle-close",
+        "n": 29,
+        "independent_dates": 14,
+        "min_anchor": "2026-08-17",
+        "max_anchor": "2026-09-04",
+        "median_abs_error_pct": 0.32158318235464056,
+        "mean_error_pct": 0.19264985246876826,
+        "band50_coverage": 0.6206896551724138,
+        "band80_coverage": 0.7931034482758621,
+        "median_horizon_hours": 0.9900397055555556,
+        "backfilled": 0,
+        "published_at_or_after_anchor": 0,
+        "with_q_rungs": 1
+      },
+      {
+        "assetKey": "commodity:wti",
+        "settlementBasis": "venue-settlement-value",
+        "n": 7,
+        "independent_dates": 4,
+        "min_anchor": "2026-08-31",
+        "max_anchor": "2026-09-03",
+        "median_abs_error_pct": 0.4608516103985088,
+        "mean_error_pct": -1.0601522752637706,
+        "band50_coverage": 0.7142857142857143,
+        "band80_coverage": 0.7142857142857143,
+        "median_horizon_hours": 0.9938996391666667,
+        "backfilled": 0,
+        "published_at_or_after_anchor": 0,
+        "with_q_rungs": 0
+      },
+      {
+        "assetKey": "crypto:btc",
+        "settlementBasis": "hl-candle-close",
+        "n": 42,
+        "independent_dates": 19,
+        "min_anchor": "2026-08-15",
+        "max_anchor": "2026-09-04",
+        "median_abs_error_pct": 0.810508146078087,
+        "mean_error_pct": -2.0487356611538976,
+        "band50_coverage": 0.5714285714285714,
+        "band80_coverage": 0.8571428571428571,
+        "median_horizon_hours": 24.489116658333337,
+        "backfilled": 0,
+        "published_at_or_after_anchor": 0,
+        "with_q_rungs": 2
+      },
+      {
+        "assetKey": "crypto:btc",
+        "settlementBasis": "venue-settlement-value",
+        "n": 7,
+        "independent_dates": 5,
+        "min_anchor": "2026-08-30",
+        "max_anchor": "2026-09-04",
+        "median_abs_error_pct": 0.05401499839036625,
+        "mean_error_pct": -0.406795513623951,
+        "band50_coverage": 0.7142857142857143,
+        "band80_coverage": 0.8571428571428571,
+        "median_horizon_hours": 0.4914562625,
+        "backfilled": 0,
+        "published_at_or_after_anchor": 0,
+        "with_q_rungs": 0
+      }
+    ],
+    "matched_horizons": [
+      {
+        "assetKey": "commodity:copper",
+        "settlementBasis": "hl-candle-close",
+        "horizonHours": "6",
+        "n": 29,
+        "dates": 15,
+        "band50_coverage": 0.41379310344827586,
+        "band80_coverage": 0.5862068965517241,
+        "median_abs_error_pct": 0.9786027637110006
+      },
+      {
+        "assetKey": "commodity:copper",
+        "settlementBasis": "hl-candle-close",
+        "horizonHours": "24",
+        "n": 18,
+        "dates": 13,
+        "band50_coverage": 0.5,
+        "band80_coverage": 0.7222222222222222,
+        "median_abs_error_pct": 0.9861324041319952
+      },
+      {
+        "assetKey": "commodity:copper",
+        "settlementBasis": "venue-settlement-value",
+        "horizonHours": "6",
+        "n": 9,
+        "dates": 5,
+        "band50_coverage": 0.4444444444444444,
+        "band80_coverage": 0.5555555555555556,
+        "median_abs_error_pct": 0.9876591406404733
+      },
+      {
+        "assetKey": "commodity:copper",
+        "settlementBasis": "venue-settlement-value",
+        "horizonHours": "24",
+        "n": 6,
+        "dates": 5,
+        "band50_coverage": 0.5,
+        "band80_coverage": 0.6666666666666666,
+        "median_abs_error_pct": 0.6799562852093932
+      },
+      {
+        "assetKey": "commodity:gold",
+        "settlementBasis": "hl-candle-close",
+        "horizonHours": "6",
+        "n": 23,
+        "dates": 12,
+        "band50_coverage": 0.30434782608695654,
+        "band80_coverage": 0.7391304347826086,
+        "median_abs_error_pct": 0.8822551841393023
+      },
+      {
+        "assetKey": "commodity:gold",
+        "settlementBasis": "hl-candle-close",
+        "horizonHours": "24",
+        "n": 18,
+        "dates": 12,
+        "band50_coverage": 0.2777777777777778,
+        "band80_coverage": 0.6666666666666666,
+        "median_abs_error_pct": 1.121207405975555
+      },
+      {
+        "assetKey": "commodity:gold",
+        "settlementBasis": "venue-settlement-value",
+        "horizonHours": "6",
+        "n": 9,
+        "dates": 5,
+        "band50_coverage": 0.3333333333333333,
+        "band80_coverage": 0.6666666666666666,
+        "median_abs_error_pct": 0.6502577737312332
+      },
+      {
+        "assetKey": "commodity:gold",
+        "settlementBasis": "venue-settlement-value",
+        "horizonHours": "24",
+        "n": 6,
+        "dates": 5,
+        "band50_coverage": 0.16666666666666666,
+        "band80_coverage": 0.6666666666666666,
+        "median_abs_error_pct": 1.1216166134990935
+      },
+      {
+        "assetKey": "commodity:silver",
+        "settlementBasis": "hl-candle-close",
+        "horizonHours": "6",
+        "n": 23,
+        "dates": 12,
+        "band50_coverage": 0.391304347826087,
+        "band80_coverage": 0.8260869565217391,
+        "median_abs_error_pct": 0.9095501419534413
+      },
+      {
+        "assetKey": "commodity:silver",
+        "settlementBasis": "hl-candle-close",
+        "horizonHours": "24",
+        "n": 18,
+        "dates": 12,
+        "band50_coverage": 0.5555555555555556,
+        "band80_coverage": 0.7222222222222222,
+        "median_abs_error_pct": 1.2413996290195517
+      },
+      {
+        "assetKey": "commodity:silver",
+        "settlementBasis": "venue-settlement-value",
+        "horizonHours": "6",
+        "n": 9,
+        "dates": 5,
+        "band50_coverage": 0.4444444444444444,
+        "band80_coverage": 0.6666666666666666,
+        "median_abs_error_pct": 0.7739339441469317
+      },
+      {
+        "assetKey": "commodity:silver",
+        "settlementBasis": "venue-settlement-value",
+        "horizonHours": "24",
+        "n": 6,
+        "dates": 5,
+        "band50_coverage": 0.5,
+        "band80_coverage": 0.6666666666666666,
+        "median_abs_error_pct": 1.2763809307344276
+      },
+      {
+        "assetKey": "commodity:wti",
+        "settlementBasis": "hl-candle-close",
+        "horizonHours": "6",
+        "n": 25,
+        "dates": 13,
+        "band50_coverage": 0.48,
+        "band80_coverage": 0.72,
+        "median_abs_error_pct": 0.8107119689882758
+      },
+      {
+        "assetKey": "commodity:wti",
+        "settlementBasis": "hl-candle-close",
+        "horizonHours": "24",
+        "n": 17,
+        "dates": 12,
+        "band50_coverage": 0.4117647058823529,
+        "band80_coverage": 0.7647058823529411,
+        "median_abs_error_pct": 1.9174905130407094
+      },
+      {
+        "assetKey": "commodity:wti",
+        "settlementBasis": "venue-settlement-value",
+        "horizonHours": "6",
+        "n": 7,
+        "dates": 4,
+        "band50_coverage": 0.2857142857142857,
+        "band80_coverage": 0.5714285714285714,
+        "median_abs_error_pct": 0.9168291802179596
+      },
+      {
+        "assetKey": "commodity:wti",
+        "settlementBasis": "venue-settlement-value",
+        "horizonHours": "24",
+        "n": 4,
+        "dates": 4,
+        "band50_coverage": 0.25,
+        "band80_coverage": 0.5,
+        "median_abs_error_pct": 2.1816010666566186
+      },
+      {
+        "assetKey": "crypto:btc",
+        "settlementBasis": "hl-candle-close",
+        "horizonHours": "6",
+        "n": 35,
+        "dates": 17,
+        "band50_coverage": 0.5428571428571428,
+        "band80_coverage": 0.8,
+        "median_abs_error_pct": 1.8547241645124224
+      },
+      {
+        "assetKey": "crypto:btc",
+        "settlementBasis": "hl-candle-close",
+        "horizonHours": "24",
+        "n": 22,
+        "dates": 15,
+        "band50_coverage": 0.5,
+        "band80_coverage": 0.7727272727272727,
+        "median_abs_error_pct": 2.356172714628979
+      },
+      {
+        "assetKey": "crypto:btc",
+        "settlementBasis": "venue-settlement-value",
+        "horizonHours": "6",
+        "n": 7,
+        "dates": 5,
+        "band50_coverage": 0.42857142857142855,
+        "band80_coverage": 0.7142857142857143,
+        "median_abs_error_pct": 1.10859620070054
+      },
+      {
+        "assetKey": "crypto:btc",
+        "settlementBasis": "venue-settlement-value",
+        "horizonHours": "24",
+        "n": 2,
+        "dates": 2,
+        "band50_coverage": 0.0,
+        "band80_coverage": 0.5,
+        "median_abs_error_pct": 3.488042689174664
+      }
+    ],
+    "horizon_hours_min": 0.2709721144444444,
+    "venue_selected": [
+      {
+        "assetKey": "commodity:silver",
+        "anchorDate": "2026-09-02",
+        "publishedAt": "2026-09-02T20:30:33.493538Z",
+        "anchorAt_outlook": "2026-09-02T21:00:00Z",
+        "horizonHours": 0.49069623944444446,
+        "settlementSource": "kalshi-settled-print",
+        "settlePrice": 65.33,
+        "forecastMedian": 64.86099671200948,
+        "qRungs": 0
+      },
+      {
+        "assetKey": "commodity:silver",
+        "anchorDate": "2026-09-02",
+        "publishedAt": "2026-09-01T20:30:31.255202Z",
+        "anchorAt_outlook": "2026-09-02T21:00:00Z",
+        "horizonHours": 24.491317999444444,
+        "settlementSource": "kalshi-settled-print",
+        "settlePrice": 65.33,
+        "forecastMedian": 64.42467609883853,
+        "qRungs": 0
+      },
+      {
+        "assetKey": "crypto:btc",
+        "anchorDate": "2026-08-30",
+        "publishedAt": "2026-08-30T20:30:29.732079Z",
+        "anchorAt_outlook": "2026-08-30T21:00:00Z",
+        "horizonHours": 0.49174108916666665,
+        "settlementSource": "kalshi-settled-print",
+        "settlePrice": 78598.24,
+        "forecastMedian": 78790.74912243578,
+        "qRungs": 0
+      },
+      {
+        "assetKey": "commodity:wti",
+        "anchorDate": "2026-08-31",
+        "publishedAt": "2026-08-31T17:30:21.961299Z",
+        "anchorAt_outlook": "2026-08-31T14:30:00-04:00",
+        "horizonHours": 0.9938996391666667,
+        "settlementSource": "kalshi-settled-print",
+        "settlePrice": 85.76,
+        "forecastMedian": 85.81115509360842,
+        "qRungs": 0
+      },
+      {
+        "assetKey": "commodity:wti",
+        "anchorDate": "2026-09-01",
+        "publishedAt": "2026-09-01T17:30:33.160942Z",
+        "anchorAt_outlook": "2026-09-01T14:30:00-04:00",
+        "horizonHours": 0.9907886272222223,
+        "settlementSource": "kalshi-settled-print",
+        "settlePrice": 90.22,
+        "forecastMedian": 88.7514484014383,
+        "qRungs": 0
+      },
+      {
+        "assetKey": "commodity:copper",
+        "anchorDate": "2026-09-03",
+        "publishedAt": "2026-09-03T20:30:30.757455Z",
+        "anchorAt_outlook": "2026-09-03T21:00:00Z",
+        "horizonHours": 0.4914562625,
+        "settlementSource": "kalshi-settled-print",
+        "settlePrice": 6.67,
+        "forecastMedian": 6.585981588895964,
+        "qRungs": 0
+      },
+      {
+        "assetKey": "commodity:copper",
+        "anchorDate": "2026-09-03",
+        "publishedAt": "2026-09-02T20:30:33.493538Z",
+        "anchorAt_outlook": "2026-09-03T21:00:00Z",
+        "horizonHours": 24.490696239444446,
+        "settlementSource": "kalshi-settled-print",
+        "settlePrice": 6.67,
+        "forecastMedian": 6.519147548455483,
+        "qRungs": 0
+      },
+      {
+        "assetKey": "commodity:gold",
+        "anchorDate": "2026-09-03",
+        "publishedAt": "2026-09-03T20:30:30.757455Z",
+        "anchorAt_outlook": "2026-09-03T21:00:00Z",
+        "horizonHours": 0.4914562625,
+        "settlementSource": "kalshi-settled-print",
+        "settlePrice": 4473.25,
+        "forecastMedian": 4469.828234022361,
+        "qRungs": 0
+      },
+      {
+        "assetKey": "commodity:gold",
+        "anchorDate": "2026-09-03",
+        "publishedAt": "2026-09-02T20:30:33.493538Z",
+        "anchorAt_outlook": "2026-09-03T21:00:00Z",
+        "horizonHours": 24.490696239444446,
+        "settlementSource": "kalshi-settled-print",
+        "settlePrice": 4473.25,
+        "forecastMedian": 4387.482889860674,
+        "qRungs": 0
+      },
+      {
+        "assetKey": "commodity:silver",
+        "anchorDate": "2026-09-03",
+        "publishedAt": "2026-09-03T20:30:30.757455Z",
+        "anchorAt_outlook": "2026-09-03T21:00:00Z",
+        "horizonHours": 0.4914562625,
+        "settlementSource": "kalshi-settled-print",
+        "settlePrice": 66.97,
+        "forecastMedian": 67.01076590740118,
+        "qRungs": 0
+      },
+      {
+        "assetKey": "commodity:silver",
+        "anchorDate": "2026-09-03",
+        "publishedAt": "2026-09-02T20:30:33.493538Z",
+        "anchorAt_outlook": "2026-09-03T21:00:00Z",
+        "horizonHours": 24.490696239444446,
+        "settlementSource": "kalshi-settled-print",
+        "settlePrice": 66.97,
+        "forecastMedian": 65.29717880890148,
+        "qRungs": 0
+      },
+      {
+        "assetKey": "crypto:btc",
+        "anchorDate": "2026-09-03",
+        "publishedAt": "2026-09-03T20:30:30.757455Z",
+        "anchorAt_outlook": "2026-09-03T21:00:00Z",
+        "horizonHours": 0.4914562625,
+        "settlementSource": "kalshi-settled-print",
+        "settlePrice": 81466.82,
+        "forecastMedian": 81422.81569848832,
+        "qRungs": 0
+      },
+      {
+        "assetKey": "crypto:btc",
+        "anchorDate": "2026-09-03",
+        "publishedAt": "2026-09-02T20:30:33.493538Z",
+        "anchorAt_outlook": "2026-09-03T21:00:00Z",
+        "horizonHours": 24.490696239444446,
+        "settlementSource": "kalshi-settled-print",
+        "settlePrice": 81466.82,
+        "forecastMedian": 77376.26695107028,
+        "qRungs": 0
+      },
+      {
+        "assetKey": "commodity:copper",
+        "anchorDate": "2026-08-31",
+        "publishedAt": "2026-08-31T20:30:39.929131Z",
+        "anchorAt_outlook": "2026-08-31T21:00:00Z",
+        "horizonHours": 0.4889085747222222,
+        "settlementSource": "kalshi-settled-print",
+        "settlePrice": 6.69,
+        "forecastMedian": 6.594664271684084,
+        "qRungs": 0
+      },
+      {
+        "assetKey": "commodity:copper",
+        "anchorDate": "2026-08-31",
+        "publishedAt": "2026-08-31T20:30:39.929131Z",
+        "anchorAt_outlook": "2026-08-31T21:00:00Z",
+        "horizonHours": 0.4889085747222222,
+        "settlementSource": "kalshi-settled-print",
+        "settlePrice": 6.69,
+        "forecastMedian": 6.594664271684084,
+        "qRungs": 0
+      },
+      {
+        "assetKey": "commodity:gold",
+        "anchorDate": "2026-08-31",
+        "publishedAt": "2026-08-31T20:30:39.929131Z",
+        "anchorAt_outlook": "2026-08-31T21:00:00Z",
+        "horizonHours": 0.4889085747222222,
+        "settlementSource": "kalshi-settled-print",
+        "settlePrice": 4448.11,
+        "forecastMedian": 4447.170566863995,
+        "qRungs": 0
+      },
+      {
+        "assetKey": "commodity:gold",
+        "anchorDate": "2026-08-31",
+        "publishedAt": "2026-08-31T20:30:39.929131Z",
+        "anchorAt_outlook": "2026-08-31T21:00:00Z",
+        "horizonHours": 0.4889085747222222,
+        "settlementSource": "kalshi-settled-print",
+        "settlePrice": 4448.11,
+        "forecastMedian": 4447.170566863995,
+        "qRungs": 0
+      },
+      {
+        "assetKey": "commodity:silver",
+        "anchorDate": "2026-08-31",
+        "publishedAt": "2026-08-31T20:30:39.929131Z",
+        "anchorAt_outlook": "2026-08-31T21:00:00Z",
+        "horizonHours": 0.4889085747222222,
+        "settlementSource": "kalshi-settled-print",
+        "settlePrice": 66.54,
+        "forecastMedian": 66.49808900192409,
+        "qRungs": 0
+      },
+      {
+        "assetKey": "commodity:silver",
+        "anchorDate": "2026-08-31",
+        "publishedAt": "2026-08-31T20:30:39.929131Z",
+        "anchorAt_outlook": "2026-08-31T21:00:00Z",
+        "horizonHours": 0.4889085747222222,
+        "settlementSource": "kalshi-settled-print",
+        "settlePrice": 66.54,
+        "forecastMedian": 66.49808900192409,
+        "qRungs": 0
+      },
+      {
+        "assetKey": "crypto:btc",
+        "anchorDate": "2026-08-31",
+        "publishedAt": "2026-08-31T20:30:39.929131Z",
+        "anchorAt_outlook": "2026-08-31T21:00:00Z",
+        "horizonHours": 0.4889085747222222,
+        "settlementSource": "kalshi-settled-print",
+        "settlePrice": 78846.9,
+        "forecastMedian": 78882.56948079223,
+        "qRungs": 0
+      },
+      {
+        "assetKey": "commodity:wti",
+        "anchorDate": "2026-09-02",
+        "publishedAt": "2026-09-02T17:30:36.836506Z",
+        "anchorAt_outlook": "2026-09-02T14:30:00-04:00",
+        "horizonHours": 0.9897676372222222,
+        "settlementSource": "kalshi-settled-print",
+        "settlePrice": 91.01,
+        "forecastMedian": 91.00133512955645,
+        "qRungs": 0
+      },
+      {
+        "assetKey": "commodity:wti",
+        "anchorDate": "2026-09-02",
+        "publishedAt": "2026-09-01T20:30:31.255202Z",
+        "anchorAt_outlook": "2026-09-02T14:30:00-04:00",
+        "horizonHours": 21.991317999444444,
+        "settlementSource": "kalshi-settled-print",
+        "settlePrice": 91.01,
+        "forecastMedian": 90.59057894937632,
+        "qRungs": 0
+      },
+      {
+        "assetKey": "commodity:wti",
+        "anchorDate": "2026-09-03",
+        "publishedAt": "2026-09-03T17:30:34.53717Z",
+        "anchorAt_outlook": "2026-09-03T14:30:00-04:00",
+        "horizonHours": 0.9904063416666666,
+        "settlementSource": "kalshi-settled-print",
+        "settlePrice": 91.3,
+        "forecastMedian": 91.4099735415602,
+        "qRungs": 0
+      },
+      {
+        "assetKey": "commodity:wti",
+        "anchorDate": "2026-09-03",
+        "publishedAt": "2026-09-02T20:30:33.493538Z",
+        "anchorAt_outlook": "2026-09-03T14:30:00-04:00",
+        "horizonHours": 21.990696239444446,
+        "settlementSource": "kalshi-settled-print",
+        "settlePrice": 91.3,
+        "forecastMedian": 90.5206555684078,
+        "qRungs": 0
+      },
+      {
+        "assetKey": "commodity:copper",
+        "anchorDate": "2026-09-04",
+        "publishedAt": "2026-09-04T20:32:12.650755Z",
+        "anchorAt_outlook": "2026-09-04T21:00:00Z",
+        "horizonHours": 0.4631525680555556,
+        "settlementSource": "kalshi-settled-print",
+        "settlePrice": 6.67,
+        "forecastMedian": 6.594085928188566,
+        "qRungs": 0
+      },
+      {
+        "assetKey": "commodity:gold",
+        "anchorDate": "2026-09-04",
+        "publishedAt": "2026-09-04T20:32:12.650755Z",
+        "anchorAt_outlook": "2026-09-04T21:00:00Z",
+        "horizonHours": 0.4631525680555556,
+        "settlementSource": "kalshi-settled-print",
+        "settlePrice": 4430.2,
+        "forecastMedian": 4431.42032928377,
+        "qRungs": 0
+      },
+      {
+        "assetKey": "commodity:silver",
+        "anchorDate": "2026-09-04",
+        "publishedAt": "2026-09-04T20:32:12.650755Z",
+        "anchorAt_outlook": "2026-09-04T21:00:00Z",
+        "horizonHours": 0.4631525680555556,
+        "settlementSource": "kalshi-settled-print",
+        "settlePrice": 66.22,
+        "forecastMedian": 66.03093445830433,
+        "qRungs": 0
+      },
+      {
+        "assetKey": "crypto:btc",
+        "anchorDate": "2026-09-04",
+        "publishedAt": "2026-09-04T20:32:12.650755Z",
+        "anchorAt_outlook": "2026-09-04T21:00:00Z",
+        "horizonHours": 0.4631525680555556,
+        "settlementSource": "kalshi-settled-print",
+        "settlePrice": 79714.8,
+        "forecastMedian": 79720.12286316649,
+        "qRungs": 0
+      },
+      {
+        "assetKey": "commodity:wti",
+        "anchorDate": "2026-09-01",
+        "publishedAt": "2026-08-31T17:30:21.961299Z",
+        "anchorAt_outlook": "2026-09-01T14:30:00-04:00",
+        "horizonHours": 24.993899639166667,
+        "settlementSource": "kalshi-settled-print",
+        "settlePrice": 90.22,
+        "forecastMedian": 86.02527326527343,
+        "qRungs": 0
+      },
+      {
+        "assetKey": "commodity:copper",
+        "anchorDate": "2026-09-01",
+        "publishedAt": "2026-09-01T20:30:31.255202Z",
+        "anchorAt_outlook": "2026-09-01T21:00:00Z",
+        "horizonHours": 0.49131799944444443,
+        "settlementSource": "kalshi-settled-print",
+        "settlePrice": 6.53,
+        "forecastMedian": 6.441570363297215,
+        "qRungs": 0
+      },
+      {
+        "assetKey": "commodity:copper",
+        "anchorDate": "2026-09-01",
+        "publishedAt": "2026-08-31T20:30:39.929131Z",
+        "anchorAt_outlook": "2026-09-01T21:00:00Z",
+        "horizonHours": 24.488908574722224,
+        "settlementSource": "kalshi-settled-print",
+        "settlePrice": 6.53,
+        "forecastMedian": 6.631986792520626,
+        "qRungs": 0
+      },
+      {
+        "assetKey": "commodity:gold",
+        "anchorDate": "2026-09-01",
+        "publishedAt": "2026-09-01T20:30:31.255202Z",
+        "anchorAt_outlook": "2026-09-01T21:00:00Z",
+        "horizonHours": 0.49131799944444443,
+        "settlementSource": "kalshi-settled-print",
+        "settlePrice": 4328.37,
+        "forecastMedian": 4329.072686050889,
+        "qRungs": 0
+      },
+      {
+        "assetKey": "commodity:gold",
+        "anchorDate": "2026-09-01",
+        "publishedAt": "2026-08-31T20:30:39.929131Z",
+        "anchorAt_outlook": "2026-09-01T21:00:00Z",
+        "horizonHours": 24.488908574722224,
+        "settlementSource": "kalshi-settled-print",
+        "settlePrice": 4328.37,
+        "forecastMedian": 4448.03385834474,
+        "qRungs": 0
+      },
+      {
+        "assetKey": "commodity:silver",
+        "anchorDate": "2026-09-01",
+        "publishedAt": "2026-09-01T20:30:31.255202Z",
+        "anchorAt_outlook": "2026-09-01T21:00:00Z",
+        "horizonHours": 0.49131799944444443,
+        "settlementSource": "kalshi-settled-print",
+        "settlePrice": 64.09,
+        "forecastMedian": 64.09862367318387,
+        "qRungs": 0
+      },
+      {
+        "assetKey": "commodity:silver",
+        "anchorDate": "2026-09-01",
+        "publishedAt": "2026-08-31T20:30:39.929131Z",
+        "anchorAt_outlook": "2026-09-01T21:00:00Z",
+        "horizonHours": 24.488908574722224,
+        "settlementSource": "kalshi-settled-print",
+        "settlePrice": 64.09,
+        "forecastMedian": 66.4784946919379,
+        "qRungs": 0
+      },
+      {
+        "assetKey": "crypto:btc",
+        "anchorDate": "2026-09-01",
+        "publishedAt": "2026-09-01T20:30:31.255202Z",
+        "anchorAt_outlook": "2026-09-01T21:00:00Z",
+        "horizonHours": 0.49131799944444443,
+        "settlementSource": "kalshi-settled-print",
+        "settlePrice": 77419.01,
+        "forecastMedian": 77400.5059916764,
+        "qRungs": 0
+      },
+      {
+        "assetKey": "crypto:btc",
+        "anchorDate": "2026-09-01",
+        "publishedAt": "2026-08-31T20:30:39.929131Z",
+        "anchorAt_outlook": "2026-09-01T21:00:00Z",
+        "horizonHours": 24.488908574722224,
+        "settlementSource": "kalshi-settled-print",
+        "settlePrice": 77419.01,
+        "forecastMedian": 78932.26586938358,
+        "qRungs": 0
+      },
+      {
+        "assetKey": "commodity:copper",
+        "anchorDate": "2026-09-02",
+        "publishedAt": "2026-09-02T20:30:33.493538Z",
+        "anchorAt_outlook": "2026-09-02T21:00:00Z",
+        "horizonHours": 0.49069623944444446,
+        "settlementSource": "kalshi-settled-print",
+        "settlePrice": 6.61,
+        "forecastMedian": 6.519147548455483,
+        "qRungs": 0
+      },
+      {
+        "assetKey": "commodity:copper",
+        "anchorDate": "2026-09-02",
+        "publishedAt": "2026-09-01T20:30:31.255202Z",
+        "anchorAt_outlook": "2026-09-02T21:00:00Z",
+        "horizonHours": 24.491317999444444,
+        "settlementSource": "kalshi-settled-print",
+        "settlePrice": 6.61,
+        "forecastMedian": 6.442709027311403,
+        "qRungs": 0
+      },
+      {
+        "assetKey": "commodity:gold",
+        "anchorDate": "2026-09-02",
+        "publishedAt": "2026-09-02T19:30:34.158544Z",
+        "anchorAt_outlook": "2026-09-02T21:00:00Z",
+        "horizonHours": 1.4905115155555555,
+        "settlementSource": "kalshi-settled-print",
+        "settlePrice": 4388.1,
+        "forecastMedian": 4355.56465420398,
+        "qRungs": 0
+      },
+      {
+        "assetKey": "commodity:gold",
+        "anchorDate": "2026-09-02",
+        "publishedAt": "2026-09-01T20:30:31.255202Z",
+        "anchorAt_outlook": "2026-09-02T21:00:00Z",
+        "horizonHours": 24.491317999444444,
+        "settlementSource": "kalshi-settled-print",
+        "settlePrice": 4388.1,
+        "forecastMedian": 4335.40423639436,
+        "qRungs": 0
+      }
+    ]
+  }
+}

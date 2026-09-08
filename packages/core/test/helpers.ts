@@ -35,6 +35,8 @@ export function buildFixtureEngine() {
   const config = parseBotConfig({
     id: "fxbot",
     venue: "polymarket",
+    // These fixture regressions deliberately exercise the legacy crossing executor.
+    execution: { mode: "legacy" },
     // Half a cent keeps only the touch level of the fixture book in-band, so
     // the depth-cap path stays exercised (25% of 40 = 10 shares).
     risk: { slippagePct: 1, depthCapPct: 20 },

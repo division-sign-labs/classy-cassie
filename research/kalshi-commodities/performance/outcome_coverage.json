@@ -1,0 +1,2234 @@
+[
+  {
+    "assetKey": "crypto:btc",
+    "asset": "Bitcoin \u2014 Daily \u00b7 to Aug 15",
+    "settlementBasis": "hl-candle-close",
+    "rows": 1,
+    "firstAnchor": "2026-08-15",
+    "lastAnchor": "2026-08-15"
+  },
+  {
+    "assetKey": "crypto:btc",
+    "asset": "Bitcoin \u2014 Daily \u00b7 to Aug 16",
+    "settlementBasis": "hl-candle-close",
+    "rows": 1,
+    "firstAnchor": "2026-08-16",
+    "lastAnchor": "2026-08-16"
+  },
+  {
+    "assetKey": "crypto:btc",
+    "asset": "Bitcoin \u2014 Daily \u00b7 to Aug 17",
+    "settlementBasis": "hl-candle-close",
+    "rows": 1,
+    "firstAnchor": "2026-08-17",
+    "lastAnchor": "2026-08-17"
+  },
+  {
+    "assetKey": "crypto:btc",
+    "asset": "Bitcoin \u2014 Daily \u00b7 to Aug 18",
+    "settlementBasis": "hl-candle-close",
+    "rows": 1,
+    "firstAnchor": "2026-08-18",
+    "lastAnchor": "2026-08-18"
+  },
+  {
+    "assetKey": "crypto:btc",
+    "asset": "Bitcoin \u2014 Daily \u00b7 to Aug 19",
+    "settlementBasis": "hl-candle-close",
+    "rows": 1,
+    "firstAnchor": "2026-08-19",
+    "lastAnchor": "2026-08-19"
+  },
+  {
+    "assetKey": "crypto:btc",
+    "asset": "Bitcoin \u2014 Daily \u00b7 to Aug 20",
+    "settlementBasis": "hl-candle-close",
+    "rows": 1,
+    "firstAnchor": "2026-08-20",
+    "lastAnchor": "2026-08-20"
+  },
+  {
+    "assetKey": "crypto:btc",
+    "asset": "Bitcoin \u2014 Daily \u00b7 to Aug 21",
+    "settlementBasis": "hl-candle-close",
+    "rows": 2,
+    "firstAnchor": "2026-08-21",
+    "lastAnchor": "2026-08-21"
+  },
+  {
+    "assetKey": "crypto:btc",
+    "asset": "Bitcoin \u2014 Daily \u00b7 to Aug 22",
+    "settlementBasis": "hl-candle-close",
+    "rows": 1,
+    "firstAnchor": "2026-08-22",
+    "lastAnchor": "2026-08-22"
+  },
+  {
+    "assetKey": "crypto:btc",
+    "asset": "Bitcoin \u2014 Daily \u00b7 to Aug 23",
+    "settlementBasis": "hl-candle-close",
+    "rows": 1,
+    "firstAnchor": "2026-08-23",
+    "lastAnchor": "2026-08-23"
+  },
+  {
+    "assetKey": "crypto:btc",
+    "asset": "Bitcoin \u2014 Daily \u00b7 to Aug 30",
+    "settlementBasis": "hl-candle-close",
+    "rows": 1,
+    "firstAnchor": "2026-08-30",
+    "lastAnchor": "2026-08-30"
+  },
+  {
+    "assetKey": "crypto:btc",
+    "asset": "Bitcoin \u2014 Daily \u00b7 to Aug 30",
+    "settlementBasis": "venue-settlement-value",
+    "rows": 1,
+    "firstAnchor": "2026-08-30",
+    "lastAnchor": "2026-08-30"
+  },
+  {
+    "assetKey": "crypto:btc",
+    "asset": "Bitcoin \u2014 Daily \u00b7 to Aug 31",
+    "settlementBasis": "venue-settlement-value",
+    "rows": 1,
+    "firstAnchor": "2026-08-31",
+    "lastAnchor": "2026-08-31"
+  },
+  {
+    "assetKey": "crypto:btc",
+    "asset": "Bitcoin \u2014 Daily \u00b7 to Sep 1",
+    "settlementBasis": "venue-settlement-value",
+    "rows": 1,
+    "firstAnchor": "2026-09-01",
+    "lastAnchor": "2026-09-01"
+  },
+  {
+    "assetKey": "crypto:btc",
+    "asset": "Bitcoin \u2014 Daily \u00b7 to Sep 2",
+    "settlementBasis": "hl-candle-close",
+    "rows": 1,
+    "firstAnchor": "2026-09-02",
+    "lastAnchor": "2026-09-02"
+  },
+  {
+    "assetKey": "crypto:btc",
+    "asset": "Bitcoin \u2014 Daily \u00b7 to Sep 3",
+    "settlementBasis": "venue-settlement-value",
+    "rows": 1,
+    "firstAnchor": "2026-09-03",
+    "lastAnchor": "2026-09-03"
+  },
+  {
+    "assetKey": "crypto:btc",
+    "asset": "Bitcoin \u2014 Daily \u00b7 to Sep 4",
+    "settlementBasis": "venue-settlement-value",
+    "rows": 1,
+    "firstAnchor": "2026-09-04",
+    "lastAnchor": "2026-09-04"
+  },
+  {
+    "assetKey": "crypto:btc",
+    "asset": "Bitcoin \u2014 Long \u00b7 Daily \u00b7 to Aug 25",
+    "settlementBasis": "hl-candle-close",
+    "rows": 1,
+    "firstAnchor": "2026-08-25",
+    "lastAnchor": "2026-08-25"
+  },
+  {
+    "assetKey": "crypto:btc",
+    "asset": "Bitcoin \u2014 Long \u00b7 Daily \u00b7 to Sep 1",
+    "settlementBasis": "hl-candle-close",
+    "rows": 1,
+    "firstAnchor": "2026-09-01",
+    "lastAnchor": "2026-09-01"
+  },
+  {
+    "assetKey": "crypto:btc",
+    "asset": "Bitcoin \u2014 Long \u00b7 Daily \u00b7 to Sep 3",
+    "settlementBasis": "hl-candle-close",
+    "rows": 1,
+    "firstAnchor": "2026-09-03",
+    "lastAnchor": "2026-09-03"
+  },
+  {
+    "assetKey": "crypto:btc",
+    "asset": "Bitcoin \u2014 Long \u00b7 Daily \u00b7 to Sep 4",
+    "settlementBasis": "hl-candle-close",
+    "rows": 1,
+    "firstAnchor": "2026-09-04",
+    "lastAnchor": "2026-09-04"
+  },
+  {
+    "assetKey": "crypto:btc",
+    "asset": "Bitcoin \u2014 Long \u00b7 Monthly \u00b7 to Aug 31",
+    "settlementBasis": "hl-candle-close",
+    "rows": 2,
+    "firstAnchor": "2026-08-31",
+    "lastAnchor": "2026-08-31"
+  },
+  {
+    "assetKey": "crypto:btc",
+    "asset": "Bitcoin \u2014 Long \u00b7 Next-day \u00b7 to Sep 2",
+    "settlementBasis": "hl-candle-close",
+    "rows": 1,
+    "firstAnchor": "2026-09-02",
+    "lastAnchor": "2026-09-02"
+  },
+  {
+    "assetKey": "crypto:btc",
+    "asset": "Bitcoin \u2014 Long \u00b7 Two-day \u00b7 to Aug 24",
+    "settlementBasis": "hl-candle-close",
+    "rows": 1,
+    "firstAnchor": "2026-08-24",
+    "lastAnchor": "2026-08-24"
+  },
+  {
+    "assetKey": "crypto:btc",
+    "asset": "Bitcoin \u2014 Long \u00b7 Weekly \u00b7 to Sep 1",
+    "settlementBasis": "hl-candle-close",
+    "rows": 2,
+    "firstAnchor": "2026-09-01",
+    "lastAnchor": "2026-09-01"
+  },
+  {
+    "assetKey": "crypto:btc",
+    "asset": "Bitcoin \u2014 Long \u00b7 Weekly \u00b7 to Sep 4",
+    "settlementBasis": "hl-candle-close",
+    "rows": 1,
+    "firstAnchor": "2026-09-04",
+    "lastAnchor": "2026-09-04"
+  },
+  {
+    "assetKey": "crypto:btc",
+    "asset": "Bitcoin \u2014 Next-day \u00b7 to Aug 29",
+    "settlementBasis": "hl-candle-close",
+    "rows": 1,
+    "firstAnchor": "2026-08-29",
+    "lastAnchor": "2026-08-29"
+  },
+  {
+    "assetKey": "crypto:btc",
+    "asset": "Bitcoin \u2014 Next-day \u00b7 to Aug 30",
+    "settlementBasis": "hl-candle-close",
+    "rows": 1,
+    "firstAnchor": "2026-08-30",
+    "lastAnchor": "2026-08-30"
+  },
+  {
+    "assetKey": "crypto:btc",
+    "asset": "Bitcoin \u2014 Next-day \u00b7 to Sep 1",
+    "settlementBasis": "hl-candle-close",
+    "rows": 1,
+    "firstAnchor": "2026-09-01",
+    "lastAnchor": "2026-09-01"
+  },
+  {
+    "assetKey": "crypto:btc",
+    "asset": "Bitcoin \u2014 Next-day \u00b7 to Sep 1",
+    "settlementBasis": "venue-settlement-value",
+    "rows": 1,
+    "firstAnchor": "2026-09-01",
+    "lastAnchor": "2026-09-01"
+  },
+  {
+    "assetKey": "crypto:btc",
+    "asset": "Bitcoin \u2014 Next-day \u00b7 to Sep 3",
+    "settlementBasis": "hl-candle-close",
+    "rows": 1,
+    "firstAnchor": "2026-09-03",
+    "lastAnchor": "2026-09-03"
+  },
+  {
+    "assetKey": "crypto:btc",
+    "asset": "Bitcoin \u2014 Next-day \u00b7 to Sep 3",
+    "settlementBasis": "venue-settlement-value",
+    "rows": 1,
+    "firstAnchor": "2026-09-03",
+    "lastAnchor": "2026-09-03"
+  },
+  {
+    "assetKey": "crypto:btc",
+    "asset": "Bitcoin \u2014 Short \u00b7 Daily \u00b7 to Aug 24",
+    "settlementBasis": "hl-candle-close",
+    "rows": 1,
+    "firstAnchor": "2026-08-24",
+    "lastAnchor": "2026-08-24"
+  },
+  {
+    "assetKey": "crypto:btc",
+    "asset": "Bitcoin \u2014 Short \u00b7 Daily \u00b7 to Aug 28",
+    "settlementBasis": "hl-candle-close",
+    "rows": 1,
+    "firstAnchor": "2026-08-28",
+    "lastAnchor": "2026-08-28"
+  },
+  {
+    "assetKey": "crypto:btc",
+    "asset": "Bitcoin \u2014 Short \u00b7 Daily \u00b7 to Aug 29",
+    "settlementBasis": "hl-candle-close",
+    "rows": 1,
+    "firstAnchor": "2026-08-29",
+    "lastAnchor": "2026-08-29"
+  },
+  {
+    "assetKey": "crypto:btc",
+    "asset": "Bitcoin \u2014 Short \u00b7 Daily \u00b7 to Aug 31",
+    "settlementBasis": "hl-candle-close",
+    "rows": 1,
+    "firstAnchor": "2026-08-31",
+    "lastAnchor": "2026-08-31"
+  },
+  {
+    "assetKey": "crypto:btc",
+    "asset": "Bitcoin \u2014 Short \u00b7 Monthly \u00b7 to Sep 1",
+    "settlementBasis": "hl-candle-close",
+    "rows": 1,
+    "firstAnchor": "2026-09-01",
+    "lastAnchor": "2026-09-01"
+  },
+  {
+    "assetKey": "crypto:btc",
+    "asset": "Bitcoin \u2014 Short \u00b7 Next-day \u00b7 to Aug 31",
+    "settlementBasis": "hl-candle-close",
+    "rows": 1,
+    "firstAnchor": "2026-08-31",
+    "lastAnchor": "2026-08-31"
+  },
+  {
+    "assetKey": "crypto:btc",
+    "asset": "Bitcoin \u2014 Two-day \u00b7 to Aug 19",
+    "settlementBasis": "hl-candle-close",
+    "rows": 1,
+    "firstAnchor": "2026-08-19",
+    "lastAnchor": "2026-08-19"
+  },
+  {
+    "assetKey": "crypto:btc",
+    "asset": "Bitcoin \u2014 Two-day \u00b7 to Aug 20",
+    "settlementBasis": "hl-candle-close",
+    "rows": 1,
+    "firstAnchor": "2026-08-20",
+    "lastAnchor": "2026-08-20"
+  },
+  {
+    "assetKey": "crypto:btc",
+    "asset": "Bitcoin \u2014 Two-day \u00b7 to Aug 21",
+    "settlementBasis": "hl-candle-close",
+    "rows": 1,
+    "firstAnchor": "2026-08-21",
+    "lastAnchor": "2026-08-21"
+  },
+  {
+    "assetKey": "crypto:btc",
+    "asset": "Bitcoin \u2014 Two-day \u00b7 to Aug 22",
+    "settlementBasis": "hl-candle-close",
+    "rows": 1,
+    "firstAnchor": "2026-08-22",
+    "lastAnchor": "2026-08-22"
+  },
+  {
+    "assetKey": "crypto:btc",
+    "asset": "Bitcoin \u2014 Two-day \u00b7 to Aug 23",
+    "settlementBasis": "hl-candle-close",
+    "rows": 2,
+    "firstAnchor": "2026-08-23",
+    "lastAnchor": "2026-08-23"
+  },
+  {
+    "assetKey": "crypto:btc",
+    "asset": "Bitcoin \u2014 Two-day \u00b7 to Aug 25",
+    "settlementBasis": "hl-candle-close",
+    "rows": 1,
+    "firstAnchor": "2026-08-25",
+    "lastAnchor": "2026-08-25"
+  },
+  {
+    "assetKey": "crypto:btc",
+    "asset": "Bitcoin \u2014 Weekly \u00b7 to Aug 21",
+    "settlementBasis": "hl-candle-close",
+    "rows": 1,
+    "firstAnchor": "2026-08-21",
+    "lastAnchor": "2026-08-21"
+  },
+  {
+    "assetKey": "crypto:btc",
+    "asset": "Bitcoin \u2014 Weekly \u00b7 to Aug 28",
+    "settlementBasis": "hl-candle-close",
+    "rows": 1,
+    "firstAnchor": "2026-08-28",
+    "lastAnchor": "2026-08-28"
+  },
+  {
+    "assetKey": "commodity:copper",
+    "asset": "Copper \u2014 Daily \u00b7 to Aug 17",
+    "settlementBasis": "hl-candle-close",
+    "rows": 1,
+    "firstAnchor": "2026-08-17",
+    "lastAnchor": "2026-08-17"
+  },
+  {
+    "assetKey": "commodity:copper",
+    "asset": "Copper \u2014 Daily \u00b7 to Aug 18",
+    "settlementBasis": "hl-candle-close",
+    "rows": 1,
+    "firstAnchor": "2026-08-18",
+    "lastAnchor": "2026-08-18"
+  },
+  {
+    "assetKey": "commodity:copper",
+    "asset": "Copper \u2014 Daily \u00b7 to Aug 19",
+    "settlementBasis": "hl-candle-close",
+    "rows": 1,
+    "firstAnchor": "2026-08-19",
+    "lastAnchor": "2026-08-19"
+  },
+  {
+    "assetKey": "commodity:copper",
+    "asset": "Copper \u2014 Daily \u00b7 to Aug 31",
+    "settlementBasis": "venue-settlement-value",
+    "rows": 1,
+    "firstAnchor": "2026-08-31",
+    "lastAnchor": "2026-08-31"
+  },
+  {
+    "assetKey": "commodity:copper",
+    "asset": "Copper \u2014 Daily \u00b7 to Sep 1",
+    "settlementBasis": "venue-settlement-value",
+    "rows": 1,
+    "firstAnchor": "2026-09-01",
+    "lastAnchor": "2026-09-01"
+  },
+  {
+    "assetKey": "commodity:copper",
+    "asset": "Copper \u2014 Daily \u00b7 to Sep 2",
+    "settlementBasis": "venue-settlement-value",
+    "rows": 1,
+    "firstAnchor": "2026-09-02",
+    "lastAnchor": "2026-09-02"
+  },
+  {
+    "assetKey": "commodity:copper",
+    "asset": "Copper \u2014 Daily \u00b7 to Sep 3",
+    "settlementBasis": "venue-settlement-value",
+    "rows": 1,
+    "firstAnchor": "2026-09-03",
+    "lastAnchor": "2026-09-03"
+  },
+  {
+    "assetKey": "commodity:copper",
+    "asset": "Copper \u2014 Long \u00b7 Daily \u00b7 to Aug 20",
+    "settlementBasis": "hl-candle-close",
+    "rows": 1,
+    "firstAnchor": "2026-08-20",
+    "lastAnchor": "2026-08-20"
+  },
+  {
+    "assetKey": "commodity:copper",
+    "asset": "Copper \u2014 Long \u00b7 Daily \u00b7 to Aug 31",
+    "settlementBasis": "hl-candle-close",
+    "rows": 1,
+    "firstAnchor": "2026-08-31",
+    "lastAnchor": "2026-08-31"
+  },
+  {
+    "assetKey": "commodity:copper",
+    "asset": "Copper \u2014 Long \u00b7 Daily \u00b7 to Sep 1",
+    "settlementBasis": "hl-candle-close",
+    "rows": 1,
+    "firstAnchor": "2026-09-01",
+    "lastAnchor": "2026-09-01"
+  },
+  {
+    "assetKey": "commodity:copper",
+    "asset": "Copper \u2014 Long \u00b7 Daily \u00b7 to Sep 2",
+    "settlementBasis": "hl-candle-close",
+    "rows": 1,
+    "firstAnchor": "2026-09-02",
+    "lastAnchor": "2026-09-02"
+  },
+  {
+    "assetKey": "commodity:copper",
+    "asset": "Copper \u2014 Long \u00b7 Daily \u00b7 to Sep 3",
+    "settlementBasis": "hl-candle-close",
+    "rows": 1,
+    "firstAnchor": "2026-09-03",
+    "lastAnchor": "2026-09-03"
+  },
+  {
+    "assetKey": "commodity:copper",
+    "asset": "Copper \u2014 Long \u00b7 Next-day \u00b7 to Sep 1",
+    "settlementBasis": "hl-candle-close",
+    "rows": 1,
+    "firstAnchor": "2026-09-01",
+    "lastAnchor": "2026-09-01"
+  },
+  {
+    "assetKey": "commodity:copper",
+    "asset": "Copper \u2014 Long \u00b7 Next-day \u00b7 to Sep 2",
+    "settlementBasis": "hl-candle-close",
+    "rows": 1,
+    "firstAnchor": "2026-09-02",
+    "lastAnchor": "2026-09-02"
+  },
+  {
+    "assetKey": "commodity:copper",
+    "asset": "Copper \u2014 Long \u00b7 Weekly \u00b7 to Aug 24",
+    "settlementBasis": "hl-candle-close",
+    "rows": 1,
+    "firstAnchor": "2026-08-24",
+    "lastAnchor": "2026-08-24"
+  },
+  {
+    "assetKey": "commodity:copper",
+    "asset": "Copper \u2014 Long \u00b7 Weekly \u00b7 to Sep 4",
+    "settlementBasis": "hl-candle-close",
+    "rows": 1,
+    "firstAnchor": "2026-09-04",
+    "lastAnchor": "2026-09-04"
+  },
+  {
+    "assetKey": "commodity:copper",
+    "asset": "Copper \u2014 Monthly \u00b7 to Aug 31",
+    "settlementBasis": "venue-settlement-value",
+    "rows": 1,
+    "firstAnchor": "2026-08-31",
+    "lastAnchor": "2026-08-31"
+  },
+  {
+    "assetKey": "commodity:copper",
+    "asset": "Copper \u2014 Next-day \u00b7 to Sep 1",
+    "settlementBasis": "venue-settlement-value",
+    "rows": 1,
+    "firstAnchor": "2026-09-01",
+    "lastAnchor": "2026-09-01"
+  },
+  {
+    "assetKey": "commodity:copper",
+    "asset": "Copper \u2014 Next-day \u00b7 to Sep 2",
+    "settlementBasis": "venue-settlement-value",
+    "rows": 1,
+    "firstAnchor": "2026-09-02",
+    "lastAnchor": "2026-09-02"
+  },
+  {
+    "assetKey": "commodity:copper",
+    "asset": "Copper \u2014 Next-day \u00b7 to Sep 3",
+    "settlementBasis": "hl-candle-close",
+    "rows": 1,
+    "firstAnchor": "2026-09-03",
+    "lastAnchor": "2026-09-03"
+  },
+  {
+    "assetKey": "commodity:copper",
+    "asset": "Copper \u2014 Next-day \u00b7 to Sep 3",
+    "settlementBasis": "venue-settlement-value",
+    "rows": 1,
+    "firstAnchor": "2026-09-03",
+    "lastAnchor": "2026-09-03"
+  },
+  {
+    "assetKey": "commodity:copper",
+    "asset": "Copper \u2014 Short \u00b7 Daily \u00b7 to Aug 24",
+    "settlementBasis": "hl-candle-close",
+    "rows": 1,
+    "firstAnchor": "2026-08-24",
+    "lastAnchor": "2026-08-24"
+  },
+  {
+    "assetKey": "commodity:copper",
+    "asset": "Copper \u2014 Short \u00b7 Daily \u00b7 to Aug 25",
+    "settlementBasis": "hl-candle-close",
+    "rows": 1,
+    "firstAnchor": "2026-08-25",
+    "lastAnchor": "2026-08-25"
+  },
+  {
+    "assetKey": "commodity:copper",
+    "asset": "Copper \u2014 Short \u00b7 Daily \u00b7 to Aug 26",
+    "settlementBasis": "hl-candle-close",
+    "rows": 1,
+    "firstAnchor": "2026-08-26",
+    "lastAnchor": "2026-08-26"
+  },
+  {
+    "assetKey": "commodity:copper",
+    "asset": "Copper \u2014 Short \u00b7 Daily \u00b7 to Aug 27",
+    "settlementBasis": "hl-candle-close",
+    "rows": 1,
+    "firstAnchor": "2026-08-27",
+    "lastAnchor": "2026-08-27"
+  },
+  {
+    "assetKey": "commodity:copper",
+    "asset": "Copper \u2014 Short \u00b7 Monthly \u00b7 to Aug 31",
+    "settlementBasis": "hl-candle-close",
+    "rows": 2,
+    "firstAnchor": "2026-08-31",
+    "lastAnchor": "2026-08-31"
+  },
+  {
+    "assetKey": "commodity:copper",
+    "asset": "Copper \u2014 Short \u00b7 Next-day \u00b7 to Aug 27",
+    "settlementBasis": "hl-candle-close",
+    "rows": 1,
+    "firstAnchor": "2026-08-27",
+    "lastAnchor": "2026-08-27"
+  },
+  {
+    "assetKey": "commodity:copper",
+    "asset": "Copper \u2014 Short \u00b7 Two-day \u00b7 to Aug 25",
+    "settlementBasis": "hl-candle-close",
+    "rows": 2,
+    "firstAnchor": "2026-08-25",
+    "lastAnchor": "2026-08-25"
+  },
+  {
+    "assetKey": "commodity:copper",
+    "asset": "Copper \u2014 Short \u00b7 Weekly \u00b7 to Aug 28",
+    "settlementBasis": "hl-candle-close",
+    "rows": 1,
+    "firstAnchor": "2026-08-28",
+    "lastAnchor": "2026-08-28"
+  },
+  {
+    "assetKey": "commodity:copper",
+    "asset": "Copper \u2014 Two-day \u00b7 to Aug 19",
+    "settlementBasis": "hl-candle-close",
+    "rows": 1,
+    "firstAnchor": "2026-08-19",
+    "lastAnchor": "2026-08-19"
+  },
+  {
+    "assetKey": "commodity:copper",
+    "asset": "Copper \u2014 Two-day \u00b7 to Aug 20",
+    "settlementBasis": "hl-candle-close",
+    "rows": 1,
+    "firstAnchor": "2026-08-20",
+    "lastAnchor": "2026-08-20"
+  },
+  {
+    "assetKey": "commodity:copper",
+    "asset": "Copper \u2014 Two-day \u00b7 to Aug 24",
+    "settlementBasis": "hl-candle-close",
+    "rows": 1,
+    "firstAnchor": "2026-08-24",
+    "lastAnchor": "2026-08-24"
+  },
+  {
+    "assetKey": "commodity:copper",
+    "asset": "Copper \u2014 Weekly \u00b7 to Aug 17",
+    "settlementBasis": "hl-candle-close",
+    "rows": 1,
+    "firstAnchor": "2026-08-17",
+    "lastAnchor": "2026-08-17"
+  },
+  {
+    "assetKey": "commodity:copper",
+    "asset": "Copper \u2014 Weekly \u00b7 to Aug 18",
+    "settlementBasis": "hl-candle-close",
+    "rows": 1,
+    "firstAnchor": "2026-08-18",
+    "lastAnchor": "2026-08-18"
+  },
+  {
+    "assetKey": "commodity:copper",
+    "asset": "Copper \u2014 Weekly \u00b7 to Aug 21",
+    "settlementBasis": "hl-candle-close",
+    "rows": 1,
+    "firstAnchor": "2026-08-21",
+    "lastAnchor": "2026-08-21"
+  },
+  {
+    "assetKey": "commodity:copper",
+    "asset": "Copper \u2014 Weekly \u00b7 to Sep 4",
+    "settlementBasis": "venue-settlement-value",
+    "rows": 1,
+    "firstAnchor": "2026-09-04",
+    "lastAnchor": "2026-09-04"
+  },
+  {
+    "assetKey": "crypto:eth",
+    "asset": "Ether \u2014 Daily \u00b7 to Aug 15",
+    "settlementBasis": "hl-candle-close",
+    "rows": 1,
+    "firstAnchor": "2026-08-15",
+    "lastAnchor": "2026-08-15"
+  },
+  {
+    "assetKey": "crypto:eth",
+    "asset": "Ether \u2014 Daily \u00b7 to Aug 16",
+    "settlementBasis": "hl-candle-close",
+    "rows": 1,
+    "firstAnchor": "2026-08-16",
+    "lastAnchor": "2026-08-16"
+  },
+  {
+    "assetKey": "crypto:eth",
+    "asset": "Ether \u2014 Daily \u00b7 to Aug 17",
+    "settlementBasis": "hl-candle-close",
+    "rows": 1,
+    "firstAnchor": "2026-08-17",
+    "lastAnchor": "2026-08-17"
+  },
+  {
+    "assetKey": "crypto:eth",
+    "asset": "Ether \u2014 Daily \u00b7 to Aug 18",
+    "settlementBasis": "hl-candle-close",
+    "rows": 1,
+    "firstAnchor": "2026-08-18",
+    "lastAnchor": "2026-08-18"
+  },
+  {
+    "assetKey": "crypto:eth",
+    "asset": "Ether \u2014 Daily \u00b7 to Aug 19",
+    "settlementBasis": "hl-candle-close",
+    "rows": 1,
+    "firstAnchor": "2026-08-19",
+    "lastAnchor": "2026-08-19"
+  },
+  {
+    "assetKey": "crypto:eth",
+    "asset": "Ether \u2014 Daily \u00b7 to Aug 20",
+    "settlementBasis": "hl-candle-close",
+    "rows": 1,
+    "firstAnchor": "2026-08-20",
+    "lastAnchor": "2026-08-20"
+  },
+  {
+    "assetKey": "crypto:eth",
+    "asset": "Ether \u2014 Daily \u00b7 to Aug 21",
+    "settlementBasis": "hl-candle-close",
+    "rows": 2,
+    "firstAnchor": "2026-08-21",
+    "lastAnchor": "2026-08-21"
+  },
+  {
+    "assetKey": "crypto:eth",
+    "asset": "Ether \u2014 Daily \u00b7 to Aug 22",
+    "settlementBasis": "hl-candle-close",
+    "rows": 1,
+    "firstAnchor": "2026-08-22",
+    "lastAnchor": "2026-08-22"
+  },
+  {
+    "assetKey": "crypto:eth",
+    "asset": "Ether \u2014 Daily \u00b7 to Aug 23",
+    "settlementBasis": "hl-candle-close",
+    "rows": 1,
+    "firstAnchor": "2026-08-23",
+    "lastAnchor": "2026-08-23"
+  },
+  {
+    "assetKey": "crypto:eth",
+    "asset": "Ether \u2014 Daily \u00b7 to Aug 24",
+    "settlementBasis": "hl-candle-close",
+    "rows": 1,
+    "firstAnchor": "2026-08-24",
+    "lastAnchor": "2026-08-24"
+  },
+  {
+    "assetKey": "crypto:eth",
+    "asset": "Ether \u2014 Daily \u00b7 to Aug 30",
+    "settlementBasis": "venue-settlement-value",
+    "rows": 1,
+    "firstAnchor": "2026-08-30",
+    "lastAnchor": "2026-08-30"
+  },
+  {
+    "assetKey": "crypto:eth",
+    "asset": "Ether \u2014 Daily \u00b7 to Aug 31",
+    "settlementBasis": "hl-candle-close",
+    "rows": 1,
+    "firstAnchor": "2026-08-31",
+    "lastAnchor": "2026-08-31"
+  },
+  {
+    "assetKey": "crypto:eth",
+    "asset": "Ether \u2014 Daily \u00b7 to Aug 31",
+    "settlementBasis": "venue-settlement-value",
+    "rows": 1,
+    "firstAnchor": "2026-08-31",
+    "lastAnchor": "2026-08-31"
+  },
+  {
+    "assetKey": "crypto:eth",
+    "asset": "Ether \u2014 Daily \u00b7 to Sep 1",
+    "settlementBasis": "hl-candle-close",
+    "rows": 1,
+    "firstAnchor": "2026-09-01",
+    "lastAnchor": "2026-09-01"
+  },
+  {
+    "assetKey": "crypto:eth",
+    "asset": "Ether \u2014 Daily \u00b7 to Sep 1",
+    "settlementBasis": "venue-settlement-value",
+    "rows": 1,
+    "firstAnchor": "2026-09-01",
+    "lastAnchor": "2026-09-01"
+  },
+  {
+    "assetKey": "crypto:eth",
+    "asset": "Ether \u2014 Daily \u00b7 to Sep 2",
+    "settlementBasis": "hl-candle-close",
+    "rows": 1,
+    "firstAnchor": "2026-09-02",
+    "lastAnchor": "2026-09-02"
+  },
+  {
+    "assetKey": "crypto:eth",
+    "asset": "Ether \u2014 Daily \u00b7 to Sep 3",
+    "settlementBasis": "venue-settlement-value",
+    "rows": 1,
+    "firstAnchor": "2026-09-03",
+    "lastAnchor": "2026-09-03"
+  },
+  {
+    "assetKey": "crypto:eth",
+    "asset": "Ether \u2014 Daily \u00b7 to Sep 4",
+    "settlementBasis": "venue-settlement-value",
+    "rows": 1,
+    "firstAnchor": "2026-09-04",
+    "lastAnchor": "2026-09-04"
+  },
+  {
+    "assetKey": "crypto:eth",
+    "asset": "Ether \u2014 Long \u00b7 Daily \u00b7 to Aug 25",
+    "settlementBasis": "hl-candle-close",
+    "rows": 1,
+    "firstAnchor": "2026-08-25",
+    "lastAnchor": "2026-08-25"
+  },
+  {
+    "assetKey": "crypto:eth",
+    "asset": "Ether \u2014 Long \u00b7 Daily \u00b7 to Sep 4",
+    "settlementBasis": "hl-candle-close",
+    "rows": 1,
+    "firstAnchor": "2026-09-04",
+    "lastAnchor": "2026-09-04"
+  },
+  {
+    "assetKey": "crypto:eth",
+    "asset": "Ether \u2014 Long \u00b7 Weekly \u00b7 to Aug 28",
+    "settlementBasis": "hl-candle-close",
+    "rows": 1,
+    "firstAnchor": "2026-08-28",
+    "lastAnchor": "2026-08-28"
+  },
+  {
+    "assetKey": "crypto:eth",
+    "asset": "Ether \u2014 Next-day \u00b7 to Aug 29",
+    "settlementBasis": "hl-candle-close",
+    "rows": 1,
+    "firstAnchor": "2026-08-29",
+    "lastAnchor": "2026-08-29"
+  },
+  {
+    "assetKey": "crypto:eth",
+    "asset": "Ether \u2014 Next-day \u00b7 to Aug 30",
+    "settlementBasis": "hl-candle-close",
+    "rows": 1,
+    "firstAnchor": "2026-08-30",
+    "lastAnchor": "2026-08-30"
+  },
+  {
+    "assetKey": "crypto:eth",
+    "asset": "Ether \u2014 Next-day \u00b7 to Aug 31",
+    "settlementBasis": "hl-candle-close",
+    "rows": 1,
+    "firstAnchor": "2026-08-31",
+    "lastAnchor": "2026-08-31"
+  },
+  {
+    "assetKey": "crypto:eth",
+    "asset": "Ether \u2014 Next-day \u00b7 to Sep 1",
+    "settlementBasis": "hl-candle-close",
+    "rows": 1,
+    "firstAnchor": "2026-09-01",
+    "lastAnchor": "2026-09-01"
+  },
+  {
+    "assetKey": "crypto:eth",
+    "asset": "Ether \u2014 Next-day \u00b7 to Sep 1",
+    "settlementBasis": "venue-settlement-value",
+    "rows": 1,
+    "firstAnchor": "2026-09-01",
+    "lastAnchor": "2026-09-01"
+  },
+  {
+    "assetKey": "crypto:eth",
+    "asset": "Ether \u2014 Next-day \u00b7 to Sep 3",
+    "settlementBasis": "hl-candle-close",
+    "rows": 1,
+    "firstAnchor": "2026-09-03",
+    "lastAnchor": "2026-09-03"
+  },
+  {
+    "assetKey": "crypto:eth",
+    "asset": "Ether \u2014 Next-day \u00b7 to Sep 3",
+    "settlementBasis": "venue-settlement-value",
+    "rows": 1,
+    "firstAnchor": "2026-09-03",
+    "lastAnchor": "2026-09-03"
+  },
+  {
+    "assetKey": "crypto:eth",
+    "asset": "Ether \u2014 Short \u00b7 Daily \u00b7 to Aug 28",
+    "settlementBasis": "hl-candle-close",
+    "rows": 1,
+    "firstAnchor": "2026-08-28",
+    "lastAnchor": "2026-08-28"
+  },
+  {
+    "assetKey": "crypto:eth",
+    "asset": "Ether \u2014 Short \u00b7 Daily \u00b7 to Aug 29",
+    "settlementBasis": "hl-candle-close",
+    "rows": 1,
+    "firstAnchor": "2026-08-29",
+    "lastAnchor": "2026-08-29"
+  },
+  {
+    "assetKey": "crypto:eth",
+    "asset": "Ether \u2014 Short \u00b7 Daily \u00b7 to Aug 30",
+    "settlementBasis": "hl-candle-close",
+    "rows": 1,
+    "firstAnchor": "2026-08-30",
+    "lastAnchor": "2026-08-30"
+  },
+  {
+    "assetKey": "crypto:eth",
+    "asset": "Ether \u2014 Short \u00b7 Daily \u00b7 to Sep 3",
+    "settlementBasis": "hl-candle-close",
+    "rows": 1,
+    "firstAnchor": "2026-09-03",
+    "lastAnchor": "2026-09-03"
+  },
+  {
+    "assetKey": "crypto:eth",
+    "asset": "Ether \u2014 Short \u00b7 Monthly \u00b7 to Aug 31",
+    "settlementBasis": "hl-candle-close",
+    "rows": 2,
+    "firstAnchor": "2026-08-31",
+    "lastAnchor": "2026-08-31"
+  },
+  {
+    "assetKey": "crypto:eth",
+    "asset": "Ether \u2014 Short \u00b7 Monthly \u00b7 to Sep 1",
+    "settlementBasis": "hl-candle-close",
+    "rows": 1,
+    "firstAnchor": "2026-09-01",
+    "lastAnchor": "2026-09-01"
+  },
+  {
+    "assetKey": "crypto:eth",
+    "asset": "Ether \u2014 Short \u00b7 Next-day \u00b7 to Sep 2",
+    "settlementBasis": "hl-candle-close",
+    "rows": 1,
+    "firstAnchor": "2026-09-02",
+    "lastAnchor": "2026-09-02"
+  },
+  {
+    "assetKey": "crypto:eth",
+    "asset": "Ether \u2014 Short \u00b7 Weekly \u00b7 to Sep 4",
+    "settlementBasis": "hl-candle-close",
+    "rows": 1,
+    "firstAnchor": "2026-09-04",
+    "lastAnchor": "2026-09-04"
+  },
+  {
+    "assetKey": "crypto:eth",
+    "asset": "Ether \u2014 Two-day \u00b7 to Aug 19",
+    "settlementBasis": "hl-candle-close",
+    "rows": 1,
+    "firstAnchor": "2026-08-19",
+    "lastAnchor": "2026-08-19"
+  },
+  {
+    "assetKey": "crypto:eth",
+    "asset": "Ether \u2014 Two-day \u00b7 to Aug 20",
+    "settlementBasis": "hl-candle-close",
+    "rows": 1,
+    "firstAnchor": "2026-08-20",
+    "lastAnchor": "2026-08-20"
+  },
+  {
+    "assetKey": "crypto:eth",
+    "asset": "Ether \u2014 Two-day \u00b7 to Aug 21",
+    "settlementBasis": "hl-candle-close",
+    "rows": 1,
+    "firstAnchor": "2026-08-21",
+    "lastAnchor": "2026-08-21"
+  },
+  {
+    "assetKey": "crypto:eth",
+    "asset": "Ether \u2014 Two-day \u00b7 to Aug 22",
+    "settlementBasis": "hl-candle-close",
+    "rows": 1,
+    "firstAnchor": "2026-08-22",
+    "lastAnchor": "2026-08-22"
+  },
+  {
+    "assetKey": "crypto:eth",
+    "asset": "Ether \u2014 Two-day \u00b7 to Aug 23",
+    "settlementBasis": "hl-candle-close",
+    "rows": 2,
+    "firstAnchor": "2026-08-23",
+    "lastAnchor": "2026-08-23"
+  },
+  {
+    "assetKey": "crypto:eth",
+    "asset": "Ether \u2014 Two-day \u00b7 to Aug 24",
+    "settlementBasis": "hl-candle-close",
+    "rows": 1,
+    "firstAnchor": "2026-08-24",
+    "lastAnchor": "2026-08-24"
+  },
+  {
+    "assetKey": "crypto:eth",
+    "asset": "Ether \u2014 Two-day \u00b7 to Aug 25",
+    "settlementBasis": "hl-candle-close",
+    "rows": 1,
+    "firstAnchor": "2026-08-25",
+    "lastAnchor": "2026-08-25"
+  },
+  {
+    "assetKey": "crypto:eth",
+    "asset": "Ether \u2014 Weekly \u00b7 to Aug 21",
+    "settlementBasis": "hl-candle-close",
+    "rows": 1,
+    "firstAnchor": "2026-08-21",
+    "lastAnchor": "2026-08-21"
+  },
+  {
+    "assetKey": "crypto:eth",
+    "asset": "Ether \u2014 Weekly \u00b7 to Sep 1",
+    "settlementBasis": "hl-candle-close",
+    "rows": 2,
+    "firstAnchor": "2026-09-01",
+    "lastAnchor": "2026-09-01"
+  },
+  {
+    "assetKey": "commodity:gold",
+    "asset": "Gold \u2014 Daily \u00b7 to Aug 17",
+    "settlementBasis": "hl-candle-close",
+    "rows": 1,
+    "firstAnchor": "2026-08-17",
+    "lastAnchor": "2026-08-17"
+  },
+  {
+    "assetKey": "commodity:gold",
+    "asset": "Gold \u2014 Daily \u00b7 to Aug 18",
+    "settlementBasis": "hl-candle-close",
+    "rows": 1,
+    "firstAnchor": "2026-08-18",
+    "lastAnchor": "2026-08-18"
+  },
+  {
+    "assetKey": "commodity:gold",
+    "asset": "Gold \u2014 Daily \u00b7 to Aug 19",
+    "settlementBasis": "hl-candle-close",
+    "rows": 1,
+    "firstAnchor": "2026-08-19",
+    "lastAnchor": "2026-08-19"
+  },
+  {
+    "assetKey": "commodity:gold",
+    "asset": "Gold \u2014 Daily \u00b7 to Aug 20",
+    "settlementBasis": "hl-candle-close",
+    "rows": 1,
+    "firstAnchor": "2026-08-20",
+    "lastAnchor": "2026-08-20"
+  },
+  {
+    "assetKey": "commodity:gold",
+    "asset": "Gold \u2014 Daily \u00b7 to Aug 21",
+    "settlementBasis": "hl-candle-close",
+    "rows": 2,
+    "firstAnchor": "2026-08-21",
+    "lastAnchor": "2026-08-21"
+  },
+  {
+    "assetKey": "commodity:gold",
+    "asset": "Gold \u2014 Daily \u00b7 to Aug 31",
+    "settlementBasis": "venue-settlement-value",
+    "rows": 1,
+    "firstAnchor": "2026-08-31",
+    "lastAnchor": "2026-08-31"
+  },
+  {
+    "assetKey": "commodity:gold",
+    "asset": "Gold \u2014 Daily \u00b7 to Sep 1",
+    "settlementBasis": "venue-settlement-value",
+    "rows": 1,
+    "firstAnchor": "2026-09-01",
+    "lastAnchor": "2026-09-01"
+  },
+  {
+    "assetKey": "commodity:gold",
+    "asset": "Gold \u2014 Daily \u00b7 to Sep 2",
+    "settlementBasis": "venue-settlement-value",
+    "rows": 1,
+    "firstAnchor": "2026-09-02",
+    "lastAnchor": "2026-09-02"
+  },
+  {
+    "assetKey": "commodity:gold",
+    "asset": "Gold \u2014 Daily \u00b7 to Sep 3",
+    "settlementBasis": "venue-settlement-value",
+    "rows": 1,
+    "firstAnchor": "2026-09-03",
+    "lastAnchor": "2026-09-03"
+  },
+  {
+    "assetKey": "commodity:gold",
+    "asset": "Gold \u2014 Long \u00b7 Daily \u00b7 to Aug 31",
+    "settlementBasis": "hl-candle-close",
+    "rows": 1,
+    "firstAnchor": "2026-08-31",
+    "lastAnchor": "2026-08-31"
+  },
+  {
+    "assetKey": "commodity:gold",
+    "asset": "Gold \u2014 Long \u00b7 Daily \u00b7 to Sep 1",
+    "settlementBasis": "hl-candle-close",
+    "rows": 1,
+    "firstAnchor": "2026-09-01",
+    "lastAnchor": "2026-09-01"
+  },
+  {
+    "assetKey": "commodity:gold",
+    "asset": "Gold \u2014 Long \u00b7 Daily \u00b7 to Sep 3",
+    "settlementBasis": "hl-candle-close",
+    "rows": 1,
+    "firstAnchor": "2026-09-03",
+    "lastAnchor": "2026-09-03"
+  },
+  {
+    "assetKey": "commodity:gold",
+    "asset": "Gold \u2014 Long \u00b7 Monthly \u00b7 to Aug 31",
+    "settlementBasis": "hl-candle-close",
+    "rows": 2,
+    "firstAnchor": "2026-08-31",
+    "lastAnchor": "2026-08-31"
+  },
+  {
+    "assetKey": "commodity:gold",
+    "asset": "Gold \u2014 Long \u00b7 Next-day \u00b7 to Sep 1",
+    "settlementBasis": "hl-candle-close",
+    "rows": 1,
+    "firstAnchor": "2026-09-01",
+    "lastAnchor": "2026-09-01"
+  },
+  {
+    "assetKey": "commodity:gold",
+    "asset": "Gold \u2014 Long \u00b7 Weekly \u00b7 to Aug 28",
+    "settlementBasis": "hl-candle-close",
+    "rows": 2,
+    "firstAnchor": "2026-08-28",
+    "lastAnchor": "2026-08-28"
+  },
+  {
+    "assetKey": "commodity:gold",
+    "asset": "Gold \u2014 Monthly \u00b7 to Aug 31",
+    "settlementBasis": "venue-settlement-value",
+    "rows": 1,
+    "firstAnchor": "2026-08-31",
+    "lastAnchor": "2026-08-31"
+  },
+  {
+    "assetKey": "commodity:gold",
+    "asset": "Gold \u2014 Next-day \u00b7 to Sep 1",
+    "settlementBasis": "venue-settlement-value",
+    "rows": 1,
+    "firstAnchor": "2026-09-01",
+    "lastAnchor": "2026-09-01"
+  },
+  {
+    "assetKey": "commodity:gold",
+    "asset": "Gold \u2014 Next-day \u00b7 to Sep 2",
+    "settlementBasis": "hl-candle-close",
+    "rows": 1,
+    "firstAnchor": "2026-09-02",
+    "lastAnchor": "2026-09-02"
+  },
+  {
+    "assetKey": "commodity:gold",
+    "asset": "Gold \u2014 Next-day \u00b7 to Sep 2",
+    "settlementBasis": "venue-settlement-value",
+    "rows": 1,
+    "firstAnchor": "2026-09-02",
+    "lastAnchor": "2026-09-02"
+  },
+  {
+    "assetKey": "commodity:gold",
+    "asset": "Gold \u2014 Next-day \u00b7 to Sep 3",
+    "settlementBasis": "hl-candle-close",
+    "rows": 1,
+    "firstAnchor": "2026-09-03",
+    "lastAnchor": "2026-09-03"
+  },
+  {
+    "assetKey": "commodity:gold",
+    "asset": "Gold \u2014 Next-day \u00b7 to Sep 3",
+    "settlementBasis": "venue-settlement-value",
+    "rows": 1,
+    "firstAnchor": "2026-09-03",
+    "lastAnchor": "2026-09-03"
+  },
+  {
+    "assetKey": "commodity:gold",
+    "asset": "Gold \u2014 Short \u00b7 Daily \u00b7 to Aug 24",
+    "settlementBasis": "hl-candle-close",
+    "rows": 1,
+    "firstAnchor": "2026-08-24",
+    "lastAnchor": "2026-08-24"
+  },
+  {
+    "assetKey": "commodity:gold",
+    "asset": "Gold \u2014 Short \u00b7 Daily \u00b7 to Aug 25",
+    "settlementBasis": "hl-candle-close",
+    "rows": 1,
+    "firstAnchor": "2026-08-25",
+    "lastAnchor": "2026-08-25"
+  },
+  {
+    "assetKey": "commodity:gold",
+    "asset": "Gold \u2014 Short \u00b7 Daily \u00b7 to Sep 2",
+    "settlementBasis": "hl-candle-close",
+    "rows": 1,
+    "firstAnchor": "2026-09-02",
+    "lastAnchor": "2026-09-02"
+  },
+  {
+    "assetKey": "commodity:gold",
+    "asset": "Gold \u2014 Short \u00b7 Weekly \u00b7 to Sep 4",
+    "settlementBasis": "hl-candle-close",
+    "rows": 1,
+    "firstAnchor": "2026-09-04",
+    "lastAnchor": "2026-09-04"
+  },
+  {
+    "assetKey": "commodity:gold",
+    "asset": "Gold \u2014 Two-day \u00b7 to Aug 19",
+    "settlementBasis": "hl-candle-close",
+    "rows": 1,
+    "firstAnchor": "2026-08-19",
+    "lastAnchor": "2026-08-19"
+  },
+  {
+    "assetKey": "commodity:gold",
+    "asset": "Gold \u2014 Two-day \u00b7 to Aug 20",
+    "settlementBasis": "hl-candle-close",
+    "rows": 1,
+    "firstAnchor": "2026-08-20",
+    "lastAnchor": "2026-08-20"
+  },
+  {
+    "assetKey": "commodity:gold",
+    "asset": "Gold \u2014 Two-day \u00b7 to Aug 24",
+    "settlementBasis": "hl-candle-close",
+    "rows": 1,
+    "firstAnchor": "2026-08-24",
+    "lastAnchor": "2026-08-24"
+  },
+  {
+    "assetKey": "commodity:gold",
+    "asset": "Gold \u2014 Two-day \u00b7 to Aug 25",
+    "settlementBasis": "hl-candle-close",
+    "rows": 2,
+    "firstAnchor": "2026-08-25",
+    "lastAnchor": "2026-08-25"
+  },
+  {
+    "assetKey": "commodity:gold",
+    "asset": "Gold \u2014 Weekly \u00b7 to Aug 17",
+    "settlementBasis": "hl-candle-close",
+    "rows": 1,
+    "firstAnchor": "2026-08-17",
+    "lastAnchor": "2026-08-17"
+  },
+  {
+    "assetKey": "commodity:gold",
+    "asset": "Gold \u2014 Weekly \u00b7 to Aug 21",
+    "settlementBasis": "hl-candle-close",
+    "rows": 1,
+    "firstAnchor": "2026-08-21",
+    "lastAnchor": "2026-08-21"
+  },
+  {
+    "assetKey": "commodity:gold",
+    "asset": "Gold \u2014 Weekly \u00b7 to Aug 24",
+    "settlementBasis": "hl-candle-close",
+    "rows": 1,
+    "firstAnchor": "2026-08-24",
+    "lastAnchor": "2026-08-24"
+  },
+  {
+    "assetKey": "commodity:gold",
+    "asset": "Gold \u2014 Weekly \u00b7 to Sep 4",
+    "settlementBasis": "venue-settlement-value",
+    "rows": 1,
+    "firstAnchor": "2026-09-04",
+    "lastAnchor": "2026-09-04"
+  },
+  {
+    "assetKey": "commodity:natural-gas",
+    "asset": "Natural Gas \u2014 Daily \u00b7 to Aug 17",
+    "settlementBasis": "hl-candle-close",
+    "rows": 1,
+    "firstAnchor": "2026-08-17",
+    "lastAnchor": "2026-08-17"
+  },
+  {
+    "assetKey": "commodity:natural-gas",
+    "asset": "Natural Gas \u2014 Daily \u00b7 to Aug 18",
+    "settlementBasis": "hl-candle-close",
+    "rows": 1,
+    "firstAnchor": "2026-08-18",
+    "lastAnchor": "2026-08-18"
+  },
+  {
+    "assetKey": "commodity:natural-gas",
+    "asset": "Natural Gas \u2014 Daily \u00b7 to Aug 19",
+    "settlementBasis": "hl-candle-close",
+    "rows": 1,
+    "firstAnchor": "2026-08-19",
+    "lastAnchor": "2026-08-19"
+  },
+  {
+    "assetKey": "commodity:natural-gas",
+    "asset": "Natural Gas \u2014 Daily \u00b7 to Aug 20",
+    "settlementBasis": "hl-candle-close",
+    "rows": 1,
+    "firstAnchor": "2026-08-20",
+    "lastAnchor": "2026-08-20"
+  },
+  {
+    "assetKey": "commodity:natural-gas",
+    "asset": "Natural Gas \u2014 Daily \u00b7 to Aug 31",
+    "settlementBasis": "venue-settlement-value",
+    "rows": 1,
+    "firstAnchor": "2026-08-31",
+    "lastAnchor": "2026-08-31"
+  },
+  {
+    "assetKey": "commodity:natural-gas",
+    "asset": "Natural Gas \u2014 Daily \u00b7 to Sep 1",
+    "settlementBasis": "venue-settlement-value",
+    "rows": 1,
+    "firstAnchor": "2026-09-01",
+    "lastAnchor": "2026-09-01"
+  },
+  {
+    "assetKey": "commodity:natural-gas",
+    "asset": "Natural Gas \u2014 Daily \u00b7 to Sep 2",
+    "settlementBasis": "venue-settlement-value",
+    "rows": 1,
+    "firstAnchor": "2026-09-02",
+    "lastAnchor": "2026-09-02"
+  },
+  {
+    "assetKey": "commodity:natural-gas",
+    "asset": "Natural Gas \u2014 Daily \u00b7 to Sep 3",
+    "settlementBasis": "venue-settlement-value",
+    "rows": 1,
+    "firstAnchor": "2026-09-03",
+    "lastAnchor": "2026-09-03"
+  },
+  {
+    "assetKey": "commodity:natural-gas",
+    "asset": "Natural Gas \u2014 Long \u00b7 Daily \u00b7 to Aug 24",
+    "settlementBasis": "hl-candle-close",
+    "rows": 1,
+    "firstAnchor": "2026-08-24",
+    "lastAnchor": "2026-08-24"
+  },
+  {
+    "assetKey": "commodity:natural-gas",
+    "asset": "Natural Gas \u2014 Long \u00b7 Daily \u00b7 to Sep 1",
+    "settlementBasis": "hl-candle-close",
+    "rows": 1,
+    "firstAnchor": "2026-09-01",
+    "lastAnchor": "2026-09-01"
+  },
+  {
+    "assetKey": "commodity:natural-gas",
+    "asset": "Natural Gas \u2014 Long \u00b7 Daily \u00b7 to Sep 3",
+    "settlementBasis": "hl-candle-close",
+    "rows": 1,
+    "firstAnchor": "2026-09-03",
+    "lastAnchor": "2026-09-03"
+  },
+  {
+    "assetKey": "commodity:natural-gas",
+    "asset": "Natural Gas \u2014 Long \u00b7 Next-day \u00b7 to Sep 1",
+    "settlementBasis": "hl-candle-close",
+    "rows": 1,
+    "firstAnchor": "2026-09-01",
+    "lastAnchor": "2026-09-01"
+  },
+  {
+    "assetKey": "commodity:natural-gas",
+    "asset": "Natural Gas \u2014 Long \u00b7 Weekly \u00b7 to Aug 28",
+    "settlementBasis": "hl-candle-close",
+    "rows": 1,
+    "firstAnchor": "2026-08-28",
+    "lastAnchor": "2026-08-28"
+  },
+  {
+    "assetKey": "commodity:natural-gas",
+    "asset": "Natural Gas \u2014 Monthly \u00b7 to Aug 31",
+    "settlementBasis": "venue-settlement-value",
+    "rows": 1,
+    "firstAnchor": "2026-08-31",
+    "lastAnchor": "2026-08-31"
+  },
+  {
+    "assetKey": "commodity:natural-gas",
+    "asset": "Natural Gas \u2014 Next-day \u00b7 to Sep 1",
+    "settlementBasis": "venue-settlement-value",
+    "rows": 1,
+    "firstAnchor": "2026-09-01",
+    "lastAnchor": "2026-09-01"
+  },
+  {
+    "assetKey": "commodity:natural-gas",
+    "asset": "Natural Gas \u2014 Next-day \u00b7 to Sep 2",
+    "settlementBasis": "hl-candle-close",
+    "rows": 1,
+    "firstAnchor": "2026-09-02",
+    "lastAnchor": "2026-09-02"
+  },
+  {
+    "assetKey": "commodity:natural-gas",
+    "asset": "Natural Gas \u2014 Next-day \u00b7 to Sep 2",
+    "settlementBasis": "venue-settlement-value",
+    "rows": 1,
+    "firstAnchor": "2026-09-02",
+    "lastAnchor": "2026-09-02"
+  },
+  {
+    "assetKey": "commodity:natural-gas",
+    "asset": "Natural Gas \u2014 Next-day \u00b7 to Sep 3",
+    "settlementBasis": "hl-candle-close",
+    "rows": 1,
+    "firstAnchor": "2026-09-03",
+    "lastAnchor": "2026-09-03"
+  },
+  {
+    "assetKey": "commodity:natural-gas",
+    "asset": "Natural Gas \u2014 Next-day \u00b7 to Sep 3",
+    "settlementBasis": "venue-settlement-value",
+    "rows": 1,
+    "firstAnchor": "2026-09-03",
+    "lastAnchor": "2026-09-03"
+  },
+  {
+    "assetKey": "commodity:natural-gas",
+    "asset": "Natural Gas \u2014 Short \u00b7 Daily \u00b7 to Aug 25",
+    "settlementBasis": "hl-candle-close",
+    "rows": 1,
+    "firstAnchor": "2026-08-25",
+    "lastAnchor": "2026-08-25"
+  },
+  {
+    "assetKey": "commodity:natural-gas",
+    "asset": "Natural Gas \u2014 Short \u00b7 Daily \u00b7 to Aug 31",
+    "settlementBasis": "hl-candle-close",
+    "rows": 1,
+    "firstAnchor": "2026-08-31",
+    "lastAnchor": "2026-08-31"
+  },
+  {
+    "assetKey": "commodity:natural-gas",
+    "asset": "Natural Gas \u2014 Short \u00b7 Daily \u00b7 to Sep 2",
+    "settlementBasis": "hl-candle-close",
+    "rows": 1,
+    "firstAnchor": "2026-09-02",
+    "lastAnchor": "2026-09-02"
+  },
+  {
+    "assetKey": "commodity:natural-gas",
+    "asset": "Natural Gas \u2014 Short \u00b7 Monthly \u00b7 to Aug 31",
+    "settlementBasis": "hl-candle-close",
+    "rows": 2,
+    "firstAnchor": "2026-08-31",
+    "lastAnchor": "2026-08-31"
+  },
+  {
+    "assetKey": "commodity:natural-gas",
+    "asset": "Natural Gas \u2014 Short \u00b7 Weekly \u00b7 to Sep 4",
+    "settlementBasis": "hl-candle-close",
+    "rows": 1,
+    "firstAnchor": "2026-09-04",
+    "lastAnchor": "2026-09-04"
+  },
+  {
+    "assetKey": "commodity:natural-gas",
+    "asset": "Natural Gas \u2014 Two-day \u00b7 to Aug 19",
+    "settlementBasis": "hl-candle-close",
+    "rows": 1,
+    "firstAnchor": "2026-08-19",
+    "lastAnchor": "2026-08-19"
+  },
+  {
+    "assetKey": "commodity:natural-gas",
+    "asset": "Natural Gas \u2014 Two-day \u00b7 to Aug 20",
+    "settlementBasis": "hl-candle-close",
+    "rows": 1,
+    "firstAnchor": "2026-08-20",
+    "lastAnchor": "2026-08-20"
+  },
+  {
+    "assetKey": "commodity:natural-gas",
+    "asset": "Natural Gas \u2014 Two-day \u00b7 to Aug 24",
+    "settlementBasis": "hl-candle-close",
+    "rows": 1,
+    "firstAnchor": "2026-08-24",
+    "lastAnchor": "2026-08-24"
+  },
+  {
+    "assetKey": "commodity:natural-gas",
+    "asset": "Natural Gas \u2014 Two-day \u00b7 to Aug 25",
+    "settlementBasis": "hl-candle-close",
+    "rows": 2,
+    "firstAnchor": "2026-08-25",
+    "lastAnchor": "2026-08-25"
+  },
+  {
+    "assetKey": "commodity:natural-gas",
+    "asset": "Natural Gas \u2014 Weekly \u00b7 to Aug 17",
+    "settlementBasis": "hl-candle-close",
+    "rows": 1,
+    "firstAnchor": "2026-08-17",
+    "lastAnchor": "2026-08-17"
+  },
+  {
+    "assetKey": "commodity:natural-gas",
+    "asset": "Natural Gas \u2014 Weekly \u00b7 to Aug 18",
+    "settlementBasis": "hl-candle-close",
+    "rows": 1,
+    "firstAnchor": "2026-08-18",
+    "lastAnchor": "2026-08-18"
+  },
+  {
+    "assetKey": "commodity:natural-gas",
+    "asset": "Natural Gas \u2014 Weekly \u00b7 to Aug 21",
+    "settlementBasis": "hl-candle-close",
+    "rows": 1,
+    "firstAnchor": "2026-08-21",
+    "lastAnchor": "2026-08-21"
+  },
+  {
+    "assetKey": "commodity:natural-gas",
+    "asset": "Natural Gas \u2014 Weekly \u00b7 to Aug 24",
+    "settlementBasis": "hl-candle-close",
+    "rows": 1,
+    "firstAnchor": "2026-08-24",
+    "lastAnchor": "2026-08-24"
+  },
+  {
+    "assetKey": "commodity:natural-gas",
+    "asset": "Natural Gas \u2014 Weekly \u00b7 to Sep 4",
+    "settlementBasis": "venue-settlement-value",
+    "rows": 1,
+    "firstAnchor": "2026-09-04",
+    "lastAnchor": "2026-09-04"
+  },
+  {
+    "assetKey": "commodity:platinum",
+    "asset": "Platinum \u2014 Daily \u00b7 to Aug 17",
+    "settlementBasis": "hl-candle-close",
+    "rows": 1,
+    "firstAnchor": "2026-08-17",
+    "lastAnchor": "2026-08-17"
+  },
+  {
+    "assetKey": "commodity:platinum",
+    "asset": "Platinum \u2014 Daily \u00b7 to Aug 18",
+    "settlementBasis": "hl-candle-close",
+    "rows": 1,
+    "firstAnchor": "2026-08-18",
+    "lastAnchor": "2026-08-18"
+  },
+  {
+    "assetKey": "commodity:platinum",
+    "asset": "Platinum \u2014 Daily \u00b7 to Aug 19",
+    "settlementBasis": "hl-candle-close",
+    "rows": 1,
+    "firstAnchor": "2026-08-19",
+    "lastAnchor": "2026-08-19"
+  },
+  {
+    "assetKey": "commodity:platinum",
+    "asset": "Platinum \u2014 Daily \u00b7 to Aug 20",
+    "settlementBasis": "hl-candle-close",
+    "rows": 1,
+    "firstAnchor": "2026-08-20",
+    "lastAnchor": "2026-08-20"
+  },
+  {
+    "assetKey": "commodity:platinum",
+    "asset": "Platinum \u2014 Daily \u00b7 to Aug 21",
+    "settlementBasis": "hl-candle-close",
+    "rows": 1,
+    "firstAnchor": "2026-08-21",
+    "lastAnchor": "2026-08-21"
+  },
+  {
+    "assetKey": "commodity:platinum",
+    "asset": "Platinum \u2014 Long \u00b7 Monthly \u00b7 to Aug 31",
+    "settlementBasis": "hl-candle-close",
+    "rows": 2,
+    "firstAnchor": "2026-08-31",
+    "lastAnchor": "2026-08-31"
+  },
+  {
+    "assetKey": "commodity:platinum",
+    "asset": "Platinum \u2014 Long \u00b7 Next-day \u00b7 to Aug 28",
+    "settlementBasis": "hl-candle-close",
+    "rows": 1,
+    "firstAnchor": "2026-08-28",
+    "lastAnchor": "2026-08-28"
+  },
+  {
+    "assetKey": "commodity:platinum",
+    "asset": "Platinum \u2014 Long \u00b7 Next-day \u00b7 to Sep 4",
+    "settlementBasis": "hl-candle-close",
+    "rows": 1,
+    "firstAnchor": "2026-09-04",
+    "lastAnchor": "2026-09-04"
+  },
+  {
+    "assetKey": "commodity:platinum",
+    "asset": "Platinum \u2014 Long \u00b7 Two-day \u00b7 to Aug 25",
+    "settlementBasis": "hl-candle-close",
+    "rows": 2,
+    "firstAnchor": "2026-08-25",
+    "lastAnchor": "2026-08-25"
+  },
+  {
+    "assetKey": "commodity:platinum",
+    "asset": "Platinum \u2014 Long \u00b7 Weekly \u00b7 to Aug 28",
+    "settlementBasis": "hl-candle-close",
+    "rows": 2,
+    "firstAnchor": "2026-08-28",
+    "lastAnchor": "2026-08-28"
+  },
+  {
+    "assetKey": "commodity:platinum",
+    "asset": "Platinum \u2014 Long \u00b7 Weekly \u00b7 to Sep 4",
+    "settlementBasis": "hl-candle-close",
+    "rows": 1,
+    "firstAnchor": "2026-09-04",
+    "lastAnchor": "2026-09-04"
+  },
+  {
+    "assetKey": "commodity:platinum",
+    "asset": "Platinum \u2014 Next-day \u00b7 to Aug 31",
+    "settlementBasis": "hl-candle-close",
+    "rows": 1,
+    "firstAnchor": "2026-08-31",
+    "lastAnchor": "2026-08-31"
+  },
+  {
+    "assetKey": "commodity:platinum",
+    "asset": "Platinum \u2014 Next-day \u00b7 to Sep 1",
+    "settlementBasis": "hl-candle-close",
+    "rows": 1,
+    "firstAnchor": "2026-09-01",
+    "lastAnchor": "2026-09-01"
+  },
+  {
+    "assetKey": "commodity:platinum",
+    "asset": "Platinum \u2014 Next-day \u00b7 to Sep 2",
+    "settlementBasis": "hl-candle-close",
+    "rows": 1,
+    "firstAnchor": "2026-09-02",
+    "lastAnchor": "2026-09-02"
+  },
+  {
+    "assetKey": "commodity:platinum",
+    "asset": "Platinum \u2014 Next-day \u00b7 to Sep 3",
+    "settlementBasis": "hl-candle-close",
+    "rows": 1,
+    "firstAnchor": "2026-09-03",
+    "lastAnchor": "2026-09-03"
+  },
+  {
+    "assetKey": "commodity:platinum",
+    "asset": "Platinum \u2014 Two-day \u00b7 to Aug 19",
+    "settlementBasis": "hl-candle-close",
+    "rows": 1,
+    "firstAnchor": "2026-08-19",
+    "lastAnchor": "2026-08-19"
+  },
+  {
+    "assetKey": "commodity:platinum",
+    "asset": "Platinum \u2014 Two-day \u00b7 to Aug 20",
+    "settlementBasis": "hl-candle-close",
+    "rows": 1,
+    "firstAnchor": "2026-08-20",
+    "lastAnchor": "2026-08-20"
+  },
+  {
+    "assetKey": "commodity:platinum",
+    "asset": "Platinum \u2014 Two-day \u00b7 to Aug 21",
+    "settlementBasis": "hl-candle-close",
+    "rows": 1,
+    "firstAnchor": "2026-08-21",
+    "lastAnchor": "2026-08-21"
+  },
+  {
+    "assetKey": "commodity:platinum",
+    "asset": "Platinum \u2014 Two-day \u00b7 to Aug 24",
+    "settlementBasis": "hl-candle-close",
+    "rows": 1,
+    "firstAnchor": "2026-08-24",
+    "lastAnchor": "2026-08-24"
+  },
+  {
+    "assetKey": "commodity:platinum",
+    "asset": "Platinum \u2014 Weekly \u00b7 to Aug 18",
+    "settlementBasis": "hl-candle-close",
+    "rows": 1,
+    "firstAnchor": "2026-08-18",
+    "lastAnchor": "2026-08-18"
+  },
+  {
+    "assetKey": "commodity:platinum",
+    "asset": "Platinum \u2014 Weekly \u00b7 to Aug 19",
+    "settlementBasis": "hl-candle-close",
+    "rows": 1,
+    "firstAnchor": "2026-08-19",
+    "lastAnchor": "2026-08-19"
+  },
+  {
+    "assetKey": "commodity:platinum",
+    "asset": "Platinum \u2014 Weekly \u00b7 to Aug 21",
+    "settlementBasis": "hl-candle-close",
+    "rows": 1,
+    "firstAnchor": "2026-08-21",
+    "lastAnchor": "2026-08-21"
+  },
+  {
+    "assetKey": "commodity:silver",
+    "asset": "Silver \u2014 Daily \u00b7 to Aug 17",
+    "settlementBasis": "hl-candle-close",
+    "rows": 1,
+    "firstAnchor": "2026-08-17",
+    "lastAnchor": "2026-08-17"
+  },
+  {
+    "assetKey": "commodity:silver",
+    "asset": "Silver \u2014 Daily \u00b7 to Aug 18",
+    "settlementBasis": "hl-candle-close",
+    "rows": 1,
+    "firstAnchor": "2026-08-18",
+    "lastAnchor": "2026-08-18"
+  },
+  {
+    "assetKey": "commodity:silver",
+    "asset": "Silver \u2014 Daily \u00b7 to Aug 19",
+    "settlementBasis": "hl-candle-close",
+    "rows": 1,
+    "firstAnchor": "2026-08-19",
+    "lastAnchor": "2026-08-19"
+  },
+  {
+    "assetKey": "commodity:silver",
+    "asset": "Silver \u2014 Daily \u00b7 to Aug 20",
+    "settlementBasis": "hl-candle-close",
+    "rows": 1,
+    "firstAnchor": "2026-08-20",
+    "lastAnchor": "2026-08-20"
+  },
+  {
+    "assetKey": "commodity:silver",
+    "asset": "Silver \u2014 Daily \u00b7 to Aug 21",
+    "settlementBasis": "hl-candle-close",
+    "rows": 2,
+    "firstAnchor": "2026-08-21",
+    "lastAnchor": "2026-08-21"
+  },
+  {
+    "assetKey": "commodity:silver",
+    "asset": "Silver \u2014 Daily \u00b7 to Aug 31",
+    "settlementBasis": "venue-settlement-value",
+    "rows": 1,
+    "firstAnchor": "2026-08-31",
+    "lastAnchor": "2026-08-31"
+  },
+  {
+    "assetKey": "commodity:silver",
+    "asset": "Silver \u2014 Daily \u00b7 to Sep 1",
+    "settlementBasis": "venue-settlement-value",
+    "rows": 1,
+    "firstAnchor": "2026-09-01",
+    "lastAnchor": "2026-09-01"
+  },
+  {
+    "assetKey": "commodity:silver",
+    "asset": "Silver \u2014 Daily \u00b7 to Sep 2",
+    "settlementBasis": "venue-settlement-value",
+    "rows": 1,
+    "firstAnchor": "2026-09-02",
+    "lastAnchor": "2026-09-02"
+  },
+  {
+    "assetKey": "commodity:silver",
+    "asset": "Silver \u2014 Daily \u00b7 to Sep 3",
+    "settlementBasis": "venue-settlement-value",
+    "rows": 1,
+    "firstAnchor": "2026-09-03",
+    "lastAnchor": "2026-09-03"
+  },
+  {
+    "assetKey": "commodity:silver",
+    "asset": "Silver \u2014 Long \u00b7 Daily \u00b7 to Aug 24",
+    "settlementBasis": "hl-candle-close",
+    "rows": 1,
+    "firstAnchor": "2026-08-24",
+    "lastAnchor": "2026-08-24"
+  },
+  {
+    "assetKey": "commodity:silver",
+    "asset": "Silver \u2014 Long \u00b7 Daily \u00b7 to Aug 25",
+    "settlementBasis": "hl-candle-close",
+    "rows": 1,
+    "firstAnchor": "2026-08-25",
+    "lastAnchor": "2026-08-25"
+  },
+  {
+    "assetKey": "commodity:silver",
+    "asset": "Silver \u2014 Long \u00b7 Daily \u00b7 to Aug 31",
+    "settlementBasis": "hl-candle-close",
+    "rows": 1,
+    "firstAnchor": "2026-08-31",
+    "lastAnchor": "2026-08-31"
+  },
+  {
+    "assetKey": "commodity:silver",
+    "asset": "Silver \u2014 Long \u00b7 Daily \u00b7 to Sep 1",
+    "settlementBasis": "hl-candle-close",
+    "rows": 1,
+    "firstAnchor": "2026-09-01",
+    "lastAnchor": "2026-09-01"
+  },
+  {
+    "assetKey": "commodity:silver",
+    "asset": "Silver \u2014 Long \u00b7 Monthly \u00b7 to Aug 31",
+    "settlementBasis": "hl-candle-close",
+    "rows": 2,
+    "firstAnchor": "2026-08-31",
+    "lastAnchor": "2026-08-31"
+  },
+  {
+    "assetKey": "commodity:silver",
+    "asset": "Silver \u2014 Long \u00b7 Weekly \u00b7 to Aug 28",
+    "settlementBasis": "hl-candle-close",
+    "rows": 2,
+    "firstAnchor": "2026-08-28",
+    "lastAnchor": "2026-08-28"
+  },
+  {
+    "assetKey": "commodity:silver",
+    "asset": "Silver \u2014 Long \u00b7 Weekly \u00b7 to Sep 4",
+    "settlementBasis": "hl-candle-close",
+    "rows": 1,
+    "firstAnchor": "2026-09-04",
+    "lastAnchor": "2026-09-04"
+  },
+  {
+    "assetKey": "commodity:silver",
+    "asset": "Silver \u2014 Monthly \u00b7 to Aug 31",
+    "settlementBasis": "venue-settlement-value",
+    "rows": 1,
+    "firstAnchor": "2026-08-31",
+    "lastAnchor": "2026-08-31"
+  },
+  {
+    "assetKey": "commodity:silver",
+    "asset": "Silver \u2014 Next-day \u00b7 to Sep 1",
+    "settlementBasis": "hl-candle-close",
+    "rows": 1,
+    "firstAnchor": "2026-09-01",
+    "lastAnchor": "2026-09-01"
+  },
+  {
+    "assetKey": "commodity:silver",
+    "asset": "Silver \u2014 Next-day \u00b7 to Sep 1",
+    "settlementBasis": "venue-settlement-value",
+    "rows": 1,
+    "firstAnchor": "2026-09-01",
+    "lastAnchor": "2026-09-01"
+  },
+  {
+    "assetKey": "commodity:silver",
+    "asset": "Silver \u2014 Next-day \u00b7 to Sep 2",
+    "settlementBasis": "hl-candle-close",
+    "rows": 1,
+    "firstAnchor": "2026-09-02",
+    "lastAnchor": "2026-09-02"
+  },
+  {
+    "assetKey": "commodity:silver",
+    "asset": "Silver \u2014 Next-day \u00b7 to Sep 2",
+    "settlementBasis": "venue-settlement-value",
+    "rows": 1,
+    "firstAnchor": "2026-09-02",
+    "lastAnchor": "2026-09-02"
+  },
+  {
+    "assetKey": "commodity:silver",
+    "asset": "Silver \u2014 Next-day \u00b7 to Sep 3",
+    "settlementBasis": "hl-candle-close",
+    "rows": 1,
+    "firstAnchor": "2026-09-03",
+    "lastAnchor": "2026-09-03"
+  },
+  {
+    "assetKey": "commodity:silver",
+    "asset": "Silver \u2014 Next-day \u00b7 to Sep 3",
+    "settlementBasis": "venue-settlement-value",
+    "rows": 1,
+    "firstAnchor": "2026-09-03",
+    "lastAnchor": "2026-09-03"
+  },
+  {
+    "assetKey": "commodity:silver",
+    "asset": "Silver \u2014 Short \u00b7 Daily \u00b7 to Sep 2",
+    "settlementBasis": "hl-candle-close",
+    "rows": 1,
+    "firstAnchor": "2026-09-02",
+    "lastAnchor": "2026-09-02"
+  },
+  {
+    "assetKey": "commodity:silver",
+    "asset": "Silver \u2014 Short \u00b7 Daily \u00b7 to Sep 3",
+    "settlementBasis": "hl-candle-close",
+    "rows": 1,
+    "firstAnchor": "2026-09-03",
+    "lastAnchor": "2026-09-03"
+  },
+  {
+    "assetKey": "commodity:silver",
+    "asset": "Silver \u2014 Two-day \u00b7 to Aug 19",
+    "settlementBasis": "hl-candle-close",
+    "rows": 1,
+    "firstAnchor": "2026-08-19",
+    "lastAnchor": "2026-08-19"
+  },
+  {
+    "assetKey": "commodity:silver",
+    "asset": "Silver \u2014 Two-day \u00b7 to Aug 20",
+    "settlementBasis": "hl-candle-close",
+    "rows": 1,
+    "firstAnchor": "2026-08-20",
+    "lastAnchor": "2026-08-20"
+  },
+  {
+    "assetKey": "commodity:silver",
+    "asset": "Silver \u2014 Two-day \u00b7 to Aug 24",
+    "settlementBasis": "hl-candle-close",
+    "rows": 1,
+    "firstAnchor": "2026-08-24",
+    "lastAnchor": "2026-08-24"
+  },
+  {
+    "assetKey": "commodity:silver",
+    "asset": "Silver \u2014 Two-day \u00b7 to Aug 25",
+    "settlementBasis": "hl-candle-close",
+    "rows": 2,
+    "firstAnchor": "2026-08-25",
+    "lastAnchor": "2026-08-25"
+  },
+  {
+    "assetKey": "commodity:silver",
+    "asset": "Silver \u2014 Weekly \u00b7 to Aug 17",
+    "settlementBasis": "hl-candle-close",
+    "rows": 1,
+    "firstAnchor": "2026-08-17",
+    "lastAnchor": "2026-08-17"
+  },
+  {
+    "assetKey": "commodity:silver",
+    "asset": "Silver \u2014 Weekly \u00b7 to Aug 21",
+    "settlementBasis": "hl-candle-close",
+    "rows": 1,
+    "firstAnchor": "2026-08-21",
+    "lastAnchor": "2026-08-21"
+  },
+  {
+    "assetKey": "commodity:silver",
+    "asset": "Silver \u2014 Weekly \u00b7 to Aug 24",
+    "settlementBasis": "hl-candle-close",
+    "rows": 1,
+    "firstAnchor": "2026-08-24",
+    "lastAnchor": "2026-08-24"
+  },
+  {
+    "assetKey": "commodity:silver",
+    "asset": "Silver \u2014 Weekly \u00b7 to Sep 4",
+    "settlementBasis": "venue-settlement-value",
+    "rows": 1,
+    "firstAnchor": "2026-09-04",
+    "lastAnchor": "2026-09-04"
+  },
+  {
+    "assetKey": "commodity:wti",
+    "asset": "WTI Crude Oil \u2014 Daily \u00b7 to Aug 17",
+    "settlementBasis": "hl-candle-close",
+    "rows": 1,
+    "firstAnchor": "2026-08-17",
+    "lastAnchor": "2026-08-17"
+  },
+  {
+    "assetKey": "commodity:wti",
+    "asset": "WTI Crude Oil \u2014 Daily \u00b7 to Aug 18",
+    "settlementBasis": "hl-candle-close",
+    "rows": 1,
+    "firstAnchor": "2026-08-18",
+    "lastAnchor": "2026-08-18"
+  },
+  {
+    "assetKey": "commodity:wti",
+    "asset": "WTI Crude Oil \u2014 Daily \u00b7 to Aug 19",
+    "settlementBasis": "hl-candle-close",
+    "rows": 1,
+    "firstAnchor": "2026-08-19",
+    "lastAnchor": "2026-08-19"
+  },
+  {
+    "assetKey": "commodity:wti",
+    "asset": "WTI Crude Oil \u2014 Daily \u00b7 to Aug 20",
+    "settlementBasis": "hl-candle-close",
+    "rows": 1,
+    "firstAnchor": "2026-08-20",
+    "lastAnchor": "2026-08-20"
+  },
+  {
+    "assetKey": "commodity:wti",
+    "asset": "WTI Crude Oil \u2014 Daily \u00b7 to Aug 21",
+    "settlementBasis": "hl-candle-close",
+    "rows": 2,
+    "firstAnchor": "2026-08-21",
+    "lastAnchor": "2026-08-21"
+  },
+  {
+    "assetKey": "commodity:wti",
+    "asset": "WTI Crude Oil \u2014 Daily \u00b7 to Aug 31",
+    "settlementBasis": "venue-settlement-value",
+    "rows": 1,
+    "firstAnchor": "2026-08-31",
+    "lastAnchor": "2026-08-31"
+  },
+  {
+    "assetKey": "commodity:wti",
+    "asset": "WTI Crude Oil \u2014 Daily \u00b7 to Sep 1",
+    "settlementBasis": "venue-settlement-value",
+    "rows": 1,
+    "firstAnchor": "2026-09-01",
+    "lastAnchor": "2026-09-01"
+  },
+  {
+    "assetKey": "commodity:wti",
+    "asset": "WTI Crude Oil \u2014 Daily \u00b7 to Sep 2",
+    "settlementBasis": "hl-candle-close",
+    "rows": 1,
+    "firstAnchor": "2026-09-02",
+    "lastAnchor": "2026-09-02"
+  },
+  {
+    "assetKey": "commodity:wti",
+    "asset": "WTI Crude Oil \u2014 Daily \u00b7 to Sep 2",
+    "settlementBasis": "venue-settlement-value",
+    "rows": 1,
+    "firstAnchor": "2026-09-02",
+    "lastAnchor": "2026-09-02"
+  },
+  {
+    "assetKey": "commodity:wti",
+    "asset": "WTI Crude Oil \u2014 Daily \u00b7 to Sep 3",
+    "settlementBasis": "venue-settlement-value",
+    "rows": 1,
+    "firstAnchor": "2026-09-03",
+    "lastAnchor": "2026-09-03"
+  },
+  {
+    "assetKey": "commodity:wti",
+    "asset": "WTI Crude Oil \u2014 Long \u00b7 Daily \u00b7 to Aug 24",
+    "settlementBasis": "hl-candle-close",
+    "rows": 1,
+    "firstAnchor": "2026-08-24",
+    "lastAnchor": "2026-08-24"
+  },
+  {
+    "assetKey": "commodity:wti",
+    "asset": "WTI Crude Oil \u2014 Long \u00b7 Daily \u00b7 to Aug 25",
+    "settlementBasis": "hl-candle-close",
+    "rows": 1,
+    "firstAnchor": "2026-08-25",
+    "lastAnchor": "2026-08-25"
+  },
+  {
+    "assetKey": "commodity:wti",
+    "asset": "WTI Crude Oil \u2014 Long \u00b7 Daily \u00b7 to Aug 28",
+    "settlementBasis": "hl-candle-close",
+    "rows": 1,
+    "firstAnchor": "2026-08-28",
+    "lastAnchor": "2026-08-28"
+  },
+  {
+    "assetKey": "commodity:wti",
+    "asset": "WTI Crude Oil \u2014 Long \u00b7 Daily \u00b7 to Aug 31",
+    "settlementBasis": "hl-candle-close",
+    "rows": 1,
+    "firstAnchor": "2026-08-31",
+    "lastAnchor": "2026-08-31"
+  },
+  {
+    "assetKey": "commodity:wti",
+    "asset": "WTI Crude Oil \u2014 Long \u00b7 Daily \u00b7 to Sep 1",
+    "settlementBasis": "hl-candle-close",
+    "rows": 1,
+    "firstAnchor": "2026-09-01",
+    "lastAnchor": "2026-09-01"
+  },
+  {
+    "assetKey": "commodity:wti",
+    "asset": "WTI Crude Oil \u2014 Long \u00b7 Daily \u00b7 to Sep 3",
+    "settlementBasis": "hl-candle-close",
+    "rows": 1,
+    "firstAnchor": "2026-09-03",
+    "lastAnchor": "2026-09-03"
+  },
+  {
+    "assetKey": "commodity:wti",
+    "asset": "WTI Crude Oil \u2014 Long \u00b7 Daily \u00b7 to Sep 4",
+    "settlementBasis": "hl-candle-close",
+    "rows": 1,
+    "firstAnchor": "2026-09-04",
+    "lastAnchor": "2026-09-04"
+  },
+  {
+    "assetKey": "commodity:wti",
+    "asset": "WTI Crude Oil \u2014 Long \u00b7 Monthly \u00b7 to Aug 31",
+    "settlementBasis": "hl-candle-close",
+    "rows": 2,
+    "firstAnchor": "2026-08-31",
+    "lastAnchor": "2026-08-31"
+  },
+  {
+    "assetKey": "commodity:wti",
+    "asset": "WTI Crude Oil \u2014 Next-day \u00b7 to Sep 1",
+    "settlementBasis": "hl-candle-close",
+    "rows": 1,
+    "firstAnchor": "2026-09-01",
+    "lastAnchor": "2026-09-01"
+  },
+  {
+    "assetKey": "commodity:wti",
+    "asset": "WTI Crude Oil \u2014 Next-day \u00b7 to Sep 1",
+    "settlementBasis": "venue-settlement-value",
+    "rows": 1,
+    "firstAnchor": "2026-09-01",
+    "lastAnchor": "2026-09-01"
+  },
+  {
+    "assetKey": "commodity:wti",
+    "asset": "WTI Crude Oil \u2014 Next-day \u00b7 to Sep 2",
+    "settlementBasis": "venue-settlement-value",
+    "rows": 1,
+    "firstAnchor": "2026-09-02",
+    "lastAnchor": "2026-09-02"
+  },
+  {
+    "assetKey": "commodity:wti",
+    "asset": "WTI Crude Oil \u2014 Next-day \u00b7 to Sep 3",
+    "settlementBasis": "hl-candle-close",
+    "rows": 1,
+    "firstAnchor": "2026-09-03",
+    "lastAnchor": "2026-09-03"
+  },
+  {
+    "assetKey": "commodity:wti",
+    "asset": "WTI Crude Oil \u2014 Next-day \u00b7 to Sep 3",
+    "settlementBasis": "venue-settlement-value",
+    "rows": 1,
+    "firstAnchor": "2026-09-03",
+    "lastAnchor": "2026-09-03"
+  },
+  {
+    "assetKey": "commodity:wti",
+    "asset": "WTI Crude Oil \u2014 Short \u00b7 Daily \u00b7 to Aug 26",
+    "settlementBasis": "hl-candle-close",
+    "rows": 1,
+    "firstAnchor": "2026-08-26",
+    "lastAnchor": "2026-08-26"
+  },
+  {
+    "assetKey": "commodity:wti",
+    "asset": "WTI Crude Oil \u2014 Short \u00b7 Next-day \u00b7 to Sep 2",
+    "settlementBasis": "hl-candle-close",
+    "rows": 1,
+    "firstAnchor": "2026-09-02",
+    "lastAnchor": "2026-09-02"
+  },
+  {
+    "assetKey": "commodity:wti",
+    "asset": "WTI Crude Oil \u2014 Short \u00b7 Weekly \u00b7 to Sep 4",
+    "settlementBasis": "hl-candle-close",
+    "rows": 1,
+    "firstAnchor": "2026-09-04",
+    "lastAnchor": "2026-09-04"
+  },
+  {
+    "assetKey": "commodity:wti",
+    "asset": "WTI Crude Oil \u2014 Two-day \u00b7 to Aug 19",
+    "settlementBasis": "hl-candle-close",
+    "rows": 1,
+    "firstAnchor": "2026-08-19",
+    "lastAnchor": "2026-08-19"
+  },
+  {
+    "assetKey": "commodity:wti",
+    "asset": "WTI Crude Oil \u2014 Two-day \u00b7 to Aug 20",
+    "settlementBasis": "hl-candle-close",
+    "rows": 1,
+    "firstAnchor": "2026-08-20",
+    "lastAnchor": "2026-08-20"
+  },
+  {
+    "assetKey": "commodity:wti",
+    "asset": "WTI Crude Oil \u2014 Two-day \u00b7 to Aug 24",
+    "settlementBasis": "hl-candle-close",
+    "rows": 1,
+    "firstAnchor": "2026-08-24",
+    "lastAnchor": "2026-08-24"
+  },
+  {
+    "assetKey": "commodity:wti",
+    "asset": "WTI Crude Oil \u2014 Two-day \u00b7 to Aug 25",
+    "settlementBasis": "hl-candle-close",
+    "rows": 2,
+    "firstAnchor": "2026-08-25",
+    "lastAnchor": "2026-08-25"
+  },
+  {
+    "assetKey": "commodity:wti",
+    "asset": "WTI Crude Oil \u2014 Weekly \u00b7 to Aug 21",
+    "settlementBasis": "hl-candle-close",
+    "rows": 1,
+    "firstAnchor": "2026-08-21",
+    "lastAnchor": "2026-08-21"
+  },
+  {
+    "assetKey": "commodity:wti",
+    "asset": "WTI Crude Oil \u2014 Weekly \u00b7 to Aug 28",
+    "settlementBasis": "hl-candle-close",
+    "rows": 2,
+    "firstAnchor": "2026-08-28",
+    "lastAnchor": "2026-08-28"
+  }
+]

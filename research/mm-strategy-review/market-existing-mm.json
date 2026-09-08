@@ -1,0 +1,2149 @@
+{
+  "startedAt": "2026-09-05T05:35:12.070Z",
+  "finishedAt": "2026-09-05T05:35:13.027Z",
+  "source": "/Users/jordanolmstead/dev/classy-cassie/research/mm-strategy-review/market-existing-input.json",
+  "inputRows": 4,
+  "uniqueInputMarkets": 4,
+  "sampledMarkets": 4,
+  "caveats": [
+    "Not a backtest or proof of maker fill probability/profitability.",
+    "Books are sequential REST snapshots, not atomic cross-outcome state.",
+    "Top-level depth is aggregate displayed size, not known queue priority.",
+    "Public taker trade rows are bounded to latest 1000 within 24h; truncated windows are lower bounds, not full volume.",
+    "No private account fields or public trader identities are stored.",
+    "Gross paired spread requires both outcomes to fill in equal quantities and later capital release; a single fill creates directional inventory."
+  ],
+  "markets": [
+    {
+      "inputIdentity": {
+        "id": "1163699"
+      },
+      "group": "existing-mm",
+      "errors": [],
+      "market": {
+        "id": "1163699",
+        "conditionId": "0x9cb23d04b2ded06147482076688b69b487a8d982c63ebdda2ab3678cf27cf390",
+        "question": "Clarity Act (H.R.3633) signed into law in 2026?",
+        "slug": "clarity-act-signed-into-law-in-2026",
+        "url": "https://polymarket.com/market/clarity-act-signed-into-law-in-2026",
+        "endDate": "2027-01-01T05:00:00Z",
+        "active": true,
+        "closed": false,
+        "archived": false,
+        "acceptingOrders": true,
+        "enableOrderBook": true,
+        "sportsMetadataPresent": false,
+        "category": null,
+        "feeType": "politics_fees",
+        "eventIds": [],
+        "volume24hUsd": 2024262.5429430003,
+        "liquidityReportedUsd": 1076691.4335,
+        "minOrderSize": 5,
+        "tickSize": 0.01,
+        "negRisk": false,
+        "feesEnabled": true,
+        "feeSchedule": {
+          "exponent": 1,
+          "rate": 0.04,
+          "takerOnly": true,
+          "rebateRate": 0.25
+        },
+        "rewardsMinSize": 20,
+        "rewardsMaxSpreadCents": 4.5,
+        "currentRewardAllocations": [
+          {
+            "id": "1599048",
+            "conditionId": "0x9cb23d04b2ded06147482076688b69b487a8d982c63ebdda2ab3678cf27cf390",
+            "assetAddress": "0x2791Bca1f2de4661ED88A30C99A7a9449Aa84174",
+            "rewardsAmount": 0,
+            "rewardsDailyRate": 3,
+            "startDate": "2026-08-26",
+            "endDate": "2500-12-31"
+          }
+        ],
+        "currentRewardDailyRate": 3
+      },
+      "clobInfo": {
+        "r": {
+          "mi": 20,
+          "ma": 4.5,
+          "e": true,
+          "moas": 4
+        },
+        "t": [
+          {
+            "t": "35198549486569600595408965368290795524428922595732253580266052028158040373233",
+            "o": "Yes"
+          },
+          {
+            "t": "29633826701713552120011280893309822625942861174174976276686142480636225243753",
+            "o": "No"
+          }
+        ],
+        "c": "0x9cb23d04b2ded06147482076688b69b487a8d982c63ebdda2ab3678cf27cf390",
+        "mos": 5,
+        "mts": 0.01,
+        "mbf": 1000,
+        "tbf": 1000,
+        "ao": true,
+        "cbos": true,
+        "aot": "2026-01-11T23:22:34Z",
+        "ibce": true,
+        "fd": {
+          "r": 0.04,
+          "e": 1,
+          "to": true
+        },
+        "v": "v1"
+      },
+      "yes": {
+        "tokenId": "35198549486569600595408965368290795524428922595732253580266052028158040373233",
+        "receivedAt": "2026-09-05T05:35:12.509Z",
+        "timestamp": "1788586507674",
+        "minOrderSize": 5,
+        "tickSize": 0.01,
+        "lastTradePrice": 0.15,
+        "bestBid": 0.14,
+        "bestAsk": 0.15,
+        "spread": 0.01,
+        "spreadTicks": 1,
+        "topBidShares": 71389.38,
+        "topAskShares": 89670.07,
+        "topBidUsd": 9994.51,
+        "topAskUsd": 13450.51,
+        "bidDepth1cUsd": 19932.73,
+        "bidDepth2cUsd": 76869.48,
+        "askDepth2cUsd": 98448.93,
+        "bestTenBids": [
+          {
+            "price": 0.14,
+            "size": 71389.38
+          },
+          {
+            "price": 0.13,
+            "size": 76447.82
+          },
+          {
+            "price": 0.12,
+            "size": 474472.94
+          },
+          {
+            "price": 0.11,
+            "size": 337469.26
+          },
+          {
+            "price": 0.1,
+            "size": 97413.43
+          },
+          {
+            "price": 0.09,
+            "size": 41949.82
+          },
+          {
+            "price": 0.08,
+            "size": 12525.76
+          },
+          {
+            "price": 0.07,
+            "size": 19737.8
+          },
+          {
+            "price": 0.06,
+            "size": 22714.88
+          },
+          {
+            "price": 0.05,
+            "size": 31878.23
+          }
+        ],
+        "bestTenAsks": [
+          {
+            "price": 0.15,
+            "size": 89670.07
+          },
+          {
+            "price": 0.16,
+            "size": 421786.9
+          },
+          {
+            "price": 0.17,
+            "size": 103014.77
+          },
+          {
+            "price": 0.18,
+            "size": 305736.26
+          },
+          {
+            "price": 0.19,
+            "size": 16381.84
+          },
+          {
+            "price": 0.2,
+            "size": 70688.07
+          },
+          {
+            "price": 0.21,
+            "size": 3969.07
+          },
+          {
+            "price": 0.22,
+            "size": 1827.7
+          },
+          {
+            "price": 0.23,
+            "size": 540
+          },
+          {
+            "price": 0.24,
+            "size": 6890.88
+          }
+        ]
+      },
+      "no": {
+        "tokenId": "29633826701713552120011280893309822625942861174174976276686142480636225243753",
+        "receivedAt": "2026-09-05T05:35:12.571Z",
+        "timestamp": "1788586507674",
+        "minOrderSize": 5,
+        "tickSize": 0.01,
+        "lastTradePrice": 0.15,
+        "bestBid": 0.85,
+        "bestAsk": 0.86,
+        "spread": 0.01,
+        "spreadTicks": 1,
+        "topBidShares": 89670.07,
+        "topAskShares": 71389.38,
+        "topBidUsd": 76219.56,
+        "topAskUsd": 61394.87,
+        "bidDepth1cUsd": 430520.56,
+        "bidDepth2cUsd": 516022.81,
+        "askDepth2cUsd": 545440.66,
+        "bestTenBids": [
+          {
+            "price": 0.85,
+            "size": 89670.07
+          },
+          {
+            "price": 0.84,
+            "size": 421786.9
+          },
+          {
+            "price": 0.83,
+            "size": 103014.77
+          },
+          {
+            "price": 0.82,
+            "size": 305736.26
+          },
+          {
+            "price": 0.81,
+            "size": 16381.84
+          },
+          {
+            "price": 0.8,
+            "size": 70688.07
+          },
+          {
+            "price": 0.79,
+            "size": 3969.07
+          },
+          {
+            "price": 0.78,
+            "size": 1827.7
+          },
+          {
+            "price": 0.77,
+            "size": 540
+          },
+          {
+            "price": 0.76,
+            "size": 6890.88
+          }
+        ],
+        "bestTenAsks": [
+          {
+            "price": 0.86,
+            "size": 71389.38
+          },
+          {
+            "price": 0.87,
+            "size": 76447.82
+          },
+          {
+            "price": 0.88,
+            "size": 474472.94
+          },
+          {
+            "price": 0.89,
+            "size": 337469.26
+          },
+          {
+            "price": 0.9,
+            "size": 97413.43
+          },
+          {
+            "price": 0.91,
+            "size": 41949.82
+          },
+          {
+            "price": 0.92,
+            "size": 12525.76
+          },
+          {
+            "price": 0.93,
+            "size": 19737.8
+          },
+          {
+            "price": 0.94,
+            "size": 22714.88
+          },
+          {
+            "price": 0.95,
+            "size": 31878.23
+          }
+        ]
+      },
+      "trades": {
+        "takerOnly": true,
+        "requestedWindowHours": 24,
+        "returnedRows": 328,
+        "truncatedAt1000": false,
+        "newestTradeAt": "2026-09-05T05:21:57.000Z",
+        "oldestTradeAt": "2026-09-04T05:39:48.000Z",
+        "last15m": {
+          "rows": 1,
+          "shares": 8,
+          "notionalUsd": 1.2
+        },
+        "last1h": {
+          "rows": 7,
+          "shares": 83.3,
+          "notionalUsd": 13.32
+        },
+        "last24h": {
+          "rows": 328,
+          "shares": 2023987.68,
+          "notionalUsd": 1081875.9
+        },
+        "byToken": [
+          {
+            "tokenId": "35198549486569600595408965368290795524428922595732253580266052028158040373233",
+            "rows": 273,
+            "shares": 908790.32,
+            "notionalUsd": 128120.14,
+            "buyRows": 180,
+            "sellRows": 93
+          },
+          {
+            "tokenId": "29633826701713552120011280893309822625942861174174976276686142480636225243753",
+            "rows": 55,
+            "shares": 1115197.36,
+            "notionalUsd": 953755.76,
+            "buyRows": 33,
+            "sellRows": 22
+          }
+        ],
+        "recentRows": [
+          {
+            "timestamp": 1788585717,
+            "tokenId": "35198549486569600595408965368290795524428922595732253580266052028158040373233",
+            "outcome": "Yes",
+            "side": "BUY",
+            "size": 8,
+            "price": 0.15
+          },
+          {
+            "timestamp": 1788584932,
+            "tokenId": "35198549486569600595408965368290795524428922595732253580266052028158040373233",
+            "outcome": "Yes",
+            "side": "BUY",
+            "size": 7.066665,
+            "price": 0.1499998939
+          },
+          {
+            "timestamp": 1788584644,
+            "tokenId": "29633826701713552120011280893309822625942861174174976276686142480636225243753",
+            "outcome": "No",
+            "side": "BUY",
+            "size": 1.162785,
+            "price": 0.859999914
+          },
+          {
+            "timestamp": 1788584643,
+            "tokenId": "35198549486569600595408965368290795524428922595732253580266052028158040373233",
+            "outcome": "Yes",
+            "side": "BUY",
+            "size": 13.333332,
+            "price": 0.14999994
+          },
+          {
+            "timestamp": 1788584301,
+            "tokenId": "35198549486569600595408965368290795524428922595732253580266052028158040373233",
+            "outcome": "Yes",
+            "side": "BUY",
+            "size": 26.4,
+            "price": 0.15
+          },
+          {
+            "timestamp": 1788584119,
+            "tokenId": "35198549486569600595408965368290795524428922595732253580266052028158040373233",
+            "outcome": "Yes",
+            "side": "BUY",
+            "size": 7.333332,
+            "price": 0.1499998909
+          },
+          {
+            "timestamp": 1788584106,
+            "tokenId": "35198549486569600595408965368290795524428922595732253580266052028158040373233",
+            "outcome": "Yes",
+            "side": "BUY",
+            "size": 20,
+            "price": 0.15
+          },
+          {
+            "timestamp": 1788582370,
+            "tokenId": "29633826701713552120011280893309822625942861174174976276686142480636225243753",
+            "outcome": "No",
+            "side": "SELL",
+            "size": 12.05,
+            "price": 0.85
+          },
+          {
+            "timestamp": 1788582130,
+            "tokenId": "29633826701713552120011280893309822625942861174174976276686142480636225243753",
+            "outcome": "No",
+            "side": "SELL",
+            "size": 12.05,
+            "price": 0.85
+          },
+          {
+            "timestamp": 1788581988,
+            "tokenId": "35198549486569600595408965368290795524428922595732253580266052028158040373233",
+            "outcome": "Yes",
+            "side": "BUY",
+            "size": 32.2,
+            "price": 0.15
+          },
+          {
+            "timestamp": 1788581503,
+            "tokenId": "35198549486569600595408965368290795524428922595732253580266052028158040373233",
+            "outcome": "Yes",
+            "side": "BUY",
+            "size": 128.8,
+            "price": 0.15
+          },
+          {
+            "timestamp": 1788580500,
+            "tokenId": "35198549486569600595408965368290795524428922595732253580266052028158040373233",
+            "outcome": "Yes",
+            "side": "BUY",
+            "size": 64.4,
+            "price": 0.15
+          },
+          {
+            "timestamp": 1788579832,
+            "tokenId": "29633826701713552120011280893309822625942861174174976276686142480636225243753",
+            "outcome": "No",
+            "side": "BUY",
+            "size": 20,
+            "price": 0.86
+          },
+          {
+            "timestamp": 1788579826,
+            "tokenId": "35198549486569600595408965368290795524428922595732253580266052028158040373233",
+            "outcome": "Yes",
+            "side": "BUY",
+            "size": 666.666665,
+            "price": 0.1499999989
+          },
+          {
+            "timestamp": 1788579298,
+            "tokenId": "35198549486569600595408965368290795524428922595732253580266052028158040373233",
+            "outcome": "Yes",
+            "side": "BUY",
+            "size": 33.333332,
+            "price": 0.149999976
+          },
+          {
+            "timestamp": 1788578518,
+            "tokenId": "29633826701713552120011280893309822625942861174174976276686142480636225243753",
+            "outcome": "No",
+            "side": "SELL",
+            "size": 58.82,
+            "price": 0.85
+          },
+          {
+            "timestamp": 1788576522,
+            "tokenId": "35198549486569600595408965368290795524428922595732253580266052028158040373233",
+            "outcome": "Yes",
+            "side": "SELL",
+            "size": 6.66,
+            "price": 0.14
+          },
+          {
+            "timestamp": 1788576486,
+            "tokenId": "35198549486569600595408965368290795524428922595732253580266052028158040373233",
+            "outcome": "Yes",
+            "side": "BUY",
+            "size": 6.666665,
+            "price": 0.1499998875
+          },
+          {
+            "timestamp": 1788575932,
+            "tokenId": "35198549486569600595408965368290795524428922595732253580266052028158040373233",
+            "outcome": "Yes",
+            "side": "BUY",
+            "size": 100,
+            "price": 0.15
+          },
+          {
+            "timestamp": 1788575047,
+            "tokenId": "35198549486569600595408965368290795524428922595732253580266052028158040373233",
+            "outcome": "Yes",
+            "side": "BUY",
+            "size": 78.466665,
+            "price": 0.1499999904
+          }
+        ]
+      },
+      "illustration": {
+        "label": "Conditional arithmetic only: same share count on both outcomes must fill; no fill probability or realized return assumed.",
+        "pairBuyCostAtCurrentBids": 0.99,
+        "grossPayoffMinusCostPerCompletedPair": 0.01,
+        "rewardMinimumPairBuyCostUsd": 19.8,
+        "ticket20UsdShareCountYes": 142.85,
+        "ticket20UsdShareCountNo": 23.52
+      }
+    },
+    {
+      "inputIdentity": {
+        "id": "2252244"
+      },
+      "group": "existing-mm",
+      "errors": [],
+      "market": {
+        "id": "2252244",
+        "conditionId": "0xa3b36b2d6104d34af4e6c6215fc818e43352e78a748fbfb0b85e3a35f71dec9a",
+        "question": "Will there be no change in Fed interest rates after the September 2026 meeting?",
+        "slug": "will-there-be-no-change-in-fed-interest-rates-after-the-september-2026-meeting-615",
+        "url": "https://polymarket.com/market/will-there-be-no-change-in-fed-interest-rates-after-the-september-2026-meeting-615",
+        "endDate": "2026-09-16T00:00:00Z",
+        "active": true,
+        "closed": false,
+        "archived": false,
+        "acceptingOrders": true,
+        "enableOrderBook": true,
+        "sportsMetadataPresent": false,
+        "category": null,
+        "feeType": "economics_fees",
+        "eventIds": [],
+        "volume24hUsd": 1395188.8150600002,
+        "liquidityReportedUsd": 768073.2344,
+        "minOrderSize": 5,
+        "tickSize": 0.01,
+        "negRisk": true,
+        "feesEnabled": true,
+        "feeSchedule": {
+          "exponent": 1,
+          "rate": 0.05,
+          "takerOnly": true,
+          "rebateRate": 0.25
+        },
+        "rewardsMinSize": 200,
+        "rewardsMaxSpreadCents": 4.5,
+        "currentRewardAllocations": [
+          {
+            "id": "1074592",
+            "conditionId": "0xa3b36b2d6104d34af4e6c6215fc818e43352e78a748fbfb0b85e3a35f71dec9a",
+            "assetAddress": "0x2791Bca1f2de4661ED88A30C99A7a9449Aa84174",
+            "rewardsAmount": 0,
+            "rewardsDailyRate": 1000,
+            "startDate": "2026-07-29",
+            "endDate": "2500-12-31"
+          }
+        ],
+        "currentRewardDailyRate": 1000
+      },
+      "no": {
+        "tokenId": "97050921740416192996389806693742575608111328819185493163189880975611314813724",
+        "receivedAt": "2026-09-05T05:35:12.504Z",
+        "timestamp": "1788586504187",
+        "minOrderSize": 5,
+        "tickSize": 0.01,
+        "lastTradePrice": 0.49,
+        "bestBid": 0.5,
+        "bestAsk": 0.51,
+        "spread": 0.01,
+        "spreadTicks": 1,
+        "topBidShares": 69165.12,
+        "topAskShares": 12746.44,
+        "topBidUsd": 34582.56,
+        "topAskUsd": 6500.68,
+        "bidDepth1cUsd": 98108.25,
+        "bidDepth2cUsd": 228135.59,
+        "askDepth2cUsd": 409664.2,
+        "bestTenBids": [
+          {
+            "price": 0.5,
+            "size": 69165.12
+          },
+          {
+            "price": 0.49,
+            "size": 129644.27
+          },
+          {
+            "price": 0.48,
+            "size": 270890.29
+          },
+          {
+            "price": 0.47,
+            "size": 19715.38
+          },
+          {
+            "price": 0.46,
+            "size": 6225.49
+          },
+          {
+            "price": 0.45,
+            "size": 8873.58
+          },
+          {
+            "price": 0.44,
+            "size": 5440.27
+          },
+          {
+            "price": 0.43,
+            "size": 10184.13
+          },
+          {
+            "price": 0.42,
+            "size": 15700
+          },
+          {
+            "price": 0.41,
+            "size": 5160
+          }
+        ],
+        "bestTenAsks": [
+          {
+            "price": 0.51,
+            "size": 12746.44
+          },
+          {
+            "price": 0.52,
+            "size": 237138.99
+          },
+          {
+            "price": 0.53,
+            "size": 528021.2
+          },
+          {
+            "price": 0.54,
+            "size": 11859.99
+          },
+          {
+            "price": 0.55,
+            "size": 16363
+          },
+          {
+            "price": 0.56,
+            "size": 34601.38
+          },
+          {
+            "price": 0.57,
+            "size": 11049.88
+          },
+          {
+            "price": 0.58,
+            "size": 4933.77
+          },
+          {
+            "price": 0.59,
+            "size": 35805
+          },
+          {
+            "price": 0.6,
+            "size": 16912.69
+          }
+        ]
+      },
+      "yes": {
+        "tokenId": "5615282760875985231868508008056959876238536896643315063916840237042205273721",
+        "receivedAt": "2026-09-05T05:35:12.513Z",
+        "timestamp": "1788586504187",
+        "minOrderSize": 5,
+        "tickSize": 0.01,
+        "lastTradePrice": 0.49,
+        "bestBid": 0.49,
+        "bestAsk": 0.5,
+        "spread": 0.01,
+        "spreadTicks": 1,
+        "topBidShares": 12746.44,
+        "topAskShares": 69165.12,
+        "topBidUsd": 6245.76,
+        "topAskUsd": 34582.56,
+        "bidDepth1cUsd": 120072.47,
+        "bidDepth2cUsd": 368242.43,
+        "askDepth2cUsd": 241564.09,
+        "bestTenBids": [
+          {
+            "price": 0.49,
+            "size": 12746.44
+          },
+          {
+            "price": 0.48,
+            "size": 237138.99
+          },
+          {
+            "price": 0.47,
+            "size": 528021.2
+          },
+          {
+            "price": 0.46,
+            "size": 11859.99
+          },
+          {
+            "price": 0.45,
+            "size": 16363
+          },
+          {
+            "price": 0.44,
+            "size": 34601.38
+          },
+          {
+            "price": 0.43,
+            "size": 11049.88
+          },
+          {
+            "price": 0.42,
+            "size": 4933.77
+          },
+          {
+            "price": 0.41,
+            "size": 35805
+          },
+          {
+            "price": 0.4,
+            "size": 16912.69
+          }
+        ],
+        "bestTenAsks": [
+          {
+            "price": 0.5,
+            "size": 69165.12
+          },
+          {
+            "price": 0.51,
+            "size": 129644.27
+          },
+          {
+            "price": 0.52,
+            "size": 270890.29
+          },
+          {
+            "price": 0.53,
+            "size": 19715.38
+          },
+          {
+            "price": 0.54,
+            "size": 6225.49
+          },
+          {
+            "price": 0.55,
+            "size": 8873.58
+          },
+          {
+            "price": 0.56,
+            "size": 5440.27
+          },
+          {
+            "price": 0.57,
+            "size": 10184.13
+          },
+          {
+            "price": 0.58,
+            "size": 15700
+          },
+          {
+            "price": 0.59,
+            "size": 5160
+          }
+        ]
+      },
+      "clobInfo": {
+        "r": {
+          "mi": 200,
+          "ma": 4.5,
+          "e": true,
+          "moas": 30
+        },
+        "t": [
+          {
+            "t": "5615282760875985231868508008056959876238536896643315063916840237042205273721",
+            "o": "Yes"
+          },
+          {
+            "t": "97050921740416192996389806693742575608111328819185493163189880975611314813724",
+            "o": "No"
+          }
+        ],
+        "c": "0xa3b36b2d6104d34af4e6c6215fc818e43352e78a748fbfb0b85e3a35f71dec9a",
+        "mos": 5,
+        "mts": 0.01,
+        "mbf": 1000,
+        "tbf": 1000,
+        "ao": true,
+        "nr": true,
+        "cbos": true,
+        "aot": "2026-05-13T21:22:03Z",
+        "ibce": true,
+        "fd": {
+          "r": 0.05,
+          "e": 1,
+          "to": true
+        },
+        "v": "v1"
+      },
+      "trades": {
+        "takerOnly": true,
+        "requestedWindowHours": 24,
+        "returnedRows": 1000,
+        "truncatedAt1000": true,
+        "newestTradeAt": "2026-09-05T05:31:03.000Z",
+        "oldestTradeAt": "2026-09-04T12:23:33.000Z",
+        "last15m": {
+          "rows": 8,
+          "shares": 188.39,
+          "notionalUsd": 93.87
+        },
+        "last1h": {
+          "rows": 25,
+          "shares": 27403.4,
+          "notionalUsd": 13700.42
+        },
+        "last24h": {
+          "rows": 1000,
+          "shares": 924199.74,
+          "notionalUsd": 450163.79
+        },
+        "byToken": [
+          {
+            "tokenId": "5615282760875985231868508008056959876238536896643315063916840237042205273721",
+            "rows": 748,
+            "shares": 780802.61,
+            "notionalUsd": 376118.85,
+            "buyRows": 516,
+            "sellRows": 232
+          },
+          {
+            "tokenId": "97050921740416192996389806693742575608111328819185493163189880975611314813724",
+            "rows": 252,
+            "shares": 143397.13,
+            "notionalUsd": 74044.94,
+            "buyRows": 206,
+            "sellRows": 46
+          }
+        ],
+        "recentRows": [
+          {
+            "timestamp": 1788586263,
+            "tokenId": "5615282760875985231868508008056959876238536896643315063916840237042205273721",
+            "outcome": "Yes",
+            "side": "SELL",
+            "size": 2.38,
+            "price": 0.49
+          },
+          {
+            "timestamp": 1788586216,
+            "tokenId": "5615282760875985231868508008056959876238536896643315063916840237042205273721",
+            "outcome": "Yes",
+            "side": "BUY",
+            "size": 100,
+            "price": 0.5
+          },
+          {
+            "timestamp": 1788586126,
+            "tokenId": "5615282760875985231868508008056959876238536896643315063916840237042205273721",
+            "outcome": "Yes",
+            "side": "BUY",
+            "size": 10,
+            "price": 0.5
+          },
+          {
+            "timestamp": 1788586039,
+            "tokenId": "5615282760875985231868508008056959876238536896643315063916840237042205273721",
+            "outcome": "Yes",
+            "side": "BUY",
+            "size": 18,
+            "price": 0.5
+          },
+          {
+            "timestamp": 1788586038,
+            "tokenId": "5615282760875985231868508008056959876238536896643315063916840237042205273721",
+            "outcome": "Yes",
+            "side": "BUY",
+            "size": 4,
+            "price": 0.5
+          },
+          {
+            "timestamp": 1788585994,
+            "tokenId": "5615282760875985231868508008056959876238536896643315063916840237042205273721",
+            "outcome": "Yes",
+            "side": "BUY",
+            "size": 19.04,
+            "price": 0.5
+          },
+          {
+            "timestamp": 1788585862,
+            "tokenId": "5615282760875985231868508008056959876238536896643315063916840237042205273721",
+            "outcome": "Yes",
+            "side": "SELL",
+            "size": 30.61,
+            "price": 0.49
+          },
+          {
+            "timestamp": 1788585661,
+            "tokenId": "5615282760875985231868508008056959876238536896643315063916840237042205273721",
+            "outcome": "Yes",
+            "side": "BUY",
+            "size": 4.36,
+            "price": 0.5
+          },
+          {
+            "timestamp": 1788585606,
+            "tokenId": "97050921740416192996389806693742575608111328819185493163189880975611314813724",
+            "outcome": "No",
+            "side": "BUY",
+            "size": 4.941175,
+            "price": 0.5099999494
+          },
+          {
+            "timestamp": 1788585544,
+            "tokenId": "97050921740416192996389806693742575608111328819185493163189880975611314813724",
+            "outcome": "No",
+            "side": "BUY",
+            "size": 6.333332,
+            "price": 0.5099999495
+          },
+          {
+            "timestamp": 1788585447,
+            "tokenId": "5615282760875985231868508008056959876238536896643315063916840237042205273721",
+            "outcome": "Yes",
+            "side": "SELL",
+            "size": 116.27,
+            "price": 0.49
+          },
+          {
+            "timestamp": 1788585007,
+            "tokenId": "5615282760875985231868508008056959876238536896643315063916840237042205273721",
+            "outcome": "Yes",
+            "side": "BUY",
+            "size": 2,
+            "price": 0.5
+          },
+          {
+            "timestamp": 1788584905,
+            "tokenId": "5615282760875985231868508008056959876238536896643315063916840237042205273721",
+            "outcome": "Yes",
+            "side": "BUY",
+            "size": 4.28,
+            "price": 0.5
+          },
+          {
+            "timestamp": 1788584868,
+            "tokenId": "5615282760875985231868508008056959876238536896643315063916840237042205273721",
+            "outcome": "Yes",
+            "side": "BUY",
+            "size": 14393.46,
+            "price": 0.5
+          },
+          {
+            "timestamp": 1788584848,
+            "tokenId": "97050921740416192996389806693742575608111328819185493163189880975611314813724",
+            "outcome": "No",
+            "side": "BUY",
+            "size": 5.039214,
+            "price": 0.5099999722
+          },
+          {
+            "timestamp": 1788584605,
+            "tokenId": "5615282760875985231868508008056959876238536896643315063916840237042205273721",
+            "outcome": "Yes",
+            "side": "BUY",
+            "size": 10647.31,
+            "price": 0.5
+          },
+          {
+            "timestamp": 1788584281,
+            "tokenId": "5615282760875985231868508008056959876238536896643315063916840237042205273721",
+            "outcome": "Yes",
+            "side": "BUY",
+            "size": 20,
+            "price": 0.5
+          },
+          {
+            "timestamp": 1788583918,
+            "tokenId": "5615282760875985231868508008056959876238536896643315063916840237042205273721",
+            "outcome": "Yes",
+            "side": "BUY",
+            "size": 30,
+            "price": 0.5
+          },
+          {
+            "timestamp": 1788583896,
+            "tokenId": "5615282760875985231868508008056959876238536896643315063916840237042205273721",
+            "outcome": "Yes",
+            "side": "BUY",
+            "size": 3.74,
+            "price": 0.5
+          },
+          {
+            "timestamp": 1788583851,
+            "tokenId": "5615282760875985231868508008056959876238536896643315063916840237042205273721",
+            "outcome": "Yes",
+            "side": "BUY",
+            "size": 2,
+            "price": 0.5
+          }
+        ]
+      },
+      "illustration": {
+        "label": "Conditional arithmetic only: same share count on both outcomes must fill; no fill probability or realized return assumed.",
+        "pairBuyCostAtCurrentBids": 0.99,
+        "grossPayoffMinusCostPerCompletedPair": 0.01,
+        "rewardMinimumPairBuyCostUsd": 198,
+        "ticket20UsdShareCountYes": 40.81,
+        "ticket20UsdShareCountNo": 40
+      }
+    },
+    {
+      "inputIdentity": {
+        "id": "2243896"
+      },
+      "group": "existing-mm",
+      "errors": [],
+      "market": {
+        "id": "2243896",
+        "conditionId": "0x6c3f1009a0c91ba9f7aae44aeadf86863b0d433b60f7a090fd00c945019aa32f",
+        "question": "Russia x Ukraine ceasefire agreement by October 31, 2026?",
+        "slug": "russia-x-ukraine-ceasefire-agreement-by-october-31-2026",
+        "url": "https://polymarket.com/market/russia-x-ukraine-ceasefire-agreement-by-october-31-2026",
+        "endDate": "2026-11-01T03:59:00Z",
+        "active": true,
+        "closed": false,
+        "archived": false,
+        "acceptingOrders": true,
+        "enableOrderBook": true,
+        "sportsMetadataPresent": false,
+        "category": null,
+        "feeType": null,
+        "eventIds": [],
+        "volume24hUsd": 306203.38852499996,
+        "liquidityReportedUsd": 42328.7568,
+        "minOrderSize": 5,
+        "tickSize": 0.01,
+        "negRisk": false,
+        "feesEnabled": false,
+        "feeSchedule": null,
+        "rewardsMinSize": 200,
+        "rewardsMaxSpreadCents": 6.5,
+        "currentRewardAllocations": [
+          {
+            "id": "342779",
+            "conditionId": "0x6c3f1009a0c91ba9f7aae44aeadf86863b0d433b60f7a090fd00c945019aa32f",
+            "assetAddress": "0x2791Bca1f2de4661ED88A30C99A7a9449Aa84174",
+            "rewardsAmount": 0,
+            "rewardsDailyRate": 200,
+            "startDate": "2026-09-04",
+            "endDate": "2500-12-31"
+          }
+        ],
+        "currentRewardDailyRate": 200
+      },
+      "no": {
+        "tokenId": "39319769648132414476170103739900770633009012502056309868976886150530270219889",
+        "receivedAt": "2026-09-05T05:35:12.508Z",
+        "timestamp": "1788586509134",
+        "minOrderSize": 5,
+        "tickSize": 0.01,
+        "lastTradePrice": 0.24,
+        "bestBid": 0.76,
+        "bestAsk": 0.77,
+        "spread": 0.01,
+        "spreadTicks": 1,
+        "topBidShares": 152.48,
+        "topAskShares": 1066.78,
+        "topBidUsd": 115.88,
+        "topAskUsd": 821.42,
+        "bidDepth1cUsd": 130.88,
+        "bidDepth2cUsd": 840.57,
+        "askDepth2cUsd": 6998.44,
+        "bestTenBids": [
+          {
+            "price": 0.76,
+            "size": 152.48
+          },
+          {
+            "price": 0.75,
+            "size": 19.99
+          },
+          {
+            "price": 0.74,
+            "size": 959.04
+          },
+          {
+            "price": 0.73,
+            "size": 1649.69
+          },
+          {
+            "price": 0.69,
+            "size": 741.44
+          },
+          {
+            "price": 0.68,
+            "size": 1175.99
+          },
+          {
+            "price": 0.66,
+            "size": 10
+          },
+          {
+            "price": 0.65,
+            "size": 5
+          },
+          {
+            "price": 0.64,
+            "size": 5
+          },
+          {
+            "price": 0.63,
+            "size": 505
+          }
+        ],
+        "bestTenAsks": [
+          {
+            "price": 0.77,
+            "size": 1066.78
+          },
+          {
+            "price": 0.78,
+            "size": 1885.08
+          },
+          {
+            "price": 0.79,
+            "size": 5957.79
+          },
+          {
+            "price": 0.8,
+            "size": 5206.91
+          },
+          {
+            "price": 0.81,
+            "size": 2110.97
+          },
+          {
+            "price": 0.82,
+            "size": 3145.07
+          },
+          {
+            "price": 0.83,
+            "size": 2162.99
+          },
+          {
+            "price": 0.84,
+            "size": 50
+          },
+          {
+            "price": 0.85,
+            "size": 1902
+          },
+          {
+            "price": 0.86,
+            "size": 320
+          }
+        ]
+      },
+      "clobInfo": {
+        "r": {
+          "mi": 200,
+          "ma": 6.5,
+          "e": true,
+          "moas": 30
+        },
+        "t": [
+          {
+            "t": "10861802947610899379330568332287100318869035186187733531205554992019689450318",
+            "o": "Yes"
+          },
+          {
+            "t": "39319769648132414476170103739900770633009012502056309868976886150530270219889",
+            "o": "No"
+          }
+        ],
+        "c": "0x6c3f1009a0c91ba9f7aae44aeadf86863b0d433b60f7a090fd00c945019aa32f",
+        "mos": 5,
+        "mts": 0.01,
+        "ao": true,
+        "cbos": true,
+        "aot": "2026-05-13T03:29:57Z",
+        "ibce": true,
+        "v": "v1"
+      },
+      "yes": {
+        "tokenId": "10861802947610899379330568332287100318869035186187733531205554992019689450318",
+        "receivedAt": "2026-09-05T05:35:12.528Z",
+        "timestamp": "1788586509134",
+        "minOrderSize": 5,
+        "tickSize": 0.01,
+        "lastTradePrice": 0.24,
+        "bestBid": 0.23,
+        "bestAsk": 0.24,
+        "spread": 0.01,
+        "spreadTicks": 1,
+        "topBidShares": 1066.78,
+        "topAskShares": 152.48,
+        "topBidUsd": 245.36,
+        "topAskUsd": 36.6,
+        "bidDepth1cUsd": 660.08,
+        "bidDepth2cUsd": 1911.21,
+        "askDepth2cUsd": 290.94,
+        "bestTenBids": [
+          {
+            "price": 0.23,
+            "size": 1066.78
+          },
+          {
+            "price": 0.22,
+            "size": 1885.08
+          },
+          {
+            "price": 0.21,
+            "size": 5957.79
+          },
+          {
+            "price": 0.2,
+            "size": 5206.91
+          },
+          {
+            "price": 0.19,
+            "size": 2110.97
+          },
+          {
+            "price": 0.18,
+            "size": 3145.07
+          },
+          {
+            "price": 0.17,
+            "size": 2162.99
+          },
+          {
+            "price": 0.16,
+            "size": 50
+          },
+          {
+            "price": 0.15,
+            "size": 1902
+          },
+          {
+            "price": 0.14,
+            "size": 320
+          }
+        ],
+        "bestTenAsks": [
+          {
+            "price": 0.24,
+            "size": 152.48
+          },
+          {
+            "price": 0.25,
+            "size": 19.99
+          },
+          {
+            "price": 0.26,
+            "size": 959.04
+          },
+          {
+            "price": 0.27,
+            "size": 1649.69
+          },
+          {
+            "price": 0.31,
+            "size": 741.44
+          },
+          {
+            "price": 0.32,
+            "size": 1175.99
+          },
+          {
+            "price": 0.34,
+            "size": 10
+          },
+          {
+            "price": 0.35,
+            "size": 5
+          },
+          {
+            "price": 0.36,
+            "size": 5
+          },
+          {
+            "price": 0.37,
+            "size": 505
+          }
+        ]
+      },
+      "trades": {
+        "takerOnly": true,
+        "requestedWindowHours": 24,
+        "returnedRows": 1000,
+        "truncatedAt1000": true,
+        "newestTradeAt": "2026-09-05T05:13:43.000Z",
+        "oldestTradeAt": "2026-09-04T17:36:48.000Z",
+        "last15m": {
+          "rows": 0,
+          "shares": 0,
+          "notionalUsd": 0
+        },
+        "last1h": {
+          "rows": 2,
+          "shares": 48.4,
+          "notionalUsd": 15.11
+        },
+        "last24h": {
+          "rows": 1000,
+          "shares": 261113.28,
+          "notionalUsd": 126626.04
+        },
+        "byToken": [
+          {
+            "tokenId": "10861802947610899379330568332287100318869035186187733531205554992019689450318",
+            "rows": 514,
+            "shares": 155526.72,
+            "notionalUsd": 56753.57,
+            "buyRows": 319,
+            "sellRows": 195
+          },
+          {
+            "tokenId": "39319769648132414476170103739900770633009012502056309868976886150530270219889",
+            "rows": 486,
+            "shares": 105586.57,
+            "notionalUsd": 69872.47,
+            "buyRows": 299,
+            "sellRows": 187
+          }
+        ],
+        "recentRows": [
+          {
+            "timestamp": 1788585223,
+            "tokenId": "10861802947610899379330568332287100318869035186187733531205554992019689450318",
+            "outcome": "Yes",
+            "side": "BUY",
+            "size": 41.666665,
+            "price": 0.2399999856
+          },
+          {
+            "timestamp": 1788583057,
+            "tokenId": "39319769648132414476170103739900770633009012502056309868976886150530270219889",
+            "outcome": "No",
+            "side": "SELL",
+            "size": 6.73,
+            "price": 0.76
+          },
+          {
+            "timestamp": 1788582112,
+            "tokenId": "10861802947610899379330568332287100318869035186187733531205554992019689450318",
+            "outcome": "Yes",
+            "side": "BUY",
+            "size": 41,
+            "price": 0.24
+          },
+          {
+            "timestamp": 1788581880,
+            "tokenId": "39319769648132414476170103739900770633009012502056309868976886150530270219889",
+            "outcome": "No",
+            "side": "BUY",
+            "size": 12.65,
+            "price": 0.78
+          },
+          {
+            "timestamp": 1788581866,
+            "tokenId": "10861802947610899379330568332287100318869035186187733531205554992019689450318",
+            "outcome": "Yes",
+            "side": "BUY",
+            "size": 50,
+            "price": 0.24
+          },
+          {
+            "timestamp": 1788581727,
+            "tokenId": "10861802947610899379330568332287100318869035186187733531205554992019689450318",
+            "outcome": "Yes",
+            "side": "BUY",
+            "size": 430.625,
+            "price": 0.2322206096
+          },
+          {
+            "timestamp": 1788579729,
+            "tokenId": "10861802947610899379330568332287100318869035186187733531205554992019689450318",
+            "outcome": "Yes",
+            "side": "BUY",
+            "size": 1216.56625,
+            "price": 0.2367318673
+          },
+          {
+            "timestamp": 1788579436,
+            "tokenId": "10861802947610899379330568332287100318869035186187733531205554992019689450318",
+            "outcome": "Yes",
+            "side": "BUY",
+            "size": 4.347825,
+            "price": 0.2299998275
+          },
+          {
+            "timestamp": 1788578989,
+            "tokenId": "39319769648132414476170103739900770633009012502056309868976886150530270219889",
+            "outcome": "No",
+            "side": "SELL",
+            "size": 11.6,
+            "price": 0.7783103448
+          },
+          {
+            "timestamp": 1788578979,
+            "tokenId": "39319769648132414476170103739900770633009012502056309868976886150530270219889",
+            "outcome": "No",
+            "side": "SELL",
+            "size": 30.35,
+            "price": 0.78
+          },
+          {
+            "timestamp": 1788578943,
+            "tokenId": "39319769648132414476170103739900770633009012502056309868976886150530270219889",
+            "outcome": "No",
+            "side": "SELL",
+            "size": 17.26,
+            "price": 0.78
+          },
+          {
+            "timestamp": 1788578943,
+            "tokenId": "39319769648132414476170103739900770633009012502056309868976886150530270219889",
+            "outcome": "No",
+            "side": "SELL",
+            "size": 2,
+            "price": 0.78
+          },
+          {
+            "timestamp": 1788578940,
+            "tokenId": "10861802947610899379330568332287100318869035186187733531205554992019689450318",
+            "outcome": "Yes",
+            "side": "SELL",
+            "size": 1779.49,
+            "price": 0.2039830513
+          },
+          {
+            "timestamp": 1788577899,
+            "tokenId": "39319769648132414476170103739900770633009012502056309868976886150530270219889",
+            "outcome": "No",
+            "side": "BUY",
+            "size": 2.531644,
+            "price": 0.7899996998
+          },
+          {
+            "timestamp": 1788577899,
+            "tokenId": "10861802947610899379330568332287100318869035186187733531205554992019689450318",
+            "outcome": "Yes",
+            "side": "SELL",
+            "size": 45.36,
+            "price": 0.22
+          },
+          {
+            "timestamp": 1788577881,
+            "tokenId": "10861802947610899379330568332287100318869035186187733531205554992019689450318",
+            "outcome": "Yes",
+            "side": "BUY",
+            "size": 8,
+            "price": 0.24
+          },
+          {
+            "timestamp": 1788577864,
+            "tokenId": "39319769648132414476170103739900770633009012502056309868976886150530270219889",
+            "outcome": "No",
+            "side": "BUY",
+            "size": 10402.02,
+            "price": 0.7662285498
+          },
+          {
+            "timestamp": 1788577864,
+            "tokenId": "39319769648132414476170103739900770633009012502056309868976886150530270219889",
+            "outcome": "No",
+            "side": "BUY",
+            "size": 9,
+            "price": 0.78
+          },
+          {
+            "timestamp": 1788574966,
+            "tokenId": "39319769648132414476170103739900770633009012502056309868976886150530270219889",
+            "outcome": "No",
+            "side": "SELL",
+            "size": 87.62,
+            "price": 0.74
+          },
+          {
+            "timestamp": 1788574966,
+            "tokenId": "10861802947610899379330568332287100318869035186187733531205554992019689450318",
+            "outcome": "Yes",
+            "side": "SELL",
+            "size": 112.38,
+            "price": 0.26
+          }
+        ]
+      },
+      "illustration": {
+        "label": "Conditional arithmetic only: same share count on both outcomes must fill; no fill probability or realized return assumed.",
+        "pairBuyCostAtCurrentBids": 0.99,
+        "grossPayoffMinusCostPerCompletedPair": 0.01,
+        "rewardMinimumPairBuyCostUsd": 198,
+        "ticket20UsdShareCountYes": 86.95,
+        "ticket20UsdShareCountNo": 26.31
+      }
+    },
+    {
+      "inputIdentity": {
+        "id": "908713"
+      },
+      "group": "existing-mm",
+      "errors": [],
+      "market": {
+        "id": "908713",
+        "conditionId": "0x80b3af88cb991980e8da1ce86b9794a0957f96ec98c29319dd7ba65e9744d82b",
+        "question": "Fed rate hike in 2026?",
+        "slug": "fed-rate-hike-in-2026",
+        "url": "https://polymarket.com/market/fed-rate-hike-in-2026",
+        "endDate": "2026-12-09T00:00:00Z",
+        "active": true,
+        "closed": false,
+        "archived": false,
+        "acceptingOrders": true,
+        "enableOrderBook": true,
+        "sportsMetadataPresent": false,
+        "category": null,
+        "feeType": "economics_fees",
+        "eventIds": [],
+        "volume24hUsd": 237603.96265,
+        "liquidityReportedUsd": 191750.7423,
+        "minOrderSize": 5,
+        "tickSize": 0.01,
+        "negRisk": false,
+        "feesEnabled": true,
+        "feeSchedule": {
+          "exponent": 1,
+          "rate": 0.05,
+          "takerOnly": true,
+          "rebateRate": 0.25
+        },
+        "rewardsMinSize": 100,
+        "rewardsMaxSpreadCents": 4.5,
+        "currentRewardAllocations": [
+          {
+            "id": "1074613",
+            "conditionId": "0x80b3af88cb991980e8da1ce86b9794a0957f96ec98c29319dd7ba65e9744d82b",
+            "assetAddress": "0x2791Bca1f2de4661ED88A30C99A7a9449Aa84174",
+            "rewardsAmount": 0,
+            "rewardsDailyRate": 500,
+            "startDate": "2026-09-04",
+            "endDate": "2500-12-31"
+          }
+        ],
+        "currentRewardDailyRate": 500
+      },
+      "no": {
+        "tokenId": "93005850938352995663334573245996733794924636935158112548608169054144721737755",
+        "receivedAt": "2026-09-05T05:35:12.946Z",
+        "timestamp": "1788586479042",
+        "minOrderSize": 5,
+        "tickSize": 0.01,
+        "lastTradePrice": 0.72,
+        "bestBid": 0.28,
+        "bestAsk": 0.29,
+        "spread": 0.01,
+        "spreadTicks": 1,
+        "topBidShares": 27733.59,
+        "topAskShares": 992.63,
+        "topBidUsd": 7765.41,
+        "topAskUsd": 287.86,
+        "bidDepth1cUsd": 10545.33,
+        "bidDepth2cUsd": 71395.01,
+        "askDepth2cUsd": 19482.8,
+        "bestTenBids": [
+          {
+            "price": 0.28,
+            "size": 27733.59
+          },
+          {
+            "price": 0.27,
+            "size": 10296.02
+          },
+          {
+            "price": 0.26,
+            "size": 234037.22
+          },
+          {
+            "price": 0.25,
+            "size": 19958
+          },
+          {
+            "price": 0.23,
+            "size": 509.99
+          },
+          {
+            "price": 0.22,
+            "size": 516.14
+          },
+          {
+            "price": 0.21,
+            "size": 225
+          },
+          {
+            "price": 0.2,
+            "size": 500
+          },
+          {
+            "price": 0.16,
+            "size": 2890.81
+          },
+          {
+            "price": 0.15,
+            "size": 2564.04
+          }
+        ],
+        "bestTenAsks": [
+          {
+            "price": 0.29,
+            "size": 992.63
+          },
+          {
+            "price": 0.3,
+            "size": 2166.29
+          },
+          {
+            "price": 0.31,
+            "size": 59822.75
+          },
+          {
+            "price": 0.32,
+            "size": 2590.86
+          },
+          {
+            "price": 0.33,
+            "size": 226
+          },
+          {
+            "price": 0.34,
+            "size": 378
+          },
+          {
+            "price": 0.35,
+            "size": 420
+          },
+          {
+            "price": 0.36,
+            "size": 325
+          },
+          {
+            "price": 0.37,
+            "size": 110
+          },
+          {
+            "price": 0.38,
+            "size": 657
+          }
+        ]
+      },
+      "clobInfo": {
+        "r": {
+          "mi": 100,
+          "ma": 4.5,
+          "e": true,
+          "moas": 4
+        },
+        "t": [
+          {
+            "t": "75028752776148090296091099469912621384650554615761384992997579209329182670110",
+            "o": "Yes"
+          },
+          {
+            "t": "93005850938352995663334573245996733794924636935158112548608169054144721737755",
+            "o": "No"
+          }
+        ],
+        "c": "0x80b3af88cb991980e8da1ce86b9794a0957f96ec98c29319dd7ba65e9744d82b",
+        "mos": 5,
+        "mts": 0.01,
+        "mbf": 1000,
+        "tbf": 1000,
+        "ao": true,
+        "cbos": true,
+        "aot": "2025-12-10T21:10:04Z",
+        "ibce": true,
+        "fd": {
+          "r": 0.05,
+          "e": 1,
+          "to": true
+        },
+        "v": "v1"
+      },
+      "yes": {
+        "tokenId": "75028752776148090296091099469912621384650554615761384992997579209329182670110",
+        "receivedAt": "2026-09-05T05:35:12.997Z",
+        "timestamp": "1788586479042",
+        "minOrderSize": 5,
+        "tickSize": 0.01,
+        "lastTradePrice": 0.72,
+        "bestBid": 0.71,
+        "bestAsk": 0.72,
+        "spread": 0.01,
+        "spreadTicks": 1,
+        "topBidShares": 992.63,
+        "topAskShares": 27733.59,
+        "topBidUsd": 704.77,
+        "topAskUsd": 19968.18,
+        "bidDepth1cUsd": 2221.17,
+        "bidDepth2cUsd": 43498.87,
+        "askDepth2cUsd": 200671.82,
+        "bestTenBids": [
+          {
+            "price": 0.71,
+            "size": 992.63
+          },
+          {
+            "price": 0.7,
+            "size": 2166.29
+          },
+          {
+            "price": 0.69,
+            "size": 59822.75
+          },
+          {
+            "price": 0.68,
+            "size": 2590.86
+          },
+          {
+            "price": 0.67,
+            "size": 226
+          },
+          {
+            "price": 0.66,
+            "size": 378
+          },
+          {
+            "price": 0.65,
+            "size": 420
+          },
+          {
+            "price": 0.64,
+            "size": 325
+          },
+          {
+            "price": 0.63,
+            "size": 110
+          },
+          {
+            "price": 0.62,
+            "size": 657
+          }
+        ],
+        "bestTenAsks": [
+          {
+            "price": 0.72,
+            "size": 27733.59
+          },
+          {
+            "price": 0.73,
+            "size": 10296.02
+          },
+          {
+            "price": 0.74,
+            "size": 234037.22
+          },
+          {
+            "price": 0.75,
+            "size": 19958
+          },
+          {
+            "price": 0.77,
+            "size": 509.99
+          },
+          {
+            "price": 0.78,
+            "size": 516.14
+          },
+          {
+            "price": 0.79,
+            "size": 225
+          },
+          {
+            "price": 0.8,
+            "size": 500
+          },
+          {
+            "price": 0.84,
+            "size": 2890.81
+          },
+          {
+            "price": 0.85,
+            "size": 2564.04
+          }
+        ]
+      },
+      "trades": {
+        "takerOnly": true,
+        "requestedWindowHours": 24,
+        "returnedRows": 145,
+        "truncatedAt1000": false,
+        "newestTradeAt": "2026-09-05T05:26:40.000Z",
+        "oldestTradeAt": "2026-09-04T05:43:13.000Z",
+        "last15m": {
+          "rows": 1,
+          "shares": 6.94,
+          "notionalUsd": 5
+        },
+        "last1h": {
+          "rows": 3,
+          "shares": 33.89,
+          "notionalUsd": 15.8
+        },
+        "last24h": {
+          "rows": 145,
+          "shares": 237610.91,
+          "notionalUsd": 62853.58
+        },
+        "byToken": [
+          {
+            "tokenId": "75028752776148090296091099469912621384650554615761384992997579209329182670110",
+            "rows": 46,
+            "shares": 24057.02,
+            "notionalUsd": 16977.08,
+            "buyRows": 24,
+            "sellRows": 22
+          },
+          {
+            "tokenId": "93005850938352995663334573245996733794924636935158112548608169054144721737755",
+            "rows": 99,
+            "shares": 213553.89,
+            "notionalUsd": 45876.5,
+            "buyRows": 57,
+            "sellRows": 42
+          }
+        ],
+        "recentRows": [
+          {
+            "timestamp": 1788586000,
+            "tokenId": "75028752776148090296091099469912621384650554615761384992997579209329182670110",
+            "outcome": "Yes",
+            "side": "BUY",
+            "size": 6.944443,
+            "price": 0.7199998618
+          },
+          {
+            "timestamp": 1788583768,
+            "tokenId": "93005850938352995663334573245996733794924636935158112548608169054144721737755",
+            "outcome": "No",
+            "side": "BUY",
+            "size": 20,
+            "price": 0.29
+          },
+          {
+            "timestamp": 1788583429,
+            "tokenId": "75028752776148090296091099469912621384650554615761384992997579209329182670110",
+            "outcome": "Yes",
+            "side": "BUY",
+            "size": 6.944443,
+            "price": 0.7199998618
+          },
+          {
+            "timestamp": 1788582601,
+            "tokenId": "93005850938352995663334573245996733794924636935158112548608169054144721737755",
+            "outcome": "No",
+            "side": "BUY",
+            "size": 63.59,
+            "price": 0.29
+          },
+          {
+            "timestamp": 1788582408,
+            "tokenId": "93005850938352995663334573245996733794924636935158112548608169054144721737755",
+            "outcome": "No",
+            "side": "BUY",
+            "size": 333.620688,
+            "price": 0.2899999984
+          },
+          {
+            "timestamp": 1788582243,
+            "tokenId": "75028752776148090296091099469912621384650554615761384992997579209329182670110",
+            "outcome": "Yes",
+            "side": "BUY",
+            "size": 6.944443,
+            "price": 0.7199998618
+          },
+          {
+            "timestamp": 1788581607,
+            "tokenId": "75028752776148090296091099469912621384650554615761384992997579209329182670110",
+            "outcome": "Yes",
+            "side": "BUY",
+            "size": 9.722221,
+            "price": 0.7199999877
+          },
+          {
+            "timestamp": 1788581140,
+            "tokenId": "75028752776148090296091099469912621384650554615761384992997579209329182670110",
+            "outcome": "Yes",
+            "side": "SELL",
+            "size": 1.41,
+            "price": 0.71
+          },
+          {
+            "timestamp": 1788578154,
+            "tokenId": "93005850938352995663334573245996733794924636935158112548608169054144721737755",
+            "outcome": "No",
+            "side": "BUY",
+            "size": 257.15,
+            "price": 0.29
+          },
+          {
+            "timestamp": 1788575551,
+            "tokenId": "75028752776148090296091099469912621384650554615761384992997579209329182670110",
+            "outcome": "Yes",
+            "side": "SELL",
+            "size": 2.85,
+            "price": 0.71
+          },
+          {
+            "timestamp": 1788575121,
+            "tokenId": "75028752776148090296091099469912621384650554615761384992997579209329182670110",
+            "outcome": "Yes",
+            "side": "SELL",
+            "size": 460,
+            "price": 0.71
+          },
+          {
+            "timestamp": 1788567621,
+            "tokenId": "75028752776148090296091099469912621384650554615761384992997579209329182670110",
+            "outcome": "Yes",
+            "side": "SELL",
+            "size": 298.5,
+            "price": 0.71
+          },
+          {
+            "timestamp": 1788561475,
+            "tokenId": "93005850938352995663334573245996733794924636935158112548608169054144721737755",
+            "outcome": "No",
+            "side": "SELL",
+            "size": 100.56,
+            "price": 0.28
+          },
+          {
+            "timestamp": 1788548634,
+            "tokenId": "75028752776148090296091099469912621384650554615761384992997579209329182670110",
+            "outcome": "Yes",
+            "side": "BUY",
+            "size": 2.777776,
+            "price": 0.7199997408
+          },
+          {
+            "timestamp": 1788543283,
+            "tokenId": "93005850938352995663334573245996733794924636935158112548608169054144721737755",
+            "outcome": "No",
+            "side": "SELL",
+            "size": 8792.28,
+            "price": 0.28
+          },
+          {
+            "timestamp": 1788542809,
+            "tokenId": "93005850938352995663334573245996733794924636935158112548608169054144721737755",
+            "outcome": "No",
+            "side": "BUY",
+            "size": 500,
+            "price": 0.29
+          },
+          {
+            "timestamp": 1788542577,
+            "tokenId": "93005850938352995663334573245996733794924636935158112548608169054144721737755",
+            "outcome": "No",
+            "side": "BUY",
+            "size": 125.13,
+            "price": 0.29
+          },
+          {
+            "timestamp": 1788541627,
+            "tokenId": "75028752776148090296091099469912621384650554615761384992997579209329182670110",
+            "outcome": "Yes",
+            "side": "SELL",
+            "size": 30.3,
+            "price": 0.71
+          },
+          {
+            "timestamp": 1788541191,
+            "tokenId": "93005850938352995663334573245996733794924636935158112548608169054144721737755",
+            "outcome": "No",
+            "side": "BUY",
+            "size": 50,
+            "price": 0.29
+          },
+          {
+            "timestamp": 1788541002,
+            "tokenId": "75028752776148090296091099469912621384650554615761384992997579209329182670110",
+            "outcome": "Yes",
+            "side": "BUY",
+            "size": 13.222221,
+            "price": 0.7199999909
+          }
+        ]
+      },
+      "illustration": {
+        "label": "Conditional arithmetic only: same share count on both outcomes must fill; no fill probability or realized return assumed.",
+        "pairBuyCostAtCurrentBids": 0.99,
+        "grossPayoffMinusCostPerCompletedPair": 0.01,
+        "rewardMinimumPairBuyCostUsd": 99,
+        "ticket20UsdShareCountYes": 28.16,
+        "ticket20UsdShareCountNo": 71.42
+      }
+    }
+  ],
+  "requests": [
+    {
+      "url": "https://gamma-api.polymarket.com/markets/2252244",
+      "attempt": 1,
+      "status": 200,
+      "fetchedAt": "2026-09-05T05:35:12.246Z",
+      "elapsedMs": 140
+    },
+    {
+      "url": "https://gamma-api.polymarket.com/markets/1163699",
+      "attempt": 1,
+      "status": 200,
+      "fetchedAt": "2026-09-05T05:35:12.248Z",
+      "elapsedMs": 177
+    },
+    {
+      "url": "https://gamma-api.polymarket.com/markets/2243896",
+      "attempt": 1,
+      "status": 200,
+      "fetchedAt": "2026-09-05T05:35:12.255Z",
+      "elapsedMs": 148
+    },
+    {
+      "url": "https://clob.polymarket.com/clob-markets/0x9cb23d04b2ded06147482076688b69b487a8d982c63ebdda2ab3678cf27cf390",
+      "attempt": 1,
+      "status": 200,
+      "fetchedAt": "2026-09-05T05:35:12.501Z",
+      "elapsedMs": 249
+    },
+    {
+      "url": "https://clob.polymarket.com/book?token_id=97050921740416192996389806693742575608111328819185493163189880975611314813724",
+      "attempt": 1,
+      "status": 200,
+      "fetchedAt": "2026-09-05T05:35:12.502Z",
+      "elapsedMs": 252
+    },
+    {
+      "url": "https://clob.polymarket.com/book?token_id=39319769648132414476170103739900770633009012502056309868976886150530270219889",
+      "attempt": 1,
+      "status": 200,
+      "fetchedAt": "2026-09-05T05:35:12.507Z",
+      "elapsedMs": 252
+    },
+    {
+      "url": "https://clob.polymarket.com/book?token_id=35198549486569600595408965368290795524428922595732253580266052028158040373233",
+      "attempt": 1,
+      "status": 200,
+      "fetchedAt": "2026-09-05T05:35:12.508Z",
+      "elapsedMs": 256
+    },
+    {
+      "url": "https://clob.polymarket.com/book?token_id=5615282760875985231868508008056959876238536896643315063916840237042205273721",
+      "attempt": 1,
+      "status": 200,
+      "fetchedAt": "2026-09-05T05:35:12.512Z",
+      "elapsedMs": 263
+    },
+    {
+      "url": "https://clob.polymarket.com/clob-markets/0xa3b36b2d6104d34af4e6c6215fc818e43352e78a748fbfb0b85e3a35f71dec9a",
+      "attempt": 1,
+      "status": 200,
+      "fetchedAt": "2026-09-05T05:35:12.520Z",
+      "elapsedMs": 270
+    },
+    {
+      "url": "https://clob.polymarket.com/clob-markets/0x6c3f1009a0c91ba9f7aae44aeadf86863b0d433b60f7a090fd00c945019aa32f",
+      "attempt": 1,
+      "status": 200,
+      "fetchedAt": "2026-09-05T05:35:12.523Z",
+      "elapsedMs": 267
+    },
+    {
+      "url": "https://clob.polymarket.com/book?token_id=10861802947610899379330568332287100318869035186187733531205554992019689450318",
+      "attempt": 1,
+      "status": 200,
+      "fetchedAt": "2026-09-05T05:35:12.526Z",
+      "elapsedMs": 271
+    },
+    {
+      "url": "https://clob.polymarket.com/book?token_id=29633826701713552120011280893309822625942861174174976276686142480636225243753",
+      "attempt": 1,
+      "status": 200,
+      "fetchedAt": "2026-09-05T05:35:12.571Z",
+      "elapsedMs": 319
+    },
+    {
+      "url": "https://data-api.polymarket.com/trades?market=0xa3b36b2d6104d34af4e6c6215fc818e43352e78a748fbfb0b85e3a35f71dec9a&takerOnly=true&start=1788500112&end=1788586512&limit=1000",
+      "attempt": 1,
+      "status": 200,
+      "fetchedAt": "2026-09-05T05:35:12.624Z",
+      "elapsedMs": 373
+    },
+    {
+      "url": "https://data-api.polymarket.com/trades?market=0x9cb23d04b2ded06147482076688b69b487a8d982c63ebdda2ab3678cf27cf390&takerOnly=true&start=1788500112&end=1788586512&limit=1000",
+      "attempt": 1,
+      "status": 200,
+      "fetchedAt": "2026-09-05T05:35:12.631Z",
+      "elapsedMs": 378
+    },
+    {
+      "url": "https://data-api.polymarket.com/trades?market=0x6c3f1009a0c91ba9f7aae44aeadf86863b0d433b60f7a090fd00c945019aa32f&takerOnly=true&start=1788500112&end=1788586512&limit=1000",
+      "attempt": 1,
+      "status": 200,
+      "fetchedAt": "2026-09-05T05:35:12.653Z",
+      "elapsedMs": 397
+    },
+    {
+      "url": "https://gamma-api.polymarket.com/markets/908713",
+      "attempt": 1,
+      "status": 200,
+      "fetchedAt": "2026-09-05T05:35:12.766Z",
+      "elapsedMs": 80
+    },
+    {
+      "url": "https://clob.polymarket.com/book?token_id=93005850938352995663334573245996733794924636935158112548608169054144721737755",
+      "attempt": 1,
+      "status": 200,
+      "fetchedAt": "2026-09-05T05:35:12.945Z",
+      "elapsedMs": 178
+    },
+    {
+      "url": "https://clob.polymarket.com/clob-markets/0x80b3af88cb991980e8da1ce86b9794a0957f96ec98c29319dd7ba65e9744d82b",
+      "attempt": 1,
+      "status": 200,
+      "fetchedAt": "2026-09-05T05:35:12.949Z",
+      "elapsedMs": 182
+    },
+    {
+      "url": "https://clob.polymarket.com/book?token_id=75028752776148090296091099469912621384650554615761384992997579209329182670110",
+      "attempt": 1,
+      "status": 200,
+      "fetchedAt": "2026-09-05T05:35:12.996Z",
+      "elapsedMs": 230
+    },
+    {
+      "url": "https://data-api.polymarket.com/trades?market=0x80b3af88cb991980e8da1ce86b9794a0957f96ec98c29319dd7ba65e9744d82b&takerOnly=true&start=1788500112&end=1788586512&limit=1000",
+      "attempt": 1,
+      "status": 200,
+      "fetchedAt": "2026-09-05T05:35:13.023Z",
+      "elapsedMs": 256
+    }
+  ]
+}

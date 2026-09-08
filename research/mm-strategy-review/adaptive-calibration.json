@@ -1,0 +1,316 @@
+{
+  "source": "/Users/jordanolmstead/dev/classy-cassie/research/mm-strategy-review/graph-oos-refresh/graph-reference-marks.parquet",
+  "as_of": "2026-09-05 05:32:46.258285+00:00",
+  "verified_initial_q_rows": 992,
+  "protocol": {
+    "split": "One preselected chronological70/30 split per horizon after timing-valid/mature/prior-RV availability filters.",
+    "embargo": "Discard training examples whose outcome horizon reaches or crosses the first test timestamp.",
+    "target": "Absolute endpoint reference-price move in pp, not realized path volatility or maker return.",
+    "baseline": "Weighted linear least squares: prior24hRV, initial price bucket, category, log(1+hours to close).",
+    "augmentation": "Add only the absolute initial Q-reference-price gap, linearly per10pp; no parameter search.",
+    "weighting": "Each event equal total weight; within event each market equal; within market each forecast equal.",
+    "prediction_bounds": "Clip both models to [0,100*max(entryprice,1-entryprice)] using only known entry information.",
+    "primary_metric": "Event-weighted holdout MAE; RMSE secondary. Difference CI resamples paired holdout events.",
+    "seed": 20260905
+  },
+  "horizons": {
+    "1h": {
+      "split": {
+        "test_start": "2026-09-03 16:13:32.060000+00:00",
+        "training_first": "2026-08-31 10:39:44.400000+00:00",
+        "training_last": "2026-09-03 12:00:19.492000+00:00",
+        "training_last_label_available": "2026-09-03 13:00:19.492000+00:00",
+        "test_last": "2026-09-05 04:32:25.739000+00:00",
+        "training_observations": 522,
+        "embargoed_observations": 0,
+        "test_observations": 225,
+        "training_markets": 264,
+        "training_events": 175,
+        "test_markets": 159,
+        "test_events": 74,
+        "test_markets_previously_in_training": 60,
+        "test_events_previously_in_training": 40
+      },
+      "baseline": {
+        "event_weighted_mae_pp": 4.127149565553241,
+        "event_weighted_rmse_pp": 8.027566849214374,
+        "event_weighted_actual_mean_abs_move_pp": 4.2662518768768765,
+        "event_weighted_predicted_mean_abs_move_pp": 3.1411886512123894,
+        "event_weighted_underprediction_by_over_5pp_fraction": 0.13412162162162164
+      },
+      "baseline_plus_gap": {
+        "event_weighted_mae_pp": 4.050071948332814,
+        "event_weighted_rmse_pp": 7.904740180998522,
+        "event_weighted_actual_mean_abs_move_pp": 4.2662518768768765,
+        "event_weighted_predicted_mean_abs_move_pp": 3.1303772807753436,
+        "event_weighted_underprediction_by_over_5pp_fraction": 0.13412162162162164
+      },
+      "paired_holdout_comparison": {
+        "augmented_minus_baseline_mae_pp": -0.07707761722042739,
+        "paired_event_bootstrap_ci95_pp": [
+          -0.14436229227971026,
+          -0.01150053841938057
+        ],
+        "event_count": 74,
+        "bootstrap_repetitions": 2000,
+        "sign_convention": "Negative means adding gap improved MAE."
+      },
+      "baseline_fit": {
+        "coefficients": {
+          "intercept": 8.546428532456549,
+          "prior_rv24_per_10pp": 0.9316617985918872,
+          "log1p_hours_to_close": -0.6074989238847304,
+          "price_bucket=(0.2, 0.4]": -0.24755494990505233,
+          "price_bucket=(0.4, 0.6]": 0.046386019294466035,
+          "price_bucket=(0.6, 0.8]": -0.24045285498864155,
+          "price_bucket=(0.8, 1.0]": -0.5604882203310692,
+          "category=Economics": -5.406651970475456,
+          "category=Entertainment": -3.6305428320354194,
+          "category=Equities": -8.793639401830378,
+          "category=Geopolitics": -4.399755143184476,
+          "category=Global Elections": -5.157745912151751,
+          "category=Politics": -5.322300895954285,
+          "category=Science & Tech": -4.939307617341202,
+          "category=Unknown": 0.895351535620925
+        },
+        "rank": 15,
+        "features": 15,
+        "unseen_test_levels": {
+          "price_bucket": 0,
+          "category": 0
+        },
+        "negative_predictions_before_clipping": 53,
+        "above_feasible_range_before_clipping": 0
+      },
+      "baseline_plus_gap_fit": {
+        "coefficients": {
+          "intercept": 8.086030536088904,
+          "prior_rv24_per_10pp": 0.9233649445062674,
+          "log1p_hours_to_close": -0.6040991289539458,
+          "price_bucket=(0.2, 0.4]": -0.3895025130306877,
+          "price_bucket=(0.4, 0.6]": -0.2891843112637457,
+          "price_bucket=(0.6, 0.8]": -0.5181785948515885,
+          "price_bucket=(0.8, 1.0]": -0.5072031225097207,
+          "category=Economics": -5.456449918134294,
+          "category=Entertainment": -3.538777651371506,
+          "category=Equities": -9.59721187013747,
+          "category=Geopolitics": -4.566803347651702,
+          "category=Global Elections": -5.180307961391649,
+          "category=Politics": -5.081987792065827,
+          "category=Science & Tech": -4.921362212997025,
+          "category=Unknown": 1.1369009080704089,
+          "gap_per_10pp": 0.6821999489392644
+        },
+        "rank": 16,
+        "features": 16,
+        "unseen_test_levels": {
+          "price_bucket": 0,
+          "category": 0
+        },
+        "negative_predictions_before_clipping": 64,
+        "above_feasible_range_before_clipping": 0
+      }
+    },
+    "6h": {
+      "split": {
+        "test_start": "2026-09-03 07:44:21.427000+00:00",
+        "training_first": "2026-08-31 10:39:44.400000+00:00",
+        "training_last": "2026-09-03 00:51:28.299000+00:00",
+        "training_last_label_available": "2026-09-03 06:51:28.299000+00:00",
+        "test_last": "2026-09-04 22:48:15.167000+00:00",
+        "training_observations": 487,
+        "embargoed_observations": 10,
+        "test_observations": 214,
+        "training_markets": 256,
+        "training_events": 169,
+        "test_markets": 146,
+        "test_events": 71,
+        "test_markets_previously_in_training": 62,
+        "test_events_previously_in_training": 39
+      },
+      "baseline": {
+        "event_weighted_mae_pp": 7.029193747800469,
+        "event_weighted_rmse_pp": 10.52860576321667,
+        "event_weighted_actual_mean_abs_move_pp": 7.348333333333334,
+        "event_weighted_predicted_mean_abs_move_pp": 7.915675173367617,
+        "event_weighted_underprediction_by_over_5pp_fraction": 0.15347417840375588
+      },
+      "baseline_plus_gap": {
+        "event_weighted_mae_pp": 7.069302471468868,
+        "event_weighted_rmse_pp": 10.527729273557119,
+        "event_weighted_actual_mean_abs_move_pp": 7.348333333333334,
+        "event_weighted_predicted_mean_abs_move_pp": 7.964395039647085,
+        "event_weighted_underprediction_by_over_5pp_fraction": 0.14995305164319248
+      },
+      "paired_holdout_comparison": {
+        "augmented_minus_baseline_mae_pp": 0.040108723668399605,
+        "paired_event_bootstrap_ci95_pp": [
+          -0.017173145242054867,
+          0.09673950093628436
+        ],
+        "event_count": 71,
+        "bootstrap_repetitions": 2000,
+        "sign_convention": "Negative means adding gap improved MAE."
+      },
+      "baseline_fit": {
+        "coefficients": {
+          "intercept": 13.967164481308147,
+          "prior_rv24_per_10pp": 1.4203961011787174,
+          "log1p_hours_to_close": -2.4054493804343897,
+          "price_bucket=(0.2, 0.4]": 3.5460682140528554,
+          "price_bucket=(0.4, 0.6]": 4.322358874948558,
+          "price_bucket=(0.6, 0.8]": 3.3404801368117605,
+          "price_bucket=(0.8, 1.0]": -1.4787902604270935,
+          "category=Economics": -1.9187156493679292,
+          "category=Entertainment": 0.6659106206419639,
+          "category=Equities": -11.415362813597504,
+          "category=Geopolitics": 4.161800754966897,
+          "category=Global Elections": -2.1901671236745974,
+          "category=Politics": 1.3287441249880823,
+          "category=Science & Tech": 7.202877952169523,
+          "category=Unknown": 0.5603705500667023
+        },
+        "rank": 15,
+        "features": 15,
+        "unseen_test_levels": {
+          "price_bucket": 0,
+          "category": 0
+        },
+        "negative_predictions_before_clipping": 31,
+        "above_feasible_range_before_clipping": 0
+      },
+      "baseline_plus_gap_fit": {
+        "coefficients": {
+          "intercept": 14.331963382927512,
+          "prior_rv24_per_10pp": 1.4253957916632884,
+          "log1p_hours_to_close": -2.406250153868337,
+          "price_bucket=(0.2, 0.4]": 3.6268194006270824,
+          "price_bucket=(0.4, 0.6]": 4.569808514269472,
+          "price_bucket=(0.6, 0.8]": 3.5074002389844754,
+          "price_bucket=(0.8, 1.0]": -1.5484409036799958,
+          "category=Economics": -1.882754854700486,
+          "category=Entertainment": 0.5871423179792902,
+          "category=Equities": -10.829628749227163,
+          "category=Geopolitics": 4.25968970641508,
+          "category=Global Elections": -2.1826142773668455,
+          "category=Politics": 1.0657001585080834,
+          "category=Science & Tech": 7.180481716779603,
+          "category=Unknown": 0.3848636057956467,
+          "gap_per_10pp": -0.5064933838097555
+        },
+        "rank": 16,
+        "features": 16,
+        "unseen_test_levels": {
+          "price_bucket": 0,
+          "category": 0
+        },
+        "negative_predictions_before_clipping": 31,
+        "above_feasible_range_before_clipping": 0
+      }
+    },
+    "24h": {
+      "split": {
+        "test_start": "2026-09-02 23:43:31.848000+00:00",
+        "training_first": "2026-08-31 10:41:55.098000+00:00",
+        "training_last": "2026-09-01 18:24:04.707000+00:00",
+        "training_last_label_available": "2026-09-02 18:24:04.707000+00:00",
+        "test_last": "2026-09-04 05:14:58.234000+00:00",
+        "training_observations": 236,
+        "embargoed_observations": 116,
+        "test_observations": 152,
+        "training_markets": 150,
+        "training_events": 105,
+        "test_markets": 108,
+        "test_events": 78,
+        "test_markets_previously_in_training": 66,
+        "test_events_previously_in_training": 50
+      },
+      "baseline": {
+        "event_weighted_mae_pp": 6.336013504836726,
+        "event_weighted_rmse_pp": 10.76899645789188,
+        "event_weighted_actual_mean_abs_move_pp": 8.512419871794872,
+        "event_weighted_predicted_mean_abs_move_pp": 8.628304600215426,
+        "event_weighted_underprediction_by_over_5pp_fraction": 0.12905982905982905
+      },
+      "baseline_plus_gap": {
+        "event_weighted_mae_pp": 6.33685206229119,
+        "event_weighted_rmse_pp": 10.65377044872509,
+        "event_weighted_actual_mean_abs_move_pp": 8.512419871794872,
+        "event_weighted_predicted_mean_abs_move_pp": 8.392750991927779,
+        "event_weighted_underprediction_by_over_5pp_fraction": 0.13547008547008546
+      },
+      "paired_holdout_comparison": {
+        "augmented_minus_baseline_mae_pp": 0.0008385574544647398,
+        "paired_event_bootstrap_ci95_pp": [
+          -0.18224606695466666,
+          0.18382552020536536
+        ],
+        "event_count": 78,
+        "bootstrap_repetitions": 2000,
+        "sign_convention": "Negative means adding gap improved MAE."
+      },
+      "baseline_fit": {
+        "coefficients": {
+          "intercept": 27.74865257423908,
+          "prior_rv24_per_10pp": 2.280745546950804,
+          "log1p_hours_to_close": -2.2485708994001445,
+          "price_bucket=(0.2, 0.4]": 3.8216317055966447,
+          "price_bucket=(0.4, 0.6]": 5.508370268608682,
+          "price_bucket=(0.6, 0.8]": 4.8618505181590725,
+          "price_bucket=(0.8, 1.0]": -1.3441233881352337,
+          "category=Economics": -13.561618769658365,
+          "category=Entertainment": -14.881193967071706,
+          "category=Geopolitics": -11.764125864207493,
+          "category=Global Elections": -15.528068803576478,
+          "category=Politics": -11.020676629462063,
+          "category=Science & Tech": -8.984936990489532,
+          "category=Unknown": -10.355865463821194
+        },
+        "rank": 14,
+        "features": 14,
+        "unseen_test_levels": {
+          "price_bucket": 0,
+          "category": 5
+        },
+        "negative_predictions_before_clipping": 10,
+        "above_feasible_range_before_clipping": 0
+      },
+      "baseline_plus_gap_fit": {
+        "coefficients": {
+          "intercept": 27.03428229519458,
+          "prior_rv24_per_10pp": 2.2283759093573914,
+          "log1p_hours_to_close": -2.260572683316428,
+          "price_bucket=(0.2, 0.4]": 3.2269287723038365,
+          "price_bucket=(0.4, 0.6]": 4.148926208699622,
+          "price_bucket=(0.6, 0.8]": 3.9475305383197625,
+          "price_bucket=(0.8, 1.0]": -1.4849060971346997,
+          "category=Economics": -13.64335805495227,
+          "category=Entertainment": -14.497013398515985,
+          "category=Geopolitics": -12.055698023266125,
+          "category=Global Elections": -15.701587144164947,
+          "category=Politics": -9.935484372439616,
+          "category=Science & Tech": -8.79682622847549,
+          "category=Unknown": -9.852575419670307,
+          "gap_per_10pp": 1.5824856718026785
+        },
+        "rank": 15,
+        "features": 15,
+        "unseen_test_levels": {
+          "price_bucket": 0,
+          "category": 5
+        },
+        "negative_predictions_before_clipping": 13,
+        "above_feasible_range_before_clipping": 0
+      }
+    }
+  },
+  "limitations": [
+    "This five-day dataset was already used to formulate the movement hypothesis. Holdout excludes model fitting, but is not a pristine hypothesis-selection holdout.",
+    "One split and short coverage; no rolling validation, hyperparameter search, or claim of generalizable profitability.",
+    "Some test events/markets occur in training; the label embargo prevents chronological overlap but does not create an unseen-event test.",
+    "The initial atomic publication Q precedes later coherence repairs; it is not the entire historical served-Q revision stream.",
+    "Public reference prices are not executable BBOs. Endpoint displacement cannot distinguish directional drift from oscillating paths.",
+    "The paired bootstrap conditions on fitted training models and resamples only holdout events.",
+    "No fitted coefficient is endorsed as an optimal quote skew, spread width, inventory target, or ticket size."
+  ]
+}

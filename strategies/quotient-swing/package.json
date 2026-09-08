@@ -1,0 +1,14 @@
+{
+  "name": "@quotient-forecasting/strategy-quotient-swing",
+  "version": "0.4.12",
+  "type": "module",
+  "license": "Apache-2.0",
+  "description": "Source-aware equity and commodity perpetual swing strategy for Cassie",
+  "publishConfig": { "access": "public" },
+  "engines": { "node": ">=24" },
+  "exports": { ".": { "types": "./dist/index.d.ts", "import": "./dist/index.js" } },
+  "files": ["dist", "README.md"],
+  "scripts": { "build": "tsc -p tsconfig.json", "typecheck": "tsc -p tsconfig.json --noEmit" },
+  "dependencies": { "@quotient-forecasting/cassie-core": "workspace:*", "zod": "4.4.3" },
+  "devDependencies": { "@types/node": "24.2.1", "typescript": "5.9.2" }
+}

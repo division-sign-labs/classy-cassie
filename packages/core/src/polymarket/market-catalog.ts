@@ -1,13 +1,13 @@
 // packages/core/src/polymarket/market-catalog.ts
-// Strict Gamma metadata lookup for the market-make runtime. Identity is
-// validated against Quotient and outcome tokens are mapped by label, never by
-// array position alone.
+// Strict Gamma metadata lookup and independent discovery for the market-make
+// runtime. Outcome tokens are mapped by label, never by array position alone.
 
 import { z } from "zod";
 import { boundFetch } from "../http.js";
 
 const StringOrNumber = z.union([z.string(), z.number()]);
 const StringArray = z.union([z.array(z.string()), z.string()]);
+const GAMMA_READ_TIMEOUT_MS = 10_000;
 
 const GammaEventSchema = z
   .object({
@@ -39,6 +39,19 @@ const GammaMarketSchema = z
   })
   .loose();
 
+const GammaMarketStatusSchema = z
+  .object({
+    id: StringOrNumber,
+    conditionId: z.string(),
+    active: z.boolean().nullish(),
+    closed: z.boolean().nullish(),
+    archived: z.boolean().nullish(),
+    acceptingOrders: z.boolean().nullish(),
+    enableOrderBook: z.boolean().nullish(),
+    orderbookEnabled: z.boolean().nullish(),
+  })
+  .loose();
+
 export interface PolymarketMarketCatalog {
   marketKey: string;
   nativeMarketId: string;
@@ -60,6 +73,11 @@ export interface PolymarketMarketCatalog {
   tickSize: number;
   minOrderSize: number;
 }
+
+export type PolymarketMarketStatus = Pick<
+  PolymarketMarketCatalog,
+  "active" | "closed" | "archived" | "acceptingOrders" | "orderbookEnabled"
+>;
 
 export interface PolymarketCatalogRecoveryIdentity {
   conditionId?: string;
@@ -174,6 +192,56 @@ export class PolymarketCatalogClient {
   }
 
   /**
+   * Discover an independent, volume-ranked page of tradable binary markets.
+   * Gamma list contract verified 2026-09-04:
+   * https://docs.polymarket.com/api-reference/markets/list-markets
+   * Pagination refers to the raw Gamma page, not the filtered result length.
+   */
+  async activeMarkets(options: { limit?: number; offset?: number } = {}): Promise<PolymarketMarketCatalog[]> {
+    const requestedLimit = options.limit ?? 100;
+    const offset = options.offset ?? 0;
+    if (!Number.isSafeInteger(requestedLimit) || requestedLimit < 1) {
+      throw new Error("Gamma discovery limit must be a positive integer");
+    }
+    if (!Number.isSafeInteger(offset) || offset < 0) {
+      throw new Error("Gamma discovery offset must be a non-negative integer");
+    }
+    const url = new URL(`${this.#baseUrl}/markets`);
+    url.searchParams.set("active", "true");
+    url.searchParams.set("closed", "false");
+    url.searchParams.set("order", "volume24hr");
+    url.searchParams.set("ascending", "false");
+    url.searchParams.set("limit", String(Math.min(requestedLimit, 100)));
+    url.searchParams.set("offset", String(offset));
+    const response = await this.#fetch(url, {
+      headers: { accept: "application/json" }, signal: AbortSignal.timeout(GAMMA_READ_TIMEOUT_MS),
+    });
+    if (!response.ok) throw new Error(`Gamma active markets → ${response.status}`);
+    const body: unknown = await response.json();
+    if (!Array.isArray(body)) throw new Error("Gamma active markets returned a non-array response");
+
+    const markets: PolymarketMarketCatalog[] = [];
+    const seen = new Set<string>();
+    for (const raw of body) {
+      let market: PolymarketMarketCatalog;
+      try {
+        market = recoveryCatalog(raw);
+      } catch {
+        // The discovery universe includes unsupported outcome labels and rows
+        // with incomplete metadata. A bad row must not hide healthy markets.
+        continue;
+      }
+      if (!market.active || market.closed || market.archived || !market.acceptingOrders || !market.orderbookEnabled) {
+        continue;
+      }
+      if (seen.has(market.marketKey)) continue;
+      seen.add(market.marketKey);
+      markets.push(market);
+    }
+    return markets;
+  }
+
+  /**
    * Query by exact id through the list form. `/markets/{id}` serves a response
    * shape that omits `events`, so the parent event identity every catalog row
    * requires is only reachable through `/markets?id={id}`.
@@ -185,7 +253,9 @@ export class PolymarketCatalogClient {
   ): Promise<PolymarketMarketCatalog> {
     const url = new URL(`${this.#baseUrl}/markets`);
     url.searchParams.set("id", nativeMarketId);
-    const response = await this.#fetch(url, { headers: { accept: "application/json" } });
+    const response = await this.#fetch(url, {
+      headers: { accept: "application/json" }, signal: AbortSignal.timeout(GAMMA_READ_TIMEOUT_MS),
+    });
     if (!response.ok) throw new Error(`Gamma market ${nativeMarketId} → ${response.status}`);
     const body: unknown = await response.json();
     if (!Array.isArray(body)) throw new Error(`Gamma market ${nativeMarketId} returned a non-array response`);
@@ -193,6 +263,37 @@ export class PolymarketCatalogClient {
       throw new Error(`Gamma market ${nativeMarketId} expected exactly one result, received ${body.length}`);
     }
     return normalizePolymarketCatalog(marketKey, nativeMarketId, expectedConditionId, body[0]);
+  }
+
+  /**
+   * Read current tradability from Gamma's path endpoint. Closed markets can
+   * disappear from the list-form lookup used above, while this endpoint still
+   * returns their terminal flags. It intentionally returns only status because
+   * the path response omits the parent event identity required for a catalog.
+   */
+  async marketStatus(
+    nativeMarketId: string,
+    expectedConditionId: string,
+  ): Promise<PolymarketMarketStatus> {
+    const response = await this.#fetch(
+      `${this.#baseUrl}/markets/${encodeURIComponent(nativeMarketId)}`,
+      { headers: { accept: "application/json" }, signal: AbortSignal.timeout(GAMMA_READ_TIMEOUT_MS) },
+    );
+    if (!response.ok) throw new Error(`Gamma market status ${nativeMarketId} → ${response.status}`);
+    const row = GammaMarketStatusSchema.parse(await response.json());
+    if (String(row.id) !== nativeMarketId) {
+      throw new Error(`Gamma market status id ${String(row.id)} does not match Quotient ${nativeMarketId}`);
+    }
+    if (row.conditionId.toLowerCase() !== expectedConditionId.toLowerCase()) {
+      throw new Error(`Gamma market status condition ${row.conditionId} does not match Quotient ${expectedConditionId}`);
+    }
+    return {
+      active: row.active === true,
+      closed: row.closed === true,
+      archived: row.archived === true,
+      acceptingOrders: row.acceptingOrders === true,
+      orderbookEnabled: (row.enableOrderBook ?? row.orderbookEnabled) === true,
+    };
   }
 
   /**
@@ -245,7 +346,9 @@ export class PolymarketCatalogClient {
   async #queryOne(filter: "condition_ids" | "clob_token_ids", value: string): Promise<unknown> {
     const url = new URL(`${this.#baseUrl}/markets`);
     url.searchParams.set(filter, value);
-    const response = await this.#fetch(url, { headers: { accept: "application/json" } });
+    const response = await this.#fetch(url, {
+      headers: { accept: "application/json" }, signal: AbortSignal.timeout(GAMMA_READ_TIMEOUT_MS),
+    });
     if (!response.ok) throw new Error(`Gamma market recovery by ${filter} → ${response.status}`);
     const body: unknown = await response.json();
     if (!Array.isArray(body)) throw new Error(`Gamma market recovery by ${filter} returned a non-array response`);

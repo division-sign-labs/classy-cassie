@@ -366,6 +366,18 @@ describe("entry boundary gates", () => {
     expect(result.passed).toBe(false);
     expect(result.reasons).toContain("edge-below-direction-min");
   });
+
+  it("admits a volatility regime when its entry switch is enabled", () => {
+    const built = candidate(0.7);
+    built.candidate.volatilityRegime = "dead";
+    const relaxed = createMarketMakeConfig({
+      volatility: { regimes: { dead: { new_entry_enabled: true, size_multiplier: 0.5 } } },
+    });
+
+    const result = gateCandidate(built.candidate, built.yesBook, built.noBook, { now: NOW }, relaxed);
+    expect(result.reasons).not.toContain("volatility-dead");
+    expect(result.passed).toBe(true);
+  });
 });
 
 describe("liquidity participation and quote formulas", () => {
@@ -959,6 +971,20 @@ describe("shared reducer invariants", () => {
     expect(shocked.actions.some((action) => action.kind === "place" && action.side === "BUY")).toBe(false);
     expect(shocked.state.markets["polymarket:1"]?.inventory?.freeQuantity ?? 0).toBe(before);
     expect(evaluateShock({ move60sPp: 5, move5mPp: 0, move15mPp: 0, spreadMultipleVs5mMedian: 1, depthDropFraction60s: 0, adverse: false }, config).shocked).toBe(true);
+  });
+
+  it("does not require a newer Q version after a shock when the gate is disabled", () => {
+    const relaxed = createMarketMakeConfig({
+      market_shock: { require_new_q_version_after_adverse_shock: false },
+    });
+    const ready = reduceAll(readyEvents(), relaxed);
+    const shocked = reduceMarketMake(
+      ready.state,
+      { type: "shock", ts: NOW + 1_000, marketKey: "polymarket:1", adverse: true, reason: "test" },
+      relaxed,
+    );
+
+    expect(shocked.state.markets["polymarket:1"]?.requireQAfterShockAsOf).toBeUndefined();
   });
 
   it("three distinct correlated shocks start the configured global entry pause", () => {

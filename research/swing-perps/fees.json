@@ -1,0 +1,82 @@
+{
+ "commodity:copper": {
+  "coin": "xyz:COPPER",
+  "taker": 9e-05,
+  "maker": 2.9999999999999997e-05
+ },
+ "commodity:gold": {
+  "coin": "xyz:GOLD",
+  "taker": 0.0009,
+  "maker": 0.0003
+ },
+ "commodity:natural-gas": {
+  "coin": "xyz:NATGAS",
+  "taker": 9e-05,
+  "maker": 2.9999999999999997e-05
+ },
+ "commodity:platinum": {
+  "coin": "xyz:PLATINUM",
+  "taker": 9e-05,
+  "maker": 2.9999999999999997e-05
+ },
+ "commodity:silver": {
+  "coin": "xyz:SILVER",
+  "taker": 9e-05,
+  "maker": 2.9999999999999997e-05
+ },
+ "commodity:wti": {
+  "coin": "xyz:CL",
+  "taker": 9e-05,
+  "maker": 2.9999999999999997e-05
+ },
+ "company:aapl": {
+  "coin": "xyz:AAPL",
+  "taker": 9e-05,
+  "maker": 2.9999999999999997e-05
+ },
+ "company:hood": {
+  "coin": "xyz:HOOD",
+  "taker": 9e-05,
+  "maker": 2.9999999999999997e-05
+ },
+ "company:intc": {
+  "coin": "xyz:INTC",
+  "taker": 9e-05,
+  "maker": 2.9999999999999997e-05
+ },
+ "company:meta": {
+  "coin": "xyz:META",
+  "taker": 9e-05,
+  "maker": 2.9999999999999997e-05
+ },
+ "company:nvda": {
+  "coin": "xyz:NVDA",
+  "taker": 9e-05,
+  "maker": 2.9999999999999997e-05
+ },
+ "company:orcl": {
+  "coin": "xyz:ORCL",
+  "taker": 9e-05,
+  "maker": 2.9999999999999997e-05
+ },
+ "company:pltr": {
+  "coin": "xyz:PLTR",
+  "taker": 9e-05,
+  "maker": 2.9999999999999997e-05
+ },
+ "company:tsla": {
+  "coin": "xyz:TSLA",
+  "taker": 9e-05,
+  "maker": 2.9999999999999997e-05
+ },
+ "crypto:btc": {
+  "coin": "BTC",
+  "taker": 0.00045,
+  "maker": 0.00015
+ },
+ "crypto:eth": {
+  "coin": "ETH",
+  "taker": 0.00045,
+  "maker": 0.00015
+ }
+}

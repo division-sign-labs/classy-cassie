@@ -1,0 +1,36 @@
+{
+  "series": {
+    "additional_prohibitions": [
+      "Persons who are employed by any of the Source Agencies are not permitted to trade on the Contract.",
+      "Persons who hold any material, non-public information on the Underlying are not permitted to trade on the Contract."
+    ],
+    "category": "Commodities",
+    "contract_terms_url": "https://assets.kalshi.com/contract_terms/COMMODITIES.pdf",
+    "contract_url": "https://assets.kalshi.com/regulatory/product-certifications/COMMODITIES.pdf",
+    "exchange_index": 0,
+    "fee_multiplier": 1,
+    "fee_type": "quadratic",
+    "frequency": "daily",
+    "last_updated_ts": "2026-09-01T17:50:55.523431Z",
+    "product_metadata": {
+      "important_info": {
+        "id": "KXCOPPERD-2026-08-24",
+        "markdown": "**Important information:** Starting with markets settling on Monday, August 31, 2026, KXCOPPERD will settle using the Pyth Copper 24/7 index (Commodities.Index.CU/USD) as the source agency, replacing the front-month copper futures contract settlement price. Markets settling before August 31 will continue to settle under the front-month contract methodology.",
+        "message": "",
+        "title": ""
+      },
+      "scope": "Copper"
+    },
+    "settlement_sources": [
+      {
+        "name": "Pyth - Copper",
+        "url": "https://app.pyth.com/explore/Commodities.Index.CU%2FUSD?returnUrl=%2Fexplore%3Fsearch%3Dcopper%26state%3Dstable"
+      }
+    ],
+    "tags": [
+      "Metals"
+    ],
+    "ticker": "KXCOPPERD",
+    "title": "Daily Copper"
+  }
+}

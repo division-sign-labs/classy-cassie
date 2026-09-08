@@ -64,17 +64,51 @@ export async function handle(service: BotService, request: IncomingMessage, resp
     send(response, await service.orders());
     return;
   }
-  if (method === "GET" && action === "signals/check") {
-    send(response, { ok: true, ...(await service.signalCheck()) });
+  if (method === "GET" && action === "execution/status") {
+    send(response, await service.executionStatus());
     return;
   }
-  if (method === "GET" && action === "reporting/check") {
-    send(response, await service.reportingCheck());
+  if (method === "GET" && action === "signals/check") {
+    send(response, { ok: true, ...(await service.signalCheck()) });
     return;
   }
   if (method === "GET" && action === "agent/check") {
     send(response, await service.agentCheck());
     return;
+  }
+  if (method === "GET" && action === "swing/status") { send(response, await service.swingStatus()); return; }
+  if (method === "GET" && action === "commodities/status") { send(response, await service.commodityStatus()); return; }
+  if (method === "GET" && action === "commodities/history") {
+    const options: { from?: number; until?: number; limit?: number } = {};
+    for (const key of ["from", "until", "limit"] as const) if (url.searchParams.has(key)) options[key] = Number(url.searchParams.get(key));
+    send(response, service.commodityHistory(options)); return;
+  }
+  if (method === "POST" && action === "commodities/dry-run") { send(response, await service.commodityDryRun()); return; }
+  if (method === "POST" && action === "commodities/resume") {
+    const body = await bodyJson<{ confirmed?: unknown; acknowledgeLossReset?: unknown }>(request);
+    if (body.confirmed !== true || (body.acknowledgeLossReset !== undefined && typeof body.acknowledgeLossReset !== "boolean")) {
+      send(response, { error: "confirmed:true and optional boolean acknowledgeLossReset required" }, 400); return;
+    }
+    send(response, await service.commodityResume(body.acknowledgeLossReset === true)); return;
+  }
+  if (method === "GET" && action === "swing/check") { send(response, await service.swingCheck()); return; }
+  if (method === "POST" && action === "swing/dry-run") { send(response, await service.swingDryRun()); return; }
+  if (method === "POST" && action === "swing/halt") { send(response, await service.swingHalt()); return; }
+  if (method === "POST" && action === "swing/resume") {
+    const body = await bodyJson<{ acknowledgeLossReset?: unknown; confirmed?: unknown }>(request);
+    if (body.confirmed !== true || (body.acknowledgeLossReset !== undefined && typeof body.acknowledgeLossReset !== "boolean")) {
+      send(response, { error: "resume requires confirmed:true and a boolean acknowledgeLossReset when supplied" }, 400); return;
+    }
+    send(response, await service.swingResume(body.acknowledgeLossReset === true)); return;
+  }
+  if (method === "POST" && action === "swing/replay") {
+    const body = await bodyJson<{ from?: unknown; until?: unknown; costMultiplier?: unknown; fillModel?: unknown }>(request);
+    if ([body.from, body.until, body.costMultiplier].some(v => v !== undefined && (typeof v !== "number" || !Number.isFinite(v))) ||
+        (body.costMultiplier !== undefined && Number(body.costMultiplier) < 1) ||
+        (body.fillModel !== undefined && body.fillModel !== "cross" && body.fillModel !== "touch")) {
+      send(response, { error: "invalid replay bounds, cost multiplier, or fill model" }, 400); return;
+    }
+    send(response, service.swingReplay(body as { from?: number; until?: number; costMultiplier?: number; fillModel?: "cross" | "touch" })); return;
   }
   if (method === "GET" && action === "agent/status") {
     send(response, await service.agentStatus());

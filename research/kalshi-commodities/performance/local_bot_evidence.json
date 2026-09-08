@@ -1,0 +1,26 @@
+{
+  "bots": [
+    {
+      "botId": "ares-trader",
+      "venue": "polymarket"
+    },
+    {
+      "botId": "poly-mm-v01",
+      "venue": "polymarket"
+    }
+  ],
+  "databases": [
+    {
+      "botId": "ares-trader",
+      "counts": {}
+    },
+    {
+      "botId": "poly-mm-v01",
+      "counts": {
+        "mm_orders": 0,
+        "mm_fills": 0
+      }
+    }
+  ],
+  "limitation": "Read immutable main SQLite files; uncheckpointed WAL contents are not included. No Kalshi bot config found."
+}

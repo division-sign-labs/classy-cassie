@@ -193,6 +193,45 @@ interface ReservationSync {
   contributionUsdByMarket: Map<string, number>;
   eventRefByMarket: Map<string, string>;
   markets: Set<string>;
+  /** Confirmed fills already reduced collateral; only working entries reserve cash. */
+  cashReservedUsd?: number;
+}
+
+interface AdaptiveAccountingState {
+  byParent: Record<string, { entryRecorded: boolean; absorbedSize: number }>;
+}
+const ADAPTIVE_ACCOUNTING_MEMORY_KEY = "adaptive-execution-accounting";
+
+function activeExecution(parent: NonNullable<StrategyContext["execution"]>["parents"][number]): boolean {
+  return parent.status === "active" || parent.status === "canceling" || parent.status === "blocked";
+}
+
+function managedOrderIds(ctx: StrategyContext): Set<string> {
+  return new Set(ctx.execution?.parents.flatMap((parent) => parent.childOrderIds) ?? []);
+}
+
+async function outcomeBook(ctx: StrategyContext, marketRef: string, side: "YES" | "NO"): Promise<OrderBook> {
+  if (ctx.venue.executionMarket) {
+    const data = await ctx.venue.executionMarket(marketRef, side);
+    const book = { ...data.book, bids: data.book.bids.map((level) => ({ ...level })), asks: data.book.asks.map((level) => ({ ...level })) };
+    for (const order of ctx.openOrders) {
+      if (order.marketRef !== marketRef || (order.tokenId ? order.tokenId !== data.tokenId : (order.outcome ?? "YES") !== side)) continue;
+      const levels = order.side === "BUY" ? book.bids : book.asks;
+      const level = levels.find((candidate) => Math.abs(candidate.price - order.price) < 1e-9);
+      if (level) level.size = Math.max(0, level.size - Math.max(0, order.size - order.filledSize));
+    }
+    book.bids = book.bids.filter((level) => level.size > 1e-9);
+    book.asks = book.asks.filter((level) => level.size > 1e-9);
+    return book;
+  }
+  const yesBook = await ctx.venue.book(marketRef);
+  return side === "NO" ? mirrorBookForNo(yesBook) : yesBook;
+}
+
+async function outcomeMid(ctx: StrategyContext, marketRef: string, side: "YES" | "NO"): Promise<number> {
+  if (ctx.venue.executionMarket) return bookMid(await outcomeBook(ctx, marketRef, side)) ?? NaN;
+  const yesMid = (await ctx.venue.quote(marketRef)).mid;
+  return side === "NO" ? 1 - yesMid : yesMid;
 }
 
 // ---------------------------------------------------------------------------
@@ -561,14 +600,24 @@ export class FlipFlatStrategy implements Strategy {
   async tick(ctx: StrategyContext): Promise<Action[]> {
     const cfg = FlipFlatConfigSchema.parse(ctx.config ?? {});
     const actions: Action[] = [];
-    const signals = await ctx.signals.latest({ venue: ctx.venueId });
+    // The signal source already retried. A final failure means no fresh
+    // entries this tick; held positions are still evaluated below on the last
+    // committed forecast, so exit conditions that fire still close positions.
+    const signals = await ctx.signals.latest({ venue: ctx.venueId }).catch((error: unknown): Signal[] => {
+      ctx.log.warn(`signal refresh failed; no entries this tick, exits evaluated on the last committed forecast: ${(error as Error).message}`);
+      return [];
+    });
     const now = ctx.now();
-    const holdStarts = await this.syncHoldStarts(ctx, now);
     const reservations = await this.syncPendingEntries(ctx, cfg, now);
+    await this.syncAdaptiveEntries(ctx, reservations);
+    const holdStarts = await this.syncHoldStarts(ctx, now, reservations.markets);
     let remainingBudgetUsd = Number.POSITIVE_INFINITY;
     if (cfg.allocationMode === "daily-budget") {
       const budget = await this.dailyBudgetState(ctx, now);
-      remainingBudgetUsd = Math.max(0, cfg.dailyBudgetUsd - budget.placedUsd);
+      const utcDay = new Date(now).toISOString().slice(0, 10);
+      const reservedUsd = ctx.execution?.parents.filter((parent) => parent.side === "BUY")
+        .reduce((sum, parent) => sum + parent.reservedNotionalUsd, 0) ?? 0;
+      remainingBudgetUsd = Math.max(0, cfg.dailyBudgetUsd - budget.placedUsd - (ctx.execution?.dailySpentUsd[utcDay] ?? 0) - reservedUsd);
     }
     const portfolio =
       cfg.allocationMode === "portfolio-kelly"
@@ -586,8 +635,10 @@ export class FlipFlatStrategy implements Strategy {
     // Resolution first: redeem where the venue requires it (Polymarket).
     const entryBlockedMarkets = new Set<string>();
     for (const pos of ctx.positions) {
-      if (pos.redeemable) {
-        actions.push({ kind: "redeem", marketRef: pos.marketRef, reason: "market resolved" });
+      if (pos.redeemable && pos.size > 0) {
+        if (!entryBlockedMarkets.has(pos.marketRef)) {
+          actions.push({ kind: "redeem", marketRef: pos.marketRef, reason: "market resolved" });
+        }
         entryBlockedMarkets.add(pos.marketRef);
       }
     }
@@ -595,11 +646,13 @@ export class FlipFlatStrategy implements Strategy {
     // Resting orders and unabsorbed entries occupy a slot too; otherwise a
     // slow fill could let later ticks place more entry orders than the
     // configured position limit.
-    const openOrderMarkets = new Set(ctx.openOrders.map((order) => order.marketRef));
+    const managedIds = managedOrderIds(ctx);
+    const openOrderMarkets = new Set(ctx.openOrders.filter((order) => !managedIds.has(order.id)).map((order) => order.marketRef));
     const occupiedMarkets = new Set([
       ...ctx.positions.filter((position) => position.size > 0).map((position) => position.marketRef),
       ...openOrderMarkets,
       ...reservations.markets,
+      ...(ctx.execution?.parents.filter(activeExecution).map((parent) => parent.marketRef) ?? []),
     ]);
     let openCount = occupiedMarkets.size;
 
@@ -638,7 +691,9 @@ export class FlipFlatStrategy implements Strategy {
     const ranked = [...latestByMarket.entries()].sort((a, b) => edgePpOf(b[1]) - edgePpOf(a[1]));
 
     for (const [marketRef, sig] of ranked) {
+      if (ctx.execution?.blocked) continue;
       if (entryBlockedMarkets.has(marketRef)) continue;
+      if (ctx.execution?.parents.some((parent) => parent.marketRef === marketRef && activeExecution(parent))) continue;
       if (reservations.markets.has(marketRef)) {
         ctx.log.info(`entry handoff pending for ${marketRef}; no new entry until the venue shows it`);
         continue;
@@ -730,6 +785,8 @@ export class FlipFlatStrategy implements Strategy {
   }
 
   async onActionResult(ctx: StrategyContext, action: Action, result: StrategyActionResult): Promise<void> {
+    // Admission reserves a parent; only its confirmed fills spend capital.
+    if (result.executionId) return;
     if (action.kind === "exit") {
       await this.recordExitResult(ctx, action.marketRef, result);
       return;
@@ -783,6 +840,7 @@ export class FlipFlatStrategy implements Strategy {
         actions.push({
           kind: "exit",
           marketRef: held.marketRef,
+          urgent: true,
           reason: `max hold reached: ${(heldMs / DAY_MS).toFixed(2)}d held (limit ${cfg.maxHoldDays}d)`,
           provenance: { exitModel: "legacy", heldSince, heldDays: heldMs / DAY_MS, maxHoldDays: cfg.maxHoldDays },
         });
@@ -901,7 +959,7 @@ export class FlipFlatStrategy implements Strategy {
       // Idempotent submission: one exit per position until the venue shows
       // the order or the position is gone. A vanished order with the position
       // still held is re-evaluated only after the retry window.
-      if (record.exit) {
+      if (record.exit && !ctx.execution) {
         const visible = ctx.openOrders.some(
           (order) =>
             (record.exit?.orderId !== undefined && order.id === record.exit.orderId) ||
@@ -936,6 +994,7 @@ export class FlipFlatStrategy implements Strategy {
       actions.push({
         kind: "exit",
         marketRef,
+        urgent: telemetry.exitReason !== "convergence",
         reason: detail,
         provenance: { exitModel: "scenario", ...telemetry },
       });
@@ -1123,18 +1182,18 @@ export class FlipFlatStrategy implements Strategy {
     const side = record.side;
     let heldBook: OrderBook | undefined;
     try {
-      const yesBook = await ctx.venue.book(held.marketRef);
-      heldBook = side === "NO" ? mirrorBookForNo(yesBook) : yesBook;
+      heldBook = await outcomeBook(ctx, held.marketRef, side);
     } catch (err) {
+      if (ctx.execution) throw err;
       ctx.log.warn(`held book unavailable for ${held.marketRef}: ${(err as Error).message}`);
     }
     let midHeld = heldBook ? bookMid(heldBook) : undefined;
     if (midHeld === undefined) {
       try {
-        const quote = await ctx.venue.quote(held.marketRef);
-        const mirrored = side === "NO" ? 1 - quote.mid : quote.mid;
-        midHeld = mirrored > 0 && mirrored < 1 ? mirrored : undefined;
+        const mid = await outcomeMid(ctx, held.marketRef, side);
+        midHeld = mid > 0 && mid < 1 ? mid : undefined;
       } catch (err) {
+        if (ctx.execution) throw err;
         ctx.log.warn(`held quote unavailable for ${held.marketRef}: ${(err as Error).message}`);
       }
     }
@@ -1228,13 +1287,14 @@ export class FlipFlatStrategy implements Strategy {
     side: "YES" | "NO",
     result: StrategyActionResult,
     now: number,
+    newConfirmedCycle = false,
   ): Promise<void> {
     const state = await this.scenarioState(ctx);
     const existing = state.byMarket[action.marketRef];
     const stillHeld = ctx.positions.some(
       (position) => position.marketRef === action.marketRef && position.side === side && position.size > 0,
     );
-    if (existing && existing.side === side && stillHeld && !existing.exit) {
+    if (existing && existing.side === side && stillHeld && !existing.exit && !newConfirmedCycle) {
       // A top-up never rewrites the immutable entry snapshot or the age anchor.
       existing.lastHeldAt = now;
       await ctx.memory.set<ScenarioState>(SCENARIO_EXIT_MEMORY_KEY, state);
@@ -1398,6 +1458,57 @@ export class FlipFlatStrategy implements Strategy {
     return { byOrderId: next, contributionUsdByMarket, eventRefByMarket, markets };
   }
 
+  /** Parent receipts own adaptive accounting; child replacements cannot spend or reserve twice. */
+  private async syncAdaptiveEntries(ctx: StrategyContext, reservations: ReservationSync): Promise<void> {
+    if (!ctx.execution) return;
+    const saved = await ctx.memory.get<AdaptiveAccountingState>(ADAPTIVE_ACCOUNTING_MEMORY_KEY);
+    const state: AdaptiveAccountingState = { byParent: { ...(saved?.byParent ?? {}) } };
+    reservations.cashReservedUsd = [...reservations.contributionUsdByMarket.values()].reduce((sum, value) => sum + value, 0);
+    for (const parent of [...ctx.execution.parents].sort((a, b) => a.admittedAt - b.admittedAt)) {
+      if (parent.side !== "BUY") continue;
+      const previous = state.byParent[parent.id] ?? { entryRecorded: false, absorbedSize: 0 };
+      const visibleSize = ctx.positions.filter((position) => position.marketRef === parent.marketRef && position.side === parent.outcome)
+        .reduce((sum, position) => sum + Math.max(0, position.size), 0);
+      const absorbedSize = Math.max(previous.absorbedSize, Math.min(parent.filledSize, Math.max(0, visibleSize - parent.priorMarketSize)));
+      // Absorption is monotonic: a subsequent exit must not resurrect an old entry reservation.
+      const unobservedSize = Math.max(0, parent.filledSize - absorbedSize);
+      const unobservedCost = parent.filledSize > 0 ? unobservedSize / parent.filledSize * parent.filledNotionalUsd : 0;
+      const exposure = parent.reservedNotionalUsd + unobservedCost;
+      if (activeExecution(parent) || unobservedSize > 1e-6) reservations.markets.add(parent.marketRef);
+      if (exposure > 0) {
+        reservations.contributionUsdByMarket.set(parent.marketRef, (reservations.contributionUsdByMarket.get(parent.marketRef) ?? 0) + exposure);
+      }
+      reservations.cashReservedUsd += parent.reservedNotionalUsd;
+      if (typeof parent.provenance?.eventRef === "string") reservations.eventRefByMarket.set(parent.marketRef, parent.provenance.eventRef);
+      if (!previous.entryRecorded && parent.firstFillAt !== undefined && parent.filledSize > 0) {
+        if (parent.priorMarketSize <= EPSILON) {
+          // Replace an observation-time seed if the position appeared before its fill receipt.
+          const holds = await this.holdStartsState(ctx);
+          await ctx.memory.set<HoldStartsState>(HOLD_STARTS_MEMORY_KEY, { byMarket: { ...holds.byMarket, [parent.marketRef]: parent.firstFillAt } });
+        } else {
+          await this.rememberHoldStart(ctx, parent.marketRef, parent.firstFillAt);
+        }
+        await this.recordEntrySnapshot(ctx, {
+          kind: "enter", marketRef: parent.marketRef, side: parent.outcome, notional: parent.filledNotionalUsd,
+          reason: parent.reason, provenance: parent.provenance,
+        }, parent.outcome, {
+          placed: true, placedAt: parent.firstFillAt, filledSize: parent.filledSize, status: "partial",
+        }, parent.firstFillAt, parent.priorMarketSize <= EPSILON);
+        const scenario = await this.scenarioState(ctx);
+        const record = scenario.byMarket[parent.marketRef];
+        if (record && (record.entryFilledAt === undefined || record.entryFilledAt === parent.firstFillAt)) {
+          record.entryFilledAt = parent.firstFillAt;
+          record.entryFillSource = "venue-fill";
+          record.entryPlacedAt = parent.admittedAt;
+          await ctx.memory.set<ScenarioState>(SCENARIO_EXIT_MEMORY_KEY, scenario);
+        }
+        previous.entryRecorded = true;
+      }
+      state.byParent[parent.id] = { entryRecorded: previous.entryRecorded, absorbedSize };
+    }
+    if (JSON.stringify(state) !== JSON.stringify(saved)) await ctx.memory.set(ADAPTIVE_ACCOUNTING_MEMORY_KEY, state);
+  }
+
   // -------------------------------------------------------------------------
   // Hold-start bookkeeping (legacy age anchor; also the fallback for the state machine)
   // -------------------------------------------------------------------------
@@ -1407,7 +1518,7 @@ export class FlipFlatStrategy implements Strategy {
    * position nor an order remains. A pending order retains an entry timestamp
    * across the placement-to-fill gap.
    */
-  private async syncHoldStarts(ctx: StrategyContext, now: number): Promise<HoldStartsState> {
+  private async syncHoldStarts(ctx: StrategyContext, now: number, reservedMarkets = new Set<string>()): Promise<HoldStartsState> {
     const saved = await this.holdStartsState(ctx);
     const heldRefs = new Set(
       ctx.positions
@@ -1417,7 +1528,7 @@ export class FlipFlatStrategy implements Strategy {
         )
         .map((position) => position.marketRef),
     );
-    const openOrderRefs = new Set(ctx.openOrders.map((order) => order.marketRef));
+    const openOrderRefs = new Set([...ctx.openOrders.map((order) => order.marketRef), ...reservedMarkets]);
     const byMarket: Record<string, number> = {};
 
     for (const marketRef of heldRefs) {
@@ -1476,14 +1587,15 @@ export class FlipFlatStrategy implements Strategy {
 
     let mid: number;
     try {
-      mid = (await ctx.venue.quote(forecast.marketRef)).mid;
+      mid = await outcomeMid(ctx, forecast.marketRef, held.side);
     } catch (err) {
+      if (ctx.execution) throw err;
       ctx.log.warn(`convergence check skipped for ${forecast.marketRef}: ${(err as Error).message}`);
       return undefined;
     }
     if (!(mid > 0 && mid < 1)) return undefined;
 
-    const curPrice = held.side === "NO" ? 1 - mid : mid;
+    const curPrice = mid;
     const prob = held.side === "NO" ? 1 - forecast.probYes : forecast.probYes;
     // Signed on purpose: an overshoot past the forecast is past converged.
     const remainingEdgePp = (prob - curPrice) * 100;
@@ -1506,7 +1618,7 @@ export class FlipFlatStrategy implements Strategy {
     } catch {
       /* fall back to current equity */
     }
-    const reservedNotVisibleUsd = [...reservations.contributionUsdByMarket.values()].reduce((sum, usd) => sum + usd, 0);
+    const reservedNotVisibleUsd = reservations.cashReservedUsd ?? [...reservations.contributionUsdByMarket.values()].reduce((sum, usd) => sum + usd, 0);
 
     const state: PortfolioPlanningState = {
       // Keep the same small cash buffer as the legacy allocator. Cash that an
@@ -1540,8 +1652,10 @@ export class FlipFlatStrategy implements Strategy {
       if (position.size <= 0) continue;
       await addExposure(position.marketRef, Math.max(0, position.size * position.avgPrice));
     }
+    const managedIds = managedOrderIds(ctx);
     for (const order of ctx.openOrders) {
       if (order.side !== "BUY") continue;
+      if (managedIds.has(order.id)) continue;
       const remainingSize = Math.max(0, order.size - order.filledSize);
       await addExposure(order.marketRef, remainingSize * order.price);
     }
@@ -1585,14 +1699,14 @@ export class FlipFlatStrategy implements Strategy {
       return undefined;
     }
 
-    let yesMid: number;
+    let price: number;
     try {
-      yesMid = (await ctx.venue.quote(sig.marketRef)).mid;
+      price = await outcomeMid(ctx, sig.marketRef, sig.side);
     } catch (err) {
       ctx.log.warn(`live entry quote failed for ${sig.marketRef}: ${(err as Error).message}`);
       return undefined;
     }
-    const price = sig.side === "NO" ? 1 - yesMid : yesMid;
+    const yesMid = sig.side === "NO" ? 1 - price : price;
     if (!(price > 0 && price < 1)) return undefined;
 
     // Revalidate both edges against the live held-side price. A formerly good
@@ -1613,8 +1727,7 @@ export class FlipFlatStrategy implements Strategy {
     if (cfg.minExitDepth2cUsd > 0) {
       exitDepthUsd = 0;
       try {
-        const yesBook = await ctx.venue.book(sig.marketRef);
-        const heldBook = sig.side === "NO" ? mirrorBookForNo(yesBook) : yesBook;
+        const heldBook = await outcomeBook(ctx, sig.marketRef, sig.side);
         exitDepthUsd = bidDepthWithin2cUsd(heldBook);
       } catch (err) {
         ctx.log.warn(
@@ -1724,6 +1837,8 @@ export class FlipFlatStrategy implements Strategy {
     } catch {
       /* fall back to equity */
     }
+    available -= ctx.execution?.parents.filter((parent) => parent.side === "BUY")
+      .reduce((sum, parent) => sum + parent.reservedNotionalUsd, 0) ?? 0;
     const perPositionUsd = (cfg.dailyBudgetUsd * cfg.positionBudgetPct) / 100;
     const sizeFactor = nearResolutionSizeFactor(sig.endsAt, ctx.now(), cfg);
     const notional = Math.min(perPositionUsd, remainingBudgetUsd, available * 0.95) * sizeFactor;

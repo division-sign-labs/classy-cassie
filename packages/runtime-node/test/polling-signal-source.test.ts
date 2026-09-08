@@ -105,4 +105,37 @@ describe("PollingSignalSource", () => {
     expect(upstream.forecasts).toHaveBeenCalledTimes(2);
     expect(upstream.latest).not.toHaveBeenCalled();
   });
+
+  it("serves the last snapshot and forecasts through an outage and backs off the next attempt", async () => {
+    let now = 1_000;
+    const upstream = {
+      latest: vi.fn<SignalSource["latest"]>().mockResolvedValueOnce([signal()]).mockRejectedValue(new Error("gateway unavailable")),
+      forecasts: vi.fn<NonNullable<SignalSource["forecasts"]>>().mockResolvedValueOnce([forecast()]).mockRejectedValue(new Error("gateway unavailable")),
+    } satisfies SignalSource;
+    const failed = vi.fn();
+    const source = new PollingSignalSource(upstream, 300_000, { now: () => now, onRefreshFailure: failed });
+    const query = { venue: "polymarket" as const, marketRefs: ["market-1"] };
+
+    await expect(source.latest({})).resolves.toEqual([signal()]);
+    await expect(source.forecasts(query)).resolves.toEqual([forecast()]);
+
+    now += 300_000;
+    await expect(source.latest({})).resolves.toEqual([signal()]);
+    await expect(source.forecasts(query)).resolves.toEqual([forecast()]);
+    expect(failed).toHaveBeenCalledTimes(2);
+    expect(failed).toHaveBeenCalledWith(expect.any(Error), true);
+
+    // Within the backoff window the dead gateway is not hit again.
+    now += 30_000;
+    await source.latest({});
+    await source.forecasts(query);
+    expect(upstream.latest).toHaveBeenCalledTimes(2);
+    expect(upstream.forecasts).toHaveBeenCalledTimes(2);
+
+    now += 30_000;
+    await source.latest({});
+    await source.forecasts(query);
+    expect(upstream.latest).toHaveBeenCalledTimes(3);
+    expect(upstream.forecasts).toHaveBeenCalledTimes(3);
+  });
 });

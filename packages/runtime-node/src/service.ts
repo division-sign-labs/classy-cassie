@@ -4,9 +4,12 @@
 
 import { readFileSync } from "node:fs";
 import {
-  AresClient,
   ConsoleAlerter,
   Engine,
+  KalshiCommoditiesStrategy,
+  CommodityConfigSchema,
+  COMMODITY_REPORT_KEY,
+  COMMODITY_LEDGER_KEY,
   FanoutAlerter,
   FixtureSignalSource,
   LiveSignalSource,
@@ -14,7 +17,6 @@ import {
   PolymarketCatalogClient,
   SafeAlerter,
   TelegramAlerter,
-  buildReporter,
   checkLiveSignalAccess,
   computePortfolio,
   consoleLogger,
@@ -25,8 +27,10 @@ import {
   type Logger,
   type ManualOrderParams,
   type RuntimeCreds,
+  type PolymarketGaslessAuth,
   type SignalSource,
   type Strategy,
+  type CommodityReport,
   type VenueAccount,
   type VenueAdapter,
 } from "@quotient-forecasting/cassie-core";
@@ -44,14 +48,14 @@ import {
   type PreviewableStrategy,
 } from "@quotient-forecasting/strategy-agent";
 import { SqliteStateStore } from "./state.js";
+import { SwingController } from "./swing-controller.js";
+import { CommodityDataSource } from "./commodity-data.js";
+import { CommodityRecordingStore } from "./commodity-recordings.js";
 import { MarketMakeStateStore } from "./market-make-state.js";
 import {
   MarketMakeController,
-  type MarketMakeControllerStatus,
-  type MarketMakeDryRunResult,
-  type MarketMakeReconcileResult,
-  type MarketMakeTickResult,
 } from "./market-make-controller.js";
+import { TwoSidedMarketMakeController } from "./two-sided-market-make-controller.js";
 import { MarketMakeConfigSchema } from "@quotient-forecasting/strategy-market-make";
 import { nextTickAtMs, tickIdAt } from "./tick-schedule.js";
 import {
@@ -60,13 +64,22 @@ import {
 } from "./polling-signal-source.js";
 
 const HEARTBEAT_MS = 5_000;
+const PERP_SUPERVISION_MS = 15_000;
 const TRIGGER_CHECK_MS = 60_000;
+
+type MarketMaker = MarketMakeController | TwoSidedMarketMakeController;
+type MarketMakeControllerStatus = ReturnType<MarketMaker["status"]>;
+type MarketMakeDryRunResult = Awaited<ReturnType<MarketMaker["dryRun"]>>;
+type MarketMakeReconcileResult = Awaited<ReturnType<MarketMaker["reconcile"]>>;
+type MarketMakeTickResult = Awaited<ReturnType<MarketMaker["tick"]>>;
 
 export interface RuntimeIdentity {
   runtime: "droplet" | "local";
   protocol: 2;
   botId: string;
   version: string;
+  /** Content identity read from the installed workspace artifact, when present. */
+  buildId?: string;
   /** Region the deploy pinned this bot to. Absent when running locally. */
   requiredRegion?: string;
   /** Region the host reports for itself. Must equal requiredRegion to trade. */
@@ -79,6 +92,7 @@ export interface BotRuntimeOptions {
   config: BotConfig;
   account: VenueAccount;
   creds?: RuntimeCreds;
+  polymarketGaslessAuth?: PolymarketGaslessAuth;
   /** SQLite path. One file per bot. */
   statePath: string;
   runtime: RuntimeIdentity["runtime"];
@@ -86,10 +100,9 @@ export interface BotRuntimeOptions {
   region?: string;
   deploymentId?: string;
   version?: string;
+  buildId?: string;
   quotientToken?: string;
   telegramToken?: string;
-  /** Ares authoring key. Absent = attribute orders, publish nothing. */
-  reportingApiKey?: string;
   /** Surplus Intelligence key (inf_…). Required by the agent strategy only. */
   surplusApiKey?: string;
   log?: Logger;
@@ -105,6 +118,8 @@ export interface ShutdownCancellationResult {
   /** True only after an authoritative venue open-orders read returned empty. */
   verifiedOpenOrders: boolean;
   remainingOpenOrders: number | null;
+  /** Swing shutdown deliberately retains verified reduce-only native protection. */
+  protectiveOrdersRetained?: boolean;
 }
 
 export interface ShutdownResult {
@@ -156,6 +171,7 @@ export function buildStrategy(opts: BotRuntimeOptions): Strategy {
   const id = opts.config.strategy.id;
   // "signals" is the user-facing name; "flip-flat" is the original id.
   if (id === "signals" || id === "flip-flat") return new FlipFlatStrategy();
+  if (id === "kalshi-commodities") return new KalshiCommoditiesStrategy();
   if (id === "agent") {
     if (!opts.surplusApiKey) {
       throw new Error("the agent strategy needs SURPLUS_API_KEY (environment, .local.env, or bot keystore)");
@@ -178,6 +194,7 @@ export function buildStrategy(opts: BotRuntimeOptions): Strategy {
   if (id === "market-make") {
     throw new Error("market-make is event-driven and must be built through BotService's dedicated controller");
   }
+  if (id === "quotient-swing") throw new Error("quotient-swing uses BotService's protected swing controller");
   throw new Error(`unknown strategy "${id}" — supported strategies are "signals", "agent", and "market-make"`);
 }
 
@@ -191,6 +208,12 @@ export function configuredSignalPollIntervalMin(config: BotConfig): number {
 }
 
 export function buildSignalSource(opts: BotRuntimeOptions, log: Logger = opts.log ?? consoleLogger(opts.config.id)): SignalSource {
+  if (opts.config.strategy.id === "kalshi-commodities") {
+    if (!opts.quotientToken) throw new Error("kalshi-commodities requires a Quotient API key");
+    const urls = opts.config.venueUrls.kalshi;
+    return new CommodityDataSource({ config: CommodityConfigSchema.parse(opts.config.strategy.config),
+      apiBase: urls.demo ? urls.demoApi : urls.api, baseUrl: opts.config.signals.baseUrl, token: opts.quotientToken });
+  }
   if (opts.signalsFixturePath) {
     return new FixtureSignalSource(readFileSync(opts.signalsFixturePath, "utf8"));
   }
@@ -206,6 +229,11 @@ export function buildSignalSource(opts: BotRuntimeOptions, log: Logger = opts.lo
         log.info(`signals refreshed (${count}); next refresh in ${compactNumber(pollIntervalMin)}m`),
       onForecastRefresh: (count) =>
         log.info(`held forecasts refreshed (${count}); next refresh in ${compactNumber(pollIntervalMin)}m`),
+      onRefreshFailure: (error, servedFromCache) =>
+        log.warn(
+          `quotient refresh failed after retries; ${servedFromCache ? "serving the last snapshot" : "no snapshot to serve"}: ` +
+            (error instanceof Error ? error.message : String(error)),
+        ),
     },
   );
 }
@@ -220,8 +248,6 @@ export function buildAlerter(opts: BotRuntimeOptions, log: Logger): Alerter {
   if (opts.telegramToken && chatId) {
     sinks.push(new SafeAlerter(new TelegramAlerter(opts.telegramToken, chatId), log));
   }
-  const reporter = buildReporter({ reporting: opts.config.reporting, apiKey: opts.reportingApiKey, log });
-  if (reporter) sinks.push(new SafeAlerter(reporter, log));
   if (sinks.length === 0) return new ConsoleAlerter(log);
   return sinks.length === 1 ? sinks[0]! : new FanoutAlerter(sinks);
 }
@@ -235,14 +261,22 @@ export class BotService {
   private readonly adapter: VenueAdapter;
   private readonly strategy?: Strategy;
   private readonly engine?: Engine;
-  private readonly marketMaker?: MarketMakeController;
+  private readonly marketMaker?: MarketMaker;
   private readonly marketMakeState?: MarketMakeStateStore;
+  private readonly swing?: SwingController;
+  private readonly commodityRecordings?: CommodityRecordingStore;
   private readonly state: SqliteStateStore;
   private readonly opts: BotRuntimeOptions;
   private readonly intervalSeconds: number;
   private operation: Promise<void> = Promise.resolve();
   private heartbeatTimer?: NodeJS.Timeout;
   private triggerTimer?: NodeJS.Timeout;
+  private perpSupervisionPending = false;
+  private perpSupervisionError?: { message: string; at: number };
+  private predictionTimer?: NodeJS.Timeout;
+  private predictionSupervision?: Promise<void>;
+  private predictionHeartbeat?: Promise<void>;
+  private predictionExecution?: Awaited<ReturnType<Engine["predictionStatus"]>>;
   private tickTimer?: NodeJS.Timeout;
   private active = false;
   private terminating = false;
@@ -259,42 +293,62 @@ export class BotService {
     this.adapter = createAdapter(opts.config.venue, {
       urls: opts.config.venueUrls,
       creds: opts.creds,
+      polymarketGaslessAuth: opts.polymarketGaslessAuth,
       fixtureBooks: opts.fixtureBooksPath ? readFileSync(opts.fixtureBooksPath, "utf8") : undefined,
-      builderCode: opts.config.reporting?.builderCode,
+      perpDex: opts.config.strategy.id === "quotient-swing" ? "xyz" : undefined,
     });
     const alerter = buildAlerter(opts, this.log);
-    if (opts.config.strategy.id === "market-make") {
+    if (opts.config.strategy.id === "kalshi-commodities") this.commodityRecordings = new CommodityRecordingStore(`${opts.statePath}.commodities.sqlite`);
+    if (opts.config.strategy.id === "quotient-swing") {
+      if (!opts.quotientToken) throw new Error("quotient-swing needs a Quotient API key");
+      this.swing = new SwingController({ config: opts.config, adapter: this.adapter, account: opts.account,
+        state: this.state, statePath: opts.statePath, alerter, log: this.log,
+        quotientToken: opts.quotientToken });
+    } else if (opts.config.strategy.id === "market-make") {
       if (opts.config.venue !== "polymarket" || opts.account.venue !== "polymarket") {
         throw new Error("the market-make controller requires a Polymarket bot and account");
       }
-      if (!opts.quotientToken) {
+      const config = MarketMakeConfigSchema.parse(opts.config.strategy.config);
+      if ((!config.two_sided || config.two_sided.adaptive) && !opts.quotientToken) {
         throw new Error("the market-make strategy needs a Quotient API key");
       }
-      const config = MarketMakeConfigSchema.parse(opts.config.strategy.config);
-      this.marketMakeState = new MarketMakeStateStore(opts.statePath);
-      this.marketMaker = new MarketMakeController(
+      const shared = {
+        config,
+        venue: this.adapter,
+        account: opts.account,
+        catalog: new PolymarketCatalogClient({ gammaBaseUrl: opts.config.venueUrls.polymarket.gamma }),
+        botId: opts.config.id,
+        alerter,
+        log: this.log,
+      };
+      const controllerOptions = {
+        deploymentId: opts.deploymentId ?? `${opts.runtime}:${opts.config.id}`,
+        autoSchedule: false,
+        enableSubscriptions: true,
+      };
+      if (config.two_sided) {
+        this.intervalSeconds = Math.max(60, Math.round(config.reconciliation.rest_reconcile_seconds));
+        this.marketMaker = new TwoSidedMarketMakeController(
+          { ...shared, stateStore: this.state, ...(config.two_sided.adaptive ? {
+            quotient: new MarketMakeQuotientClient({ baseUrl: opts.config.signals.baseUrl, signalsPath: opts.config.signals.path, token: opts.quotientToken! }),
+          } : {}) }, controllerOptions,
+        );
+      } else {
+        this.marketMakeState = new MarketMakeStateStore(opts.statePath);
+        this.marketMaker = new MarketMakeController(
         {
-          config,
+          ...shared,
           stateStore: this.marketMakeState,
           snapshotStore: this.state,
-          venue: this.adapter,
-          account: opts.account,
           quotient: new MarketMakeQuotientClient({
             baseUrl: opts.config.signals.baseUrl,
             signalsPath: opts.config.signals.path,
-            token: opts.quotientToken,
+            token: opts.quotientToken!,
           }),
-          catalog: new PolymarketCatalogClient({ gammaBaseUrl: opts.config.venueUrls.polymarket.gamma }),
-          botId: opts.config.id,
-          alerter,
-          log: this.log,
         },
-        {
-          deploymentId: opts.deploymentId ?? `${opts.runtime}:${opts.config.id}`,
-          autoSchedule: false,
-          enableSubscriptions: true,
-        },
+        controllerOptions,
       );
+      }
     } else {
       this.strategy = buildStrategy(opts);
       this.engine = new Engine({
@@ -314,6 +368,7 @@ export class BotService {
       protocol: 2,
       botId: opts.config.id,
       version: opts.version ?? "unknown",
+      ...(opts.buildId ? { buildId: opts.buildId } : {}),
       requiredRegion: opts.requiredRegion,
       region: opts.region,
       deploymentId: opts.deploymentId,
@@ -329,13 +384,17 @@ export class BotService {
     lastTickAt?: number;
     tickIntervalMin: number;
     marketMake?: MarketMakeControllerStatus;
+    swing?: { mode: "live" };
+    execution?: Awaited<ReturnType<Engine["predictionStatus"]>>;
   } {
     return {
       ...this.identity,
       active: this.active,
       lastTickAt: this.lastTickAt,
-      tickIntervalMin: this.config.tickIntervalMin,
+      tickIntervalMin: this.intervalSeconds / 60,
       ...(this.marketMaker ? { marketMake: this.marketMaker.status() } : {}),
+      ...(this.swing ? { swing: { mode: this.swing.config.mode } } : {}),
+      ...(this.predictionExecution ? { execution: this.predictionExecution } : {}),
     };
   }
 
@@ -353,8 +412,13 @@ export class BotService {
     if (this.active || this.terminating) return;
     try {
       await this.exclusive(async () => {
+        if (this.config.strategy.id === "kalshi-commodities") await this.state.set("engine:paused", "true");
         if (this.marketMaker) await this.marketMaker.start();
-        else await this.syncFastLoops();
+        else {
+          this.swing?.start();
+          await this.engine?.recoverPredictions();
+          await this.syncFastLoops();
+        }
       });
       this.active = true;
       // Tick the current slot right away rather than idling to the next
@@ -364,7 +428,7 @@ export class BotService {
       this.log.info(
         this.marketMaker
           ? `market-make loop started ${this.marketMaker.status().halted ? "halted" : "active"}; ` +
-              `reconciliation every ${compactNumber(this.intervalSeconds)}s`
+              `${this.config.strategy.config.two_sided ? "quote checks" : "reconciliation"} every ${compactNumber(this.intervalSeconds)}s`
           : `loop started; position checks every ${compactNumber(this.intervalSeconds)}s; ` +
               `signals every ${compactNumber(configuredSignalPollIntervalMin(this.config))}m`,
       );
@@ -393,18 +457,68 @@ export class BotService {
     if (this.heartbeatTimer) clearInterval(this.heartbeatTimer);
     if (this.triggerTimer) clearInterval(this.triggerTimer);
     if (this.tickTimer) clearTimeout(this.tickTimer);
+    if (this.predictionTimer) clearInterval(this.predictionTimer);
     this.heartbeatTimer = undefined;
     this.triggerTimer = undefined;
     this.tickTimer = undefined;
+    this.predictionTimer = undefined;
   }
 
   private async syncFastLoops(): Promise<void> {
+    if (this.terminating) return;
+    if (this.swing) {
+      if (!this.triggerTimer) {
+        // Research and market data are refreshed by the controller outside this lane.
+        this.triggerTimer = setInterval(() => {
+          if (this.terminating || this.perpSupervisionPending) return;
+          this.perpSupervisionPending = true;
+          void this.exclusive(() => this.swing!.supervise())
+            .then(() => { this.perpSupervisionError = undefined; })
+            .catch(error => {
+              const message = (error as Error).message;
+              if (this.perpSupervisionError?.message !== message || Date.now() - this.perpSupervisionError.at >= 300_000) {
+                this.log.error(`perp protection reconcile failed: ${message}`);
+                this.perpSupervisionError = { message, at: Date.now() };
+              }
+            })
+            .finally(() => { this.perpSupervisionPending = false; });
+        }, PERP_SUPERVISION_MS);
+      }
+      return;
+    }
     if (!this.engine) return;
     const engine = this.engine;
+    if (engine.adaptivePredictionExecution) {
+      this.predictionExecution = await engine.predictionStatus();
+      if (this.terminating) return;
+      // Neither lane waits for strategy research or the control API's queue.
+      // The executor serializes its own state changes; heartbeat remains independent.
+      if (!this.predictionTimer) {
+        this.predictionTimer = setInterval(() => {
+          if (this.terminating || this.predictionSupervision) return;
+          this.predictionSupervision = engine.supervisePredictions()
+            .then(() => engine.checkTriggers())
+            .then(async () => { this.predictionExecution = await engine.predictionStatus(); })
+            .catch(error => this.log.error(`prediction execution failed: ${(error as Error).message}`))
+            .finally(() => { this.predictionSupervision = undefined; });
+        }, HEARTBEAT_MS);
+      }
+      if (!this.heartbeatTimer) {
+        this.heartbeatTimer = setInterval(() => {
+          if (this.terminating || this.predictionHeartbeat) return;
+          this.predictionHeartbeat = engine.heartbeatIfResting()
+            .then(() => undefined)
+            .catch(error => this.log.error(`prediction heartbeat failed: ${(error as Error).message}`))
+            .finally(() => { this.predictionHeartbeat = undefined; });
+        }, HEARTBEAT_MS);
+      }
+      return;
+    }
     const resting = await engine.heartbeatIfResting().catch((error) => {
       this.log.warn(`heartbeat probe failed: ${(error as Error).message}`);
       return false;
     });
+    if (this.terminating) return;
     if (resting && !this.heartbeatTimer) {
       this.heartbeatTimer = setInterval(() => {
         void this.exclusive(async () => {
@@ -442,6 +556,23 @@ export class BotService {
 
   shutdown(cancelResting = true): Promise<ShutdownResult> {
     if (this.shutdownPromise) return this.shutdownPromise;
+    if (this.swing && (cancelResting || this.active)) {
+      // Prove cancellation/protection before stopping the loop. An unknown acknowledgement
+      // leaves the bot running with additions halted so late fills can still acquire stops.
+      const shutdown = this.exclusive(async (): Promise<ShutdownResult> => {
+        await this.swing!.prepareShutdown();
+        this.terminating = true; this.active = false; this.stopTimers();
+        await this.swing!.shutdown(false);
+        this.state.close();
+        return { stopped: true, restingOrdersCanceled: true, cancellation: { method: "engine", requested: true,
+          completed: true, verifiedOpenOrders: false, remainingOpenOrders: null, protectiveOrdersRetained: true } };
+      });
+      this.shutdownPromise = shutdown;
+      void shutdown.catch(() => { this.shutdownPromise = undefined; });
+      return shutdown;
+    }
+    // Latch the executor before a delayed strategy/signing call can resume.
+    const predictionShutdown = this.engine?.beginPredictionShutdown();
     this.terminating = true;
     this.active = false;
     this.stopTimers();
@@ -449,7 +580,15 @@ export class BotService {
     const shutdown = (async (): Promise<ShutdownResult> => {
       let primaryFailure: unknown;
       try {
+        await predictionShutdown;
+        await Promise.all([this.predictionSupervision, this.predictionHeartbeat]);
         return await this.exclusive(async () => {
+          if (this.swing) {
+            await this.swing.shutdown(cancelResting);
+            return { stopped: true, restingOrdersCanceled: cancelResting,
+              cancellation: { method: cancelResting ? "engine" : "none", requested: cancelResting,
+                completed: true, verifiedOpenOrders: false, remainingOpenOrders: null } };
+          }
           if (this.marketMaker) {
             let controllerFailure: unknown;
             try {
@@ -519,6 +658,7 @@ export class BotService {
         }
         try {
           this.state.close();
+          this.commodityRecordings?.close();
         } catch (error) {
           closeFailures.push(error);
         }
@@ -543,9 +683,15 @@ export class BotService {
   tick(tickId?: number): Promise<MarketMakeTickResult | import("@quotient-forecasting/cassie-core").TickResult> {
     return this.exclusive(async () => {
       const result = this.marketMaker
-        ? await this.marketMaker.tick()
-        : await this.engine!.tick(tickId === undefined ? {} : { tickId });
+        ? this.marketMaker instanceof TwoSidedMarketMakeController
+          ? await this.marketMaker.tick({ scheduled: true })
+          : await this.marketMaker.tick()
+        : this.swing ? await this.swing.tick(tickId) : await this.engine!.tick(tickId === undefined ? {} : { tickId });
       this.lastTickAt = Date.now();
+      if (this.commodityRecordings && !("skipped" in result && result.skipped)) {
+        const raw = await this.state.get(`strategy:${COMMODITY_REPORT_KEY}`);
+        if (raw) this.commodityRecordings.record(JSON.parse(raw) as CommodityReport, CommodityConfigSchema.parse(this.config.strategy.config));
+      }
       if (!this.marketMaker) await this.syncFastLoops();
       return result;
     });
@@ -559,31 +705,40 @@ export class BotService {
     return this.exclusive(() => this.adapter.openOrders(this.account));
   }
 
+  async executionStatus() {
+    return await this.engine?.predictionStatus() ?? { enabled: false };
+  }
+
   cancelOrder(id: string): Promise<void> {
+    if (this.swing) return Promise.reject(new Error("use swing halt; generic cancellation could remove native protection"));
     if (this.marketMaker) {
       return Promise.reject(new Error(
         "generic order cancellation is disabled for market-make bots; use market-make halt and hash-bound reconciliation",
       ));
     }
     return this.exclusive(async () => {
+      if (await this.engine?.cancelPredictionOrder(id)) return;
       await this.adapter.cancelOrder(this.account, id);
     });
   }
 
   cancelAll(): Promise<void> {
+    if (this.swing) return Promise.reject(new Error("use swing halt; native protective stops must remain in place"));
     if (this.marketMaker) {
       return Promise.reject(new Error(
         "generic cancel-all is disabled for market-make bots; use market-make halt and hash-bound reconciliation",
       ));
     }
     return this.exclusive(async () => {
-      await this.adapter.cancelAll(this.account);
+      if (this.engine) await this.engine.cancelAllResting();
+      else await this.adapter.cancelAll(this.account);
       await this.syncFastLoops();
     });
   }
 
   manualOrder(params: ManualOrderParams) {
     return this.exclusive(async () => {
+      if (this.swing) throw new Error("manual orders are disabled for a swing bot; they bypass its durable exposure ledger");
       if (!this.engine) {
         throw new Error(
           "manual orders are disabled for a market-make bot because they bypass durable inventory reservations",
@@ -596,23 +751,71 @@ export class BotService {
   }
 
   async pause(): Promise<void> {
+    if (this.swing) { await this.exclusive(() => this.swing!.halt()); return; }
     if (this.marketMaker) {
       await this.exclusive(async () => this.marketMaker!.halt());
       return;
     }
     await this.state.set("engine:paused", "true");
+    await this.engine?.supervisePredictions();
   }
 
   async resume(): Promise<void> {
+    if (this.config.strategy.id === "kalshi-commodities") throw new Error("use commodities resume after reviewing the current dry run");
+    if (this.swing) throw new Error("use swing resume to recover an operator or execution halt");
     if (this.marketMaker) {
       throw new Error("use /market-make/resume after reviewing reconciliation and activation state");
     }
+    await this.engine?.resumePredictions();
+    this.predictionExecution = await this.engine?.predictionStatus();
     await this.state.delete("engine:paused");
   }
 
   async paused(): Promise<boolean> {
+    if (this.swing) return (await this.swing.status()).halted;
     if (this.marketMaker) return this.marketMaker.status().halted;
     return (await this.state.get("engine:paused")) === "true";
+  }
+
+  async commodityStatus(): Promise<unknown> {
+    if (this.config.strategy.id !== "kalshi-commodities") throw new Error("this bot does not run kalshi-commodities");
+    const report = await this.state.get(`strategy:${COMMODITY_REPORT_KEY}`);
+    return { paused: await this.paused(), config: this.config.strategy.config, report: report ? JSON.parse(report) as unknown : null,
+      execution: await this.engine?.predictionStatus() };
+  }
+
+  commodityHistory(options: { from?: number; until?: number; limit?: number } = {}): unknown {
+    if (!this.commodityRecordings) throw new Error("this bot does not run kalshi-commodities");
+    return this.commodityRecordings.read(options);
+  }
+
+  commodityDryRun(): Promise<unknown> {
+    return this.exclusive(async () => {
+      if (this.config.strategy.id !== "kalshi-commodities" || !this.engine || !this.strategy) throw new Error("this bot does not run kalshi-commodities");
+      const ctx = await this.engine.strategyContext(), scratch = new Map<string, unknown>();
+      const original = ctx.memory;
+      ctx.memory = { get: async <T>(key: string): Promise<T | undefined> => structuredClone((scratch.has(key) ? scratch.get(key) : await original.get<T>(key)) as T | undefined),
+        set: async <T>(key: string, value: T): Promise<void> => { scratch.set(key, structuredClone(value)); } };
+      await this.strategy.tick(ctx);
+      return scratch.get(COMMODITY_REPORT_KEY) ?? { actions: [], reason: "no funded equity" };
+    });
+  }
+
+  commodityResume(reset: boolean): Promise<unknown> {
+    return this.exclusive(async () => {
+      if (this.config.strategy.id !== "kalshi-commodities" || !this.engine) throw new Error("this bot does not run kalshi-commodities");
+      const key = `strategy:${COMMODITY_LEDGER_KEY}`, raw = await this.state.get(key);
+      const ledger = raw ? JSON.parse(raw) as { halted?: boolean } : undefined;
+      if (ledger?.halted && !reset) throw new Error("commodity drawdown stop is latched; review losses and explicitly acknowledge reset");
+      if (reset) {
+        const ctx = await this.engine.strategyContext();
+        if (ctx.positions.length || ctx.openOrders.length) throw new Error("drawdown reset requires a flat account with no working orders");
+      }
+      await this.engine.resumePredictions();
+      if (reset) await this.state.delete(key);
+      await this.state.delete("engine:paused");
+      return this.commodityStatus();
+    });
   }
 
   logs(level?: LogLevel, tail?: number) {
@@ -620,16 +823,29 @@ export class BotService {
   }
 
   signalCheck() {
+    if (this.swing) return this.swing.check();
+    if (this.config.strategy.id === "market-make" && this.config.strategy.config.two_sided && !MarketMakeConfigSchema.parse(this.config.strategy.config).two_sided?.adaptive) {
+      return Promise.resolve({ ok: true, required: false, count: 0, source: "polymarket-books" });
+    }
     if (!this.opts.quotientToken) throw new Error("no Quotient API key in this runtime's environment");
     return checkLiveSignalAccess(this.config.signals, this.opts.quotientToken);
   }
 
-  async reportingCheck(): Promise<{ ok: true; enabled: boolean; username?: string; builderCodeConfigured: boolean }> {
-    const reporting = this.config.reporting;
-    if (!reporting) return { ok: true, enabled: false, builderCodeConfigured: false };
-    if (!this.opts.reportingApiKey) throw new Error("reporting is enabled but ARES_API_KEY is missing");
-    const { username } = await new AresClient({ apiKey: this.opts.reportingApiKey, baseUrl: reporting.baseUrl }).me();
-    return { ok: true, enabled: reporting.post, username, builderCodeConfigured: true };
+  private requireSwing(): SwingController {
+    if (!this.swing) throw new Error("this bot does not run quotient-swing");
+    return this.swing;
+  }
+  swingStatus() { return this.requireSwing().status(); }
+  swingCheck() { return this.requireSwing().check(); }
+  // Dry-run's async research must not hold the execution/protection mutex.
+  swingDryRun() { return this.requireSwing().dryRun(); }
+  swingReplay(options: { from?: number; until?: number; costMultiplier?: number; fillModel?: "cross" | "touch" } = {}) {
+    return this.requireSwing().replay(options);
+  }
+  swingHalt() { return this.exclusive(async () => { await this.requireSwing().halt(); return this.requireSwing().status(); }); }
+  async swingResume(acknowledgeLossReset = false) {
+    await this.requireSwing().refreshResearch();
+    return this.exclusive(async () => { await this.requireSwing().resume(acknowledgeLossReset); return this.requireSwing().status(); });
   }
 
   async geoblockCheck(): Promise<{ blocked?: boolean; country?: string; region?: string }> {
@@ -706,17 +922,17 @@ export class BotService {
 
   marketMakeDryRun(): Promise<MarketMakeDryRunResult> {
     if (!this.marketMaker) return Promise.reject(new Error(`strategy "${this.config.strategy.id}" is not market-make`));
-    return this.exclusive(() => this.marketMaker!.dryRun());
+    return this.exclusive<MarketMakeDryRunResult>(() => this.marketMaker!.dryRun());
   }
 
   marketMakeHalt(options: { liquidate?: boolean } = {}): Promise<MarketMakeControllerStatus> {
     if (!this.marketMaker) return Promise.reject(new Error(`strategy "${this.config.strategy.id}" is not market-make`));
-    return this.exclusive(() => this.marketMaker!.halt(options));
+    return this.exclusive<MarketMakeControllerStatus>(() => this.marketMaker!.halt(options));
   }
 
   marketMakeResume(options: { acknowledgeLossReset?: boolean } = {}): Promise<MarketMakeControllerStatus> {
     if (!this.marketMaker) return Promise.reject(new Error(`strategy "${this.config.strategy.id}" is not market-make`));
-    return this.exclusive(() => this.marketMaker!.resume(options));
+    return this.exclusive<MarketMakeControllerStatus>(() => this.marketMaker!.resume(options));
   }
 
   marketMakeReconcile(
@@ -726,10 +942,13 @@ export class BotService {
     if (options.apply === true && !options.expectedProposalHash) {
       return Promise.reject(new Error("applying reconciliation requires the exact proposal hash from a report-only preview"));
     }
-    return this.exclusive(() => this.marketMaker!.reconcile(options));
+    return this.exclusive<MarketMakeReconcileResult>(() => this.marketMaker!.reconcile(options));
   }
 
-  marketMakeSnapshot() {
+  marketMakeSnapshot(): {
+    strategy: ReturnType<MarketMaker["stateSnapshot"]>;
+    persistence: ReturnType<MarketMakeStateStore["exportSnapshot"]> | undefined;
+  } {
     if (!this.marketMaker) throw new Error(`strategy "${this.config.strategy.id}" is not market-make`);
     return {
       strategy: this.marketMaker.stateSnapshot(),

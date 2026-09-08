@@ -23,6 +23,7 @@ import type {
 import { DEFAULT_SIGNAL_MAX_AGE_SEC, type SignalsConfig } from "../config.js";
 import { boundFetch } from "../http.js";
 import { QuotientResearchClient } from "../quotient/research.js";
+import { QuotientApiError, withQuotientRetries, type RetryOptions } from "../quotient/retry.js";
 
 export const SignalSchema = z.object({
   id: z.string(),
@@ -63,7 +64,10 @@ export function marketForecastFromSignal(sig: Signal): MarketForecast | null {
 // ---------------------------------------------------------------------------
 
 type LiveSignalConfig = Pick<SignalsConfig, "baseUrl" | "path"> &
-  Partial<Pick<SignalsConfig, "maxAgeSec">>;
+  Partial<Pick<SignalsConfig, "maxAgeSec">> & {
+    /** Retry policy override, for tests; production uses the bounded default. */
+    retry?: RetryOptions;
+  };
 
 const GatewaySignalSchema = z.object({
   id: z.string(),
@@ -102,39 +106,9 @@ async function fetchGatewayRows(
     signal,
   });
   if (!res.ok) {
-    throw new Error(`signal API ${res.status} ${res.statusText} for ${url.pathname}`);
+    throw new QuotientApiError(res.status, url.pathname, res.statusText);
   }
   return GatewayResponseSchema.parse(await res.json()).signals;
-}
-
-/** Latest active published-signal thesis for one Polymarket condition. */
-export async function latestPublishedSignalThesis(
-  cfg: Pick<SignalsConfig, "baseUrl" | "path">,
-  conditionId: string,
-  token: string,
-  fetchImpl?: typeof fetch,
-  signal?: AbortSignal,
-): Promise<string | undefined> {
-  const rows = await fetchGatewayRows(cfg, token, boundFetch(fetchImpl), signal);
-  const matches = rows
-    .map((row) => GatewaySignalSchema.safeParse(row))
-    .filter((result) => result.success)
-    .map((result) => result.data)
-    .filter(
-      (row) =>
-        row.is_active !== false &&
-        row.market?.venue?.startsWith("polymarket") === true &&
-        row.market.condition_id?.toLowerCase() === conditionId.toLowerCase(),
-    )
-    .sort((a, b) => signalTimestamp(b) - signalTimestamp(a));
-
-  const thesis = matches[0]?.thesis;
-  return typeof thesis === "string" && thesis.trim() ? thesis.trim() : undefined;
-}
-
-function signalTimestamp(row: z.output<typeof GatewaySignalSchema>): number {
-  const value = Date.parse(row.forecast_updated_at ?? row.published_at ?? "");
-  return Number.isNaN(value) ? 0 : value;
 }
 
 /** Read-only credential preflight: authenticate and validate the feed envelope. */
@@ -153,6 +127,7 @@ export class LiveSignalSource implements SignalSource {
   /** YES-token marketRef → Quotient's stable Polymarket marketKey. */
   readonly #marketKeyCache = new Map<string, string>();
   readonly #cfg: Pick<SignalsConfig, "baseUrl" | "path" | "maxAgeSec">;
+  readonly #retry: RetryOptions | undefined;
   readonly #token: string;
   readonly #fetchImpl: typeof fetch;
   readonly #clobBase: string;
@@ -166,7 +141,8 @@ export class LiveSignalSource implements SignalSource {
     clobBase = "https://clob.polymarket.com",
     gammaBase = "https://gamma-api.polymarket.com",
   ) {
-    this.#cfg = { ...cfg, maxAgeSec: cfg.maxAgeSec ?? DEFAULT_SIGNAL_MAX_AGE_SEC };
+    this.#cfg = { baseUrl: cfg.baseUrl, path: cfg.path, maxAgeSec: cfg.maxAgeSec ?? DEFAULT_SIGNAL_MAX_AGE_SEC };
+    this.#retry = cfg.retry;
     this.#token = token;
     this.#fetchImpl = boundFetch(fetchImpl);
     this.#clobBase = clobBase;
@@ -178,8 +154,13 @@ export class LiveSignalSource implements SignalSource {
     });
   }
 
+  /**
+   * Gateway reads retry a bounded number of times on transient failure and
+   * then reject. The engine treats that rejection as "no fresh Quotient data"
+   * rather than abandoning the tick, so held positions still get evaluated.
+   */
   async latest(query: SignalQuery): Promise<Signal[]> {
-    const rows = await fetchGatewayRows(this.#cfg, this.#token, this.#fetchImpl);
+    const rows = await withQuotientRetries(() => fetchGatewayRows(this.#cfg, this.#token, this.#fetchImpl), this.#retry);
     const out: Signal[] = [];
     for (const raw of rows) {
       const parsed = GatewaySignalSchema.safeParse(raw);
@@ -223,10 +204,10 @@ export class LiveSignalSource implements SignalSource {
           .map((row) => [row.marketKey.toLowerCase(), row.marketRef]),
       );
       if (byKey.size === 0) return [];
-      const rows = await this.#research.lookup({
+      const rows = await withQuotientRetries(() => this.#research.lookup({
         marketKeys: [...byKey.keys()],
         venue: "polymarket",
-      });
+      }), this.#retry);
       return rows.flatMap((row) => {
         const marketKey = row.marketKey?.toLowerCase();
         const marketRef = marketKey ? byKey.get(marketKey) : undefined;

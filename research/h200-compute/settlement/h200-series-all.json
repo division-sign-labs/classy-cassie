@@ -1,0 +1,254 @@
+{
+  "series": [
+    {
+      "additional_prohibitions": [
+        "Persons who are employed by any of the Source Agencies are not permitted to trade on the Contract.",
+        "Persons who hold any material, non-public information on the Underlying are not permitted to trade on the Contract."
+      ],
+      "category": "Science and Technology",
+      "contract_terms_url": "https://assets.kalshi.com/contract_terms/GPUMON.pdf",
+      "contract_url": "https://assets.kalshi.com/regulatory/product-certifications/GPUMON.pdf",
+      "exchange_index": 0,
+      "fee_multiplier": 1,
+      "fee_type": "quadratic_with_maker_fees",
+      "frequency": "annual",
+      "last_updated_ts": "2026-09-03T18:35:49.66362Z",
+      "settlement_sources": [
+        {
+          "name": "Ornn",
+          "url": "https://dashboard.ornnai.com/compute"
+        }
+      ],
+      "tags": [
+        "AI",
+        "Compute",
+        "Tech"
+      ],
+      "ticker": "KXH200MAX",
+      "title": "H200 Yearly Directional Price"
+    },
+    {
+      "additional_prohibitions": [
+        "Persons who are employed by any of the Source Agencies are not permitted to trade on the Contract.",
+        "Persons who hold any material, non-public information on the Underlying are not permitted to trade on the Contract."
+      ],
+      "category": "Science and Technology",
+      "contract_terms_url": "https://assets.kalshi.com/contract_terms/GPUMON.pdf",
+      "contract_url": "https://assets.kalshi.com/regulatory/product-certifications/GPUMON.pdf",
+      "exchange_index": 0,
+      "fee_multiplier": 1,
+      "fee_type": "quadratic_with_maker_fees",
+      "frequency": "custom",
+      "last_updated_ts": "2026-09-03T18:35:49.684856Z",
+      "settlement_sources": [
+        {
+          "name": "Ornn",
+          "url": "https://dashboard.ornnai.com/compute"
+        }
+      ],
+      "tags": [
+        "AI",
+        "Compute",
+        "Tech"
+      ],
+      "ticker": "KXH200Q",
+      "title": "H200 Quarterly Directional Price"
+    },
+    {
+      "additional_prohibitions": [
+        "Persons who are employed by any of the Source Agencies are not permitted to trade on the Contract.",
+        "Persons who hold any material, non-public information on the Underlying are not permitted to trade on the Contract."
+      ],
+      "category": "Financials",
+      "contract_terms_url": "https://assets.kalshi.com/contract_terms/GPUA.pdf",
+      "contract_url": "https://assets.kalshi.com/regulatory/product-certifications/GPUA.pdf",
+      "exchange_index": 0,
+      "fee_multiplier": 1,
+      "fee_type": "quadratic_with_maker_fees",
+      "frequency": "weekly",
+      "last_updated_ts": "2026-09-03T18:35:49.936866Z",
+      "settlement_sources": [
+        {
+          "name": "Ornn",
+          "url": "https://dashboard.ornnai.com/compute"
+        }
+      ],
+      "tags": [
+        "Industries",
+        "AI",
+        "Compute"
+      ],
+      "ticker": "KXH200WS",
+      "title": "Weekly H200"
+    },
+    {
+      "additional_prohibitions": [
+        "Persons who are employed by any of the Source Agencies are not permitted to trade on the Contract.",
+        "Persons who hold any material, non-public information on the Underlying are not permitted to trade on the Contract."
+      ],
+      "category": "Financials",
+      "contract_terms_url": "https://assets.kalshi.com/contract_terms/GPUAVGA.pdf",
+      "contract_url": "https://assets.kalshi.com/regulatory/product-certifications/GPUAVGA.pdf",
+      "exchange_index": 0,
+      "fee_multiplier": 1,
+      "fee_type": "quadratic_with_maker_fees",
+      "frequency": "one_off",
+      "last_updated_ts": "2026-09-03T18:35:49.924977Z",
+      "settlement_sources": [
+        {
+          "name": "Ornn",
+          "url": "https://dashboard.ornnai.com/compute"
+        }
+      ],
+      "tags": [
+        "Industries",
+        "AI",
+        "Compute",
+        "Tech"
+      ],
+      "ticker": "KXH200MS",
+      "title": "H200 Monthly"
+    },
+    {
+      "additional_prohibitions": [
+        "Current and former players, coaches, and staff of the league, association, or organization(s) governing the event. For college leagues/associations specifically, or where otherwise appropriate (as identified by the Exchange), this applies to current and former players/coaches/staff of the specific teams in <event> rather than the league/association as a whole (e.g., if the Division I Gonzaga Men\u2019s Basketball Team is playing in <event>, this prohibition will restrict trades by current/former players of that team, rather than all current/former players/coaches/staff in any NCAA sport).",
+        "Paid employees of the league and league participants",
+        "Owners of teams and the league",
+        "and household members and immediate family of all above",
+        "Persons who are employed by any of the Source Agencies are not permitted to trade on the Contract.",
+        "Persons who hold any material, non-public information on the Underlying are not permitted to trade on the Contract."
+      ],
+      "category": "Economics",
+      "contract_terms_url": "https://assets.kalshi.com/contract_terms/EVENTCONFIRMED.pdf",
+      "contract_url": "https://assets.kalshi.com/regulatory/product-certifications/EVENTCONFIRMED.pdf",
+      "exchange_index": 0,
+      "fee_multiplier": 1,
+      "fee_type": "quadratic",
+      "frequency": "custom",
+      "last_updated_ts": "2026-09-04T09:34:59.862593Z",
+      "settlement_sources": [
+        {
+          "name": "Semafor",
+          "url": "https://www.semafor.com/"
+        },
+        {
+          "name": "ABC",
+          "url": "https://abcnews.go.com/"
+        },
+        {
+          "name": "Bloomberg",
+          "url": "https://www.bloomberg.com/"
+        },
+        {
+          "name": "NBC",
+          "url": "https://www.nbcnews.com/"
+        },
+        {
+          "name": "The Washington Post",
+          "url": "https://www.washingtonpost.com/"
+        },
+        {
+          "name": "Associated Press",
+          "url": "https://apnews.com"
+        },
+        {
+          "name": "The Wall Street Journal",
+          "url": "https://www.wsj.com/"
+        },
+        {
+          "name": "Fox News",
+          "url": "https://www.foxnews.com"
+        },
+        {
+          "name": "Reuters",
+          "url": "https://www.reuters.com/"
+        },
+        {
+          "name": "The Information",
+          "url": "https://www.theinformation.com/"
+        },
+        {
+          "name": "Politico",
+          "url": "https://www.politico.com"
+        },
+        {
+          "name": "Axios",
+          "url": "https://www.axios.com"
+        },
+        {
+          "name": "MSNBC",
+          "url": "https://www.msnbc.com"
+        },
+        {
+          "name": "CNN",
+          "url": "https://www.cnn.com"
+        },
+        {
+          "name": "the New York Times",
+          "url": "https://www.nytimes.com"
+        },
+        {
+          "name": "CBS",
+          "url": "https://www.cbsnews.com/"
+        }
+      ],
+      "tags": [
+        "Jobs & Economy"
+      ],
+      "ticker": "KXH200CHINA",
+      "title": "Nvidia H200 chips delivered to China before 2027?"
+    },
+    {
+      "additional_prohibitions": [
+        "Persons who are employed by any of the Source Agencies are not permitted to trade on the Contract.",
+        "Persons who hold any material, non-public information on the Underlying are not permitted to trade on the Contract."
+      ],
+      "category": "Science and Technology",
+      "contract_terms_url": "https://assets.kalshi.com/contract_terms/GPUW.pdf",
+      "contract_url": "https://assets.kalshi.com/regulatory/product-certifications/GPUW.pdf",
+      "exchange_index": 0,
+      "fee_multiplier": 1,
+      "fee_type": "quadratic_with_maker_fees",
+      "frequency": "weekly",
+      "last_updated_ts": "2026-09-04T22:55:19.821224Z",
+      "settlement_sources": [
+        {
+          "name": "Ornn",
+          "url": "https://dashboard.ornnai.com/compute"
+        }
+      ],
+      "tags": [
+        "AI"
+      ],
+      "ticker": "KXH200W",
+      "title": "H200 Weekly Price"
+    },
+    {
+      "additional_prohibitions": [
+        "Persons who are employed by any of the Source Agencies are not permitted to trade on the Contract.",
+        "Persons who hold any material, non-public information on the Underlying are not permitted to trade on the Contract."
+      ],
+      "category": "Science and Technology",
+      "contract_terms_url": "https://assets.kalshi.com/contract_terms/GPUMON.pdf",
+      "contract_url": "https://assets.kalshi.com/regulatory/product-certifications/GPUMON.pdf",
+      "exchange_index": 0,
+      "fee_multiplier": 1,
+      "fee_type": "quadratic_with_maker_fees",
+      "frequency": "monthly",
+      "last_updated_ts": "2026-09-03T18:35:49.624948Z",
+      "settlement_sources": [
+        {
+          "name": "Ornn",
+          "url": "https://dashboard.ornnai.com/compute"
+        }
+      ],
+      "tags": [
+        "AI",
+        "Compute",
+        "Tech"
+      ],
+      "ticker": "KXH200MON",
+      "title": "H200 Monthly Price"
+    }
+  ]
+}

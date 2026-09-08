@@ -1,0 +1,1935 @@
+{
+  "source": "/Users/jordanolmstead/dev/classy-cassie/research/mm-strategy-review/graph-oos-refresh/graph-reference-marks.parquet",
+  "as_of": "2026-09-05 05:32:46.258285+00:00",
+  "verified_initial_publication_forecasts": 992,
+  "method": {
+    "exposure": "Absolute initial publication Q minus timing-valid public reference entry price, in pp.",
+    "primary_outcome": "Absolute reference-price change at horizon; NOT realized path volatility or residual volatility.",
+    "entry_range": "[0.05,0.95]; horizon must be matured, before market close, with timing-valid compatible reference-price marks.",
+    "weighting": "Within each sample/fit each market has total weight one; repeated updates share its weight.",
+    "uncertainty": "Event-clustered sandwich normal-approximation 95% CI; not multiple-testing adjusted.",
+    "controls": "Starting-price bins (.0-.2/.2-.4/.4-.6/.6-.8/.8-1), category fixed effects, log(1+hours to close), Q direction; additional prior 24h realized-volatility proxy.",
+    "boundaries": "[0,5),[5,10),[10,20),[20,30],(30,infinity)"
+  },
+  "horizons": {
+    "1h": {
+      "observations": 787,
+      "markets": 396,
+      "events": 225,
+      "bins": [
+        {
+          "gap_bucket": "0-5pp",
+          "observations": 246,
+          "markets": 157,
+          "events": 100,
+          "absolute_move_pp": {
+            "mean": 2.0975371549893844,
+            "median_market_mean": 0.6666666666666673,
+            "event_clustered_ci95": [
+              1.3475362455192461,
+              2.8475380644595227
+            ]
+          },
+          "signed_toward_q_pp": {
+            "mean": -0.06526539278131649,
+            "median_market_mean": 0.0,
+            "event_clustered_ci95": [
+              -0.8500158211265918,
+              0.7194850355639588
+            ]
+          },
+          "move_at_least_2pp_fraction": {
+            "mean": 0.23776160145586897,
+            "median_market_mean": 0.0,
+            "event_clustered_ci95": [
+              0.16816990156619627,
+              0.3073533013455417
+            ]
+          },
+          "move_at_least_5pp_fraction": {
+            "mean": 0.12161055505004549,
+            "median_market_mean": 0.0,
+            "event_clustered_ci95": [
+              0.07284048593447195,
+              0.17038062416561903
+            ]
+          },
+          "prior_rv24_pp": {
+            "mean": 20.61025358427598,
+            "median_market_mean": 15.8902485820707,
+            "event_clustered_ci95": [
+              16.4438902443604,
+              24.77661692419156
+            ]
+          }
+        },
+        {
+          "gap_bucket": "5-10pp",
+          "observations": 228,
+          "markets": 154,
+          "events": 114,
+          "absolute_move_pp": {
+            "mean": 2.4699134199134196,
+            "median_market_mean": 0.5000000000000004,
+            "event_clustered_ci95": [
+              1.560592851175321,
+              3.379233988651518
+            ]
+          },
+          "signed_toward_q_pp": {
+            "mean": -0.2950216450216452,
+            "median_market_mean": 0.0,
+            "event_clustered_ci95": [
+              -1.1608309057985908,
+              0.5707876157553005
+            ]
+          },
+          "move_at_least_2pp_fraction": {
+            "mean": 0.2705627705627705,
+            "median_market_mean": 0.0,
+            "event_clustered_ci95": [
+              0.20109846801296621,
+              0.3400270731125748
+            ]
+          },
+          "move_at_least_5pp_fraction": {
+            "mean": 0.1314935064935065,
+            "median_market_mean": 0.0,
+            "event_clustered_ci95": [
+              0.07685734999929532,
+              0.18612966298771766
+            ]
+          },
+          "prior_rv24_pp": {
+            "mean": 18.724865760577206,
+            "median_market_mean": 12.020000675163335,
+            "event_clustered_ci95": [
+              15.464194025416138,
+              21.985537495738274
+            ]
+          }
+        },
+        {
+          "gap_bucket": "10-20pp",
+          "observations": 243,
+          "markets": 159,
+          "events": 120,
+          "absolute_move_pp": {
+            "mean": 3.1681341719077563,
+            "median_market_mean": 0.5000000000000004,
+            "event_clustered_ci95": [
+              1.9093684141146259,
+              4.426899929700887
+            ]
+          },
+          "signed_toward_q_pp": {
+            "mean": 0.7640461215932913,
+            "median_market_mean": 0.0,
+            "event_clustered_ci95": [
+              -0.31052954053284465,
+              1.8386217837194274
+            ]
+          },
+          "move_at_least_2pp_fraction": {
+            "mean": 0.27044025157232704,
+            "median_market_mean": 0.0,
+            "event_clustered_ci95": [
+              0.19405916214370714,
+              0.34682134100094697
+            ]
+          },
+          "move_at_least_5pp_fraction": {
+            "mean": 0.14360587002096437,
+            "median_market_mean": 0.0,
+            "event_clustered_ci95": [
+              0.08896275484602004,
+              0.1982489851959087
+            ]
+          },
+          "prior_rv24_pp": {
+            "mean": 22.024821846032975,
+            "median_market_mean": 16.13226580490168,
+            "event_clustered_ci95": [
+              18.26178603010235,
+              25.7878576619636
+            ]
+          }
+        },
+        {
+          "gap_bucket": "20-30pp",
+          "observations": 52,
+          "markets": 44,
+          "events": 37,
+          "absolute_move_pp": {
+            "mean": 4.367045454545454,
+            "median_market_mean": 0.874999999999998,
+            "event_clustered_ci95": [
+              1.8044538937001287,
+              6.929637015390779
+            ]
+          },
+          "signed_toward_q_pp": {
+            "mean": 1.8238636363636365,
+            "median_market_mean": 0.0,
+            "event_clustered_ci95": [
+              -0.8191375777677317,
+              4.466864850495004
+            ]
+          },
+          "move_at_least_2pp_fraction": {
+            "mean": 0.3465909090909091,
+            "median_market_mean": 0.0,
+            "event_clustered_ci95": [
+              0.19278216208819457,
+              0.5003996560936237
+            ]
+          },
+          "move_at_least_5pp_fraction": {
+            "mean": 0.26136363636363635,
+            "median_market_mean": 0.0,
+            "event_clustered_ci95": [
+              0.11457600726780781,
+              0.4081512654594649
+            ]
+          },
+          "prior_rv24_pp": {
+            "mean": 26.75358260144806,
+            "median_market_mean": 23.13491558510449,
+            "event_clustered_ci95": [
+              18.61246079112157,
+              34.89470441177455
+            ]
+          }
+        },
+        {
+          "gap_bucket": ">30pp",
+          "observations": 18,
+          "markets": 18,
+          "events": 14,
+          "absolute_move_pp": {
+            "mean": 14.211111111111112,
+            "median_market_mean": 3.0,
+            "event_clustered_ci95": [
+              6.9678133544881735,
+              21.454408867734053
+            ]
+          },
+          "signed_toward_q_pp": {
+            "mean": 13.794444444444444,
+            "median_market_mean": 2.0999999999999988,
+            "event_clustered_ci95": [
+              6.4378192984423865,
+              21.151069590446504
+            ]
+          },
+          "move_at_least_2pp_fraction": {
+            "mean": 0.5555555555555556,
+            "median_market_mean": 1.0,
+            "event_clustered_ci95": [
+              0.37799422271821337,
+              0.7331168883928978
+            ]
+          },
+          "move_at_least_5pp_fraction": {
+            "mean": 0.4444444444444444,
+            "median_market_mean": 0.0,
+            "event_clustered_ci95": [
+              0.2373741264126129,
+              0.6515147624762759
+            ]
+          },
+          "prior_rv24_pp": {
+            "mean": 54.76686313856975,
+            "median_market_mean": 36.76834658172941,
+            "event_clustered_ci95": [
+              33.12330593607164,
+              76.41042034106786
+            ]
+          }
+        }
+      ],
+      "regressions": {
+        "unadjusted": {
+          "observations": 787,
+          "markets": 396,
+          "events": 225,
+          "outcome": "abs_move_pp",
+          "gap_effect_pp_per_10pp_gap": 2.266764672323808,
+          "event_clustered_ci95": [
+            0.8302001773504326,
+            3.7033291672971833
+          ],
+          "controls": [],
+          "design_rank": 2,
+          "weighted_r_squared": 0.06484693914471562
+        },
+        "price_category_time_direction": {
+          "observations": 787,
+          "markets": 396,
+          "events": 225,
+          "outcome": "abs_move_pp",
+          "gap_effect_pp_per_10pp_gap": 2.162075568969066,
+          "event_clustered_ci95": [
+            0.6930355171286184,
+            3.6311156208095134
+          ],
+          "controls": [
+            "log1p_hours_to_close",
+            "q_direction_yes",
+            "price_bucket_(0.2, 0.4]",
+            "price_bucket_(0.4, 0.6]",
+            "price_bucket_(0.6, 0.8]",
+            "price_bucket_(0.8, 1.0]",
+            "category_Economics",
+            "category_Entertainment",
+            "category_Equities",
+            "category_Geopolitics",
+            "category_Global Elections",
+            "category_Politics",
+            "category_Science & Tech",
+            "category_Unknown"
+          ],
+          "design_rank": 16,
+          "weighted_r_squared": 0.2145132498437723
+        },
+        "plus_prior_rv24": {
+          "observations": 747,
+          "markets": 363,
+          "events": 209,
+          "outcome": "abs_move_pp",
+          "gap_effect_pp_per_10pp_gap": 2.109660827037555,
+          "event_clustered_ci95": [
+            0.5779666611068408,
+            3.6413549929682696
+          ],
+          "controls": [
+            "log1p_hours_to_close",
+            "q_direction_yes",
+            "price_bucket_(0.2, 0.4]",
+            "price_bucket_(0.4, 0.6]",
+            "price_bucket_(0.6, 0.8]",
+            "price_bucket_(0.8, 1.0]",
+            "category_Economics",
+            "category_Entertainment",
+            "category_Equities",
+            "category_Geopolitics",
+            "category_Global Elections",
+            "category_Politics",
+            "category_Science & Tech",
+            "category_Unknown",
+            "prior_rv24_per_10pp"
+          ],
+          "design_rank": 17,
+          "weighted_r_squared": 0.3026149275696114
+        },
+        "plus_prior_rv24_gap_at_most_30": {
+          "observations": 731,
+          "markets": 354,
+          "events": 208,
+          "outcome": "abs_move_pp",
+          "gap_effect_pp_per_10pp_gap": 1.0477061905968963,
+          "event_clustered_ci95": [
+            -0.25658427355870406,
+            2.3519966547524964
+          ],
+          "controls": [
+            "log1p_hours_to_close",
+            "q_direction_yes",
+            "price_bucket_(0.2, 0.4]",
+            "price_bucket_(0.4, 0.6]",
+            "price_bucket_(0.6, 0.8]",
+            "price_bucket_(0.8, 1.0]",
+            "category_Economics",
+            "category_Entertainment",
+            "category_Equities",
+            "category_Geopolitics",
+            "category_Global Elections",
+            "category_Politics",
+            "category_Science & Tech",
+            "category_Unknown",
+            "prior_rv24_per_10pp"
+          ],
+          "design_rank": 17,
+          "weighted_r_squared": 0.25999467929754805
+        },
+        "signed_plus_prior_rv24": {
+          "observations": 747,
+          "markets": 363,
+          "events": 209,
+          "outcome": "signed_toward_q_pp",
+          "gap_effect_pp_per_10pp_gap": 3.089885105440649,
+          "event_clustered_ci95": [
+            1.4675872244435677,
+            4.71218298643773
+          ],
+          "controls": [
+            "log1p_hours_to_close",
+            "q_direction_yes",
+            "price_bucket_(0.2, 0.4]",
+            "price_bucket_(0.4, 0.6]",
+            "price_bucket_(0.6, 0.8]",
+            "price_bucket_(0.8, 1.0]",
+            "category_Economics",
+            "category_Entertainment",
+            "category_Equities",
+            "category_Geopolitics",
+            "category_Global Elections",
+            "category_Politics",
+            "category_Science & Tech",
+            "category_Unknown",
+            "prior_rv24_per_10pp"
+          ],
+          "design_rank": 17,
+          "weighted_r_squared": 0.2025892398457797
+        }
+      },
+      "same_common_matured_forecasts": {
+        "count": 516,
+        "bins": [
+          {
+            "gap_bucket": "0-5pp",
+            "observations": 143,
+            "markets": 90,
+            "events": 63,
+            "absolute_move_pp": {
+              "mean": 0.9357870370370371,
+              "median_market_mean": 0.40000000000000036,
+              "event_clustered_ci95": [
+                0.586637441579974,
+                1.2849366324941003
+              ]
+            },
+            "signed_toward_q_pp": {
+              "mean": -0.05634259259259271,
+              "median_market_mean": 0.0,
+              "event_clustered_ci95": [
+                -0.4642069828245636,
+                0.35152179763937813
+              ]
+            },
+            "move_at_least_2pp_fraction": {
+              "mean": 0.10537037037037038,
+              "median_market_mean": 0.0,
+              "event_clustered_ci95": [
+                0.052814461562686814,
+                0.15792627917805394
+              ]
+            },
+            "move_at_least_5pp_fraction": {
+              "mean": 0.05555555555555555,
+              "median_market_mean": 0.0,
+              "event_clustered_ci95": [
+                0.011514848529070205,
+                0.0995962625820409
+              ]
+            },
+            "prior_rv24_pp": {
+              "mean": 13.846427071909549,
+              "median_market_mean": 8.864716305726457,
+              "event_clustered_ci95": [
+                9.376134107203658,
+                18.31672003661544
+              ]
+            }
+          },
+          {
+            "gap_bucket": "5-10pp",
+            "observations": 159,
+            "markets": 109,
+            "events": 84,
+            "absolute_move_pp": {
+              "mean": 1.681880733944954,
+              "median_market_mean": 0.49999999999999767,
+              "event_clustered_ci95": [
+                0.833487336487564,
+                2.530274131402344
+              ]
+            },
+            "signed_toward_q_pp": {
+              "mean": 0.29701834862385346,
+              "median_market_mean": 0.0,
+              "event_clustered_ci95": [
+                -0.47605144702001967,
+                1.0700881442677266
+              ]
+            },
+            "move_at_least_2pp_fraction": {
+              "mean": 0.17660550458715596,
+              "median_market_mean": 0.0,
+              "event_clustered_ci95": [
+                0.10215430892349237,
+                0.25105670025081955
+              ]
+            },
+            "move_at_least_5pp_fraction": {
+              "mean": 0.07186544342507645,
+              "median_market_mean": 0.0,
+              "event_clustered_ci95": [
+                0.020942670954116747,
+                0.12278821589603614
+              ]
+            },
+            "prior_rv24_pp": {
+              "mean": 14.358130369629567,
+              "median_market_mean": 10.221668161313008,
+              "event_clustered_ci95": [
+                10.865396593161767,
+                17.850864146097365
+              ]
+            }
+          },
+          {
+            "gap_bucket": "10-20pp",
+            "observations": 169,
+            "markets": 103,
+            "events": 88,
+            "absolute_move_pp": {
+              "mean": 1.7194174757281553,
+              "median_market_mean": 0.2500000000000002,
+              "event_clustered_ci95": [
+                0.8520990149361468,
+                2.5867359365201636
+              ]
+            },
+            "signed_toward_q_pp": {
+              "mean": 0.13317152103559868,
+              "median_market_mean": 0.0,
+              "event_clustered_ci95": [
+                -0.7291272509869264,
+                0.9954702930581238
+              ]
+            },
+            "move_at_least_2pp_fraction": {
+              "mean": 0.18932038834951456,
+              "median_market_mean": 0.0,
+              "event_clustered_ci95": [
+                0.10756071634199078,
+                0.27108006035703835
+              ]
+            },
+            "move_at_least_5pp_fraction": {
+              "mean": 0.07928802588996763,
+              "median_market_mean": 0.0,
+              "event_clustered_ci95": [
+                0.02671257229149937,
+                0.13186347948843588
+              ]
+            },
+            "prior_rv24_pp": {
+              "mean": 15.23262618907132,
+              "median_market_mean": 10.349894682596087,
+              "event_clustered_ci95": [
+                12.516790407130202,
+                17.94846197101244
+              ]
+            }
+          },
+          {
+            "gap_bucket": "20-30pp",
+            "observations": 37,
+            "markets": 29,
+            "events": 28,
+            "absolute_move_pp": {
+              "mean": 2.687931034482758,
+              "median_market_mean": 0.7500000000000007,
+              "event_clustered_ci95": [
+                1.1858375341973146,
+                4.190024534768201
+              ]
+            },
+            "signed_toward_q_pp": {
+              "mean": 0.10517241379310326,
+              "median_market_mean": 0.0,
+              "event_clustered_ci95": [
+                -1.677789153268112,
+                1.8881339808543183
+              ]
+            },
+            "move_at_least_2pp_fraction": {
+              "mean": 0.31896551724137934,
+              "median_market_mean": 0.0,
+              "event_clustered_ci95": [
+                0.15298753111425517,
+                0.4849435033685035
+              ]
+            },
+            "move_at_least_5pp_fraction": {
+              "mean": 0.22413793103448276,
+              "median_market_mean": 0.0,
+              "event_clustered_ci95": [
+                0.0718840008093512,
+                0.3763918612596143
+              ]
+            },
+            "prior_rv24_pp": {
+              "mean": 21.954822877544004,
+              "median_market_mean": 18.587630295441112,
+              "event_clustered_ci95": [
+                13.91023431184135,
+                29.999411443246657
+              ]
+            }
+          },
+          {
+            "gap_bucket": ">30pp",
+            "observations": 8,
+            "markets": 8,
+            "events": 7,
+            "absolute_move_pp": {
+              "mean": 13.2375,
+              "median_market_mean": 3.0,
+              "event_clustered_ci95": [
+                0.041339121510015175,
+                26.433660878489988
+              ]
+            },
+            "signed_toward_q_pp": {
+              "mean": 12.6125,
+              "median_market_mean": 1.7499999999999987,
+              "event_clustered_ci95": [
+                -0.8497989076496957,
+                26.074798907649697
+              ]
+            },
+            "move_at_least_2pp_fraction": {
+              "mean": 0.625,
+              "median_market_mean": 1.0,
+              "event_clustered_ci95": [
+                0.31118713279248733,
+                0.9388128672075127
+              ]
+            },
+            "move_at_least_5pp_fraction": {
+              "mean": 0.375,
+              "median_market_mean": 0.0,
+              "event_clustered_ci95": [
+                -0.013587687176266572,
+                0.7635876871762666
+              ]
+            },
+            "prior_rv24_pp": {
+              "mean": 26.4380097766398,
+              "median_market_mean": 26.139051245215462,
+              "event_clustered_ci95": [
+                11.476563824183305,
+                41.39945572909629
+              ]
+            }
+          }
+        ],
+        "fully_adjusted": {
+          "observations": 504,
+          "markets": 238,
+          "events": 163,
+          "outcome": "abs_move_pp",
+          "gap_effect_pp_per_10pp_gap": 1.5370086305630624,
+          "event_clustered_ci95": [
+            -0.7876652177797849,
+            3.8616824789059097
+          ],
+          "controls": [
+            "log1p_hours_to_close",
+            "q_direction_yes",
+            "price_bucket_(0.2, 0.4]",
+            "price_bucket_(0.4, 0.6]",
+            "price_bucket_(0.6, 0.8]",
+            "price_bucket_(0.8, 1.0]",
+            "category_Economics",
+            "category_Entertainment",
+            "category_Equities",
+            "category_Geopolitics",
+            "category_Global Elections",
+            "category_Politics",
+            "category_Science & Tech",
+            "category_Unknown",
+            "prior_rv24_per_10pp"
+          ],
+          "design_rank": 17,
+          "weighted_r_squared": 0.2841889672416379
+        }
+      }
+    },
+    "6h": {
+      "observations": 741,
+      "markets": 364,
+      "events": 214,
+      "bins": [
+        {
+          "gap_bucket": "0-5pp",
+          "observations": 236,
+          "markets": 149,
+          "events": 94,
+          "absolute_move_pp": {
+            "mean": 6.323466762543943,
+            "median_market_mean": 2.3499999999999996,
+            "event_clustered_ci95": [
+              4.5273237243728675,
+              8.119609800715018
+            ]
+          },
+          "signed_toward_q_pp": {
+            "mean": 0.49756072227548725,
+            "median_market_mean": 0.0,
+            "event_clustered_ci95": [
+              -1.4658649453385735,
+              2.460986389889548
+            ]
+          },
+          "move_at_least_2pp_fraction": {
+            "mean": 0.5220517737296261,
+            "median_market_mean": 0.5,
+            "event_clustered_ci95": [
+              0.4397972955429499,
+              0.6043062519163023
+            ]
+          },
+          "move_at_least_5pp_fraction": {
+            "mean": 0.336241610738255,
+            "median_market_mean": 0.0,
+            "event_clustered_ci95": [
+              0.2553123313637699,
+              0.41717089011274006
+            ]
+          },
+          "prior_rv24_pp": {
+            "mean": 19.083624854718003,
+            "median_market_mean": 14.35201131234932,
+            "event_clustered_ci95": [
+              14.979800949760232,
+              23.187448759675775
+            ]
+          }
+        },
+        {
+          "gap_bucket": "5-10pp",
+          "observations": 217,
+          "markets": 145,
+          "events": 108,
+          "absolute_move_pp": {
+            "mean": 5.735344827586207,
+            "median_market_mean": 2.0000000000000018,
+            "event_clustered_ci95": [
+              4.11581410392516,
+              7.354875551247254
+            ]
+          },
+          "signed_toward_q_pp": {
+            "mean": 1.1272988505747126,
+            "median_market_mean": 0.09999999999999454,
+            "event_clustered_ci95": [
+              -0.7357408050731369,
+              2.990338506222562
+            ]
+          },
+          "move_at_least_2pp_fraction": {
+            "mean": 0.4586206896551724,
+            "median_market_mean": 0.3333333333333333,
+            "event_clustered_ci95": [
+              0.3802225919480028,
+              0.537018787362342
+            ]
+          },
+          "move_at_least_5pp_fraction": {
+            "mean": 0.27298850574712646,
+            "median_market_mean": 0.0,
+            "event_clustered_ci95": [
+              0.20453996548641323,
+              0.3414370460078397
+            ]
+          },
+          "prior_rv24_pp": {
+            "mean": 17.998339601421566,
+            "median_market_mean": 11.863805839083806,
+            "event_clustered_ci95": [
+              14.690132397137672,
+              21.30654680570546
+            ]
+          }
+        },
+        {
+          "gap_bucket": "10-20pp",
+          "observations": 226,
+          "markets": 145,
+          "events": 110,
+          "absolute_move_pp": {
+            "mean": 6.4268965517241385,
+            "median_market_mean": 3.0000000000000027,
+            "event_clustered_ci95": [
+              4.5374556039538705,
+              8.316337499494406
+            ]
+          },
+          "signed_toward_q_pp": {
+            "mean": 2.100459770114943,
+            "median_market_mean": 0.5000000000000004,
+            "event_clustered_ci95": [
+              -0.029441380009615603,
+              4.230360920239502
+            ]
+          },
+          "move_at_least_2pp_fraction": {
+            "mean": 0.5390804597701149,
+            "median_market_mean": 0.6666666666666666,
+            "event_clustered_ci95": [
+              0.45446878161404136,
+              0.6236921379261884
+            ]
+          },
+          "move_at_least_5pp_fraction": {
+            "mean": 0.3379310344827586,
+            "median_market_mean": 0.0,
+            "event_clustered_ci95": [
+              0.25831264350838046,
+              0.4175494254571367
+            ]
+          },
+          "prior_rv24_pp": {
+            "mean": 20.00830516285964,
+            "median_market_mean": 15.695718404108579,
+            "event_clustered_ci95": [
+              16.709912513013585,
+              23.306697812705693
+            ]
+          }
+        },
+        {
+          "gap_bucket": "20-30pp",
+          "observations": 48,
+          "markets": 40,
+          "events": 33,
+          "absolute_move_pp": {
+            "mean": 7.428124999999999,
+            "median_market_mean": 5.6249999999999964,
+            "event_clustered_ci95": [
+              4.726133665948246,
+              10.130116334051753
+            ]
+          },
+          "signed_toward_q_pp": {
+            "mean": -1.421875000000001,
+            "median_market_mean": 0.0,
+            "event_clustered_ci95": [
+              -5.224514871129742,
+              2.38076487112974
+            ]
+          },
+          "move_at_least_2pp_fraction": {
+            "mean": 0.6375,
+            "median_market_mean": 1.0,
+            "event_clustered_ci95": [
+              0.47136749011754575,
+              0.8036325098824542
+            ]
+          },
+          "move_at_least_5pp_fraction": {
+            "mean": 0.50625,
+            "median_market_mean": 0.5,
+            "event_clustered_ci95": [
+              0.34607528467729076,
+              0.6664247153227092
+            ]
+          },
+          "prior_rv24_pp": {
+            "mean": 24.25547851493255,
+            "median_market_mean": 21.016654339243747,
+            "event_clustered_ci95": [
+              16.64248860828329,
+              31.868468421581806
+            ]
+          }
+        },
+        {
+          "gap_bucket": ">30pp",
+          "observations": 14,
+          "markets": 14,
+          "events": 10,
+          "absolute_move_pp": {
+            "mean": 21.414285714285715,
+            "median_market_mean": 18.75,
+            "event_clustered_ci95": [
+              9.75127209572783,
+              33.0772993328436
+            ]
+          },
+          "signed_toward_q_pp": {
+            "mean": 21.342857142857145,
+            "median_market_mean": 18.75,
+            "event_clustered_ci95": [
+              9.603486631624442,
+              33.08222765408985
+            ]
+          },
+          "move_at_least_2pp_fraction": {
+            "mean": 0.7142857142857143,
+            "median_market_mean": 1.0,
+            "event_clustered_ci95": [
+              0.4872272294066956,
+              0.941344199164733
+            ]
+          },
+          "move_at_least_5pp_fraction": {
+            "mean": 0.7142857142857143,
+            "median_market_mean": 1.0,
+            "event_clustered_ci95": [
+              0.4872272294066956,
+              0.941344199164733
+            ]
+          },
+          "prior_rv24_pp": {
+            "mean": 39.16869128345381,
+            "median_market_mean": 29.958304357890476,
+            "event_clustered_ci95": [
+              20.77228862920967,
+              57.56509393769795
+            ]
+          }
+        }
+      ],
+      "regressions": {
+        "unadjusted": {
+          "observations": 741,
+          "markets": 364,
+          "events": 214,
+          "outcome": "abs_move_pp",
+          "gap_effect_pp_per_10pp_gap": 1.4573538471585328,
+          "event_clustered_ci95": [
+            -0.35074131957139354,
+            3.265449013888459
+          ],
+          "controls": [],
+          "design_rank": 2,
+          "weighted_r_squared": 0.011166399137027438
+        },
+        "price_category_time_direction": {
+          "observations": 741,
+          "markets": 364,
+          "events": 214,
+          "outcome": "abs_move_pp",
+          "gap_effect_pp_per_10pp_gap": 0.6918275269773239,
+          "event_clustered_ci95": [
+            -1.1825203636699277,
+            2.5661754176245752
+          ],
+          "controls": [
+            "log1p_hours_to_close",
+            "q_direction_yes",
+            "price_bucket_(0.2, 0.4]",
+            "price_bucket_(0.4, 0.6]",
+            "price_bucket_(0.6, 0.8]",
+            "price_bucket_(0.8, 1.0]",
+            "category_Economics",
+            "category_Entertainment",
+            "category_Equities",
+            "category_Geopolitics",
+            "category_Global Elections",
+            "category_Politics",
+            "category_Science & Tech",
+            "category_Unknown"
+          ],
+          "design_rank": 16,
+          "weighted_r_squared": 0.23143988929626247
+        },
+        "plus_prior_rv24": {
+          "observations": 711,
+          "markets": 341,
+          "events": 202,
+          "outcome": "abs_move_pp",
+          "gap_effect_pp_per_10pp_gap": 0.1514398969534019,
+          "event_clustered_ci95": [
+            -1.6839425965957113,
+            1.986822390502515
+          ],
+          "controls": [
+            "log1p_hours_to_close",
+            "q_direction_yes",
+            "price_bucket_(0.2, 0.4]",
+            "price_bucket_(0.4, 0.6]",
+            "price_bucket_(0.6, 0.8]",
+            "price_bucket_(0.8, 1.0]",
+            "category_Economics",
+            "category_Entertainment",
+            "category_Equities",
+            "category_Geopolitics",
+            "category_Global Elections",
+            "category_Politics",
+            "category_Science & Tech",
+            "category_Unknown",
+            "prior_rv24_per_10pp"
+          ],
+          "design_rank": 17,
+          "weighted_r_squared": 0.28731655886537366
+        },
+        "plus_prior_rv24_gap_at_most_30": {
+          "observations": 698,
+          "markets": 333,
+          "events": 201,
+          "outcome": "abs_move_pp",
+          "gap_effect_pp_per_10pp_gap": -1.3100744227699674,
+          "event_clustered_ci95": [
+            -3.086534377496807,
+            0.46638553195687216
+          ],
+          "controls": [
+            "log1p_hours_to_close",
+            "q_direction_yes",
+            "price_bucket_(0.2, 0.4]",
+            "price_bucket_(0.4, 0.6]",
+            "price_bucket_(0.6, 0.8]",
+            "price_bucket_(0.8, 1.0]",
+            "category_Economics",
+            "category_Entertainment",
+            "category_Equities",
+            "category_Geopolitics",
+            "category_Global Elections",
+            "category_Politics",
+            "category_Science & Tech",
+            "category_Unknown",
+            "prior_rv24_per_10pp"
+          ],
+          "design_rank": 17,
+          "weighted_r_squared": 0.27418968334147564
+        },
+        "signed_plus_prior_rv24": {
+          "observations": 711,
+          "markets": 341,
+          "events": 202,
+          "outcome": "signed_toward_q_pp",
+          "gap_effect_pp_per_10pp_gap": 1.9815895009234854,
+          "event_clustered_ci95": [
+            -0.7555602893849676,
+            4.718739291231938
+          ],
+          "controls": [
+            "log1p_hours_to_close",
+            "q_direction_yes",
+            "price_bucket_(0.2, 0.4]",
+            "price_bucket_(0.4, 0.6]",
+            "price_bucket_(0.6, 0.8]",
+            "price_bucket_(0.8, 1.0]",
+            "category_Economics",
+            "category_Entertainment",
+            "category_Equities",
+            "category_Geopolitics",
+            "category_Global Elections",
+            "category_Politics",
+            "category_Science & Tech",
+            "category_Unknown",
+            "prior_rv24_per_10pp"
+          ],
+          "design_rank": 17,
+          "weighted_r_squared": 0.08298424955436823
+        }
+      },
+      "same_common_matured_forecasts": {
+        "count": 516,
+        "bins": [
+          {
+            "gap_bucket": "0-5pp",
+            "observations": 143,
+            "markets": 90,
+            "events": 63,
+            "absolute_move_pp": {
+              "mean": 3.418194444444445,
+              "median_market_mean": 1.2916666666666679,
+              "event_clustered_ci95": [
+                2.2238252113853365,
+                4.6125636775035534
+              ]
+            },
+            "signed_toward_q_pp": {
+              "mean": -0.3835648148148147,
+              "median_market_mean": 0.0,
+              "event_clustered_ci95": [
+                -1.6901728624436787,
+                0.9230432328140492
+              ]
+            },
+            "move_at_least_2pp_fraction": {
+              "mean": 0.4185185185185185,
+              "median_market_mean": 0.0,
+              "event_clustered_ci95": [
+                0.3110146707280685,
+                0.5260223663089686
+              ]
+            },
+            "move_at_least_5pp_fraction": {
+              "mean": 0.22407407407407404,
+              "median_market_mean": 0.0,
+              "event_clustered_ci95": [
+                0.13942188998387406,
+                0.308726258164274
+              ]
+            },
+            "prior_rv24_pp": {
+              "mean": 13.846427071909549,
+              "median_market_mean": 8.864716305726457,
+              "event_clustered_ci95": [
+                9.376134107203658,
+                18.31672003661544
+              ]
+            }
+          },
+          {
+            "gap_bucket": "5-10pp",
+            "observations": 159,
+            "markets": 109,
+            "events": 84,
+            "absolute_move_pp": {
+              "mean": 4.025840978593272,
+              "median_market_mean": 1.2499999999999998,
+              "event_clustered_ci95": [
+                2.725872025704497,
+                5.325809931482047
+              ]
+            },
+            "signed_toward_q_pp": {
+              "mean": 0.5834862385321103,
+              "median_market_mean": 0.16666666666666588,
+              "event_clustered_ci95": [
+                -0.9691747199343733,
+                2.136147196998594
+              ]
+            },
+            "move_at_least_2pp_fraction": {
+              "mean": 0.3891437308868501,
+              "median_market_mean": 0.0,
+              "event_clustered_ci95": [
+                0.2967976212736702,
+                0.48148984050003
+              ]
+            },
+            "move_at_least_5pp_fraction": {
+              "mean": 0.22324159021406725,
+              "median_market_mean": 0.0,
+              "event_clustered_ci95": [
+                0.14448121943675227,
+                0.3020019609913822
+              ]
+            },
+            "prior_rv24_pp": {
+              "mean": 14.358130369629567,
+              "median_market_mean": 10.221668161313008,
+              "event_clustered_ci95": [
+                10.865396593161767,
+                17.850864146097365
+              ]
+            }
+          },
+          {
+            "gap_bucket": "10-20pp",
+            "observations": 169,
+            "markets": 103,
+            "events": 88,
+            "absolute_move_pp": {
+              "mean": 4.0077669902912625,
+              "median_market_mean": 1.749999999999999,
+              "event_clustered_ci95": [
+                2.8069204735650857,
+                5.208613507017439
+              ]
+            },
+            "signed_toward_q_pp": {
+              "mean": 0.6211974110032364,
+              "median_market_mean": 0.15000000000000568,
+              "event_clustered_ci95": [
+                -0.7665809050013287,
+                2.0089757270078015
+              ]
+            },
+            "move_at_least_2pp_fraction": {
+              "mean": 0.4377022653721682,
+              "median_market_mean": 0.25,
+              "event_clustered_ci95": [
+                0.34195942528543577,
+                0.5334451054589007
+              ]
+            },
+            "move_at_least_5pp_fraction": {
+              "mean": 0.23300970873786409,
+              "median_market_mean": 0.0,
+              "event_clustered_ci95": [
+                0.15115502899001354,
+                0.31486438848571463
+              ]
+            },
+            "prior_rv24_pp": {
+              "mean": 15.23262618907132,
+              "median_market_mean": 10.349894682596087,
+              "event_clustered_ci95": [
+                12.516790407130202,
+                17.94846197101244
+              ]
+            }
+          },
+          {
+            "gap_bucket": "20-30pp",
+            "observations": 37,
+            "markets": 29,
+            "events": 28,
+            "absolute_move_pp": {
+              "mean": 7.678448275862066,
+              "median_market_mean": 5.75,
+              "event_clustered_ci95": [
+                4.355237585036793,
+                11.001658966687339
+              ]
+            },
+            "signed_toward_q_pp": {
+              "mean": -2.0491379310344837,
+              "median_market_mean": 0.0,
+              "event_clustered_ci95": [
+                -6.363110432844776,
+                2.264834570775809
+              ]
+            },
+            "move_at_least_2pp_fraction": {
+              "mean": 0.6724137931034483,
+              "median_market_mean": 1.0,
+              "event_clustered_ci95": [
+                0.5059085115744056,
+                0.8389190746324909
+              ]
+            },
+            "move_at_least_5pp_fraction": {
+              "mean": 0.5258620689655172,
+              "median_market_mean": 0.5,
+              "event_clustered_ci95": [
+                0.3425179144128816,
+                0.7092062235181529
+              ]
+            },
+            "prior_rv24_pp": {
+              "mean": 21.954822877544004,
+              "median_market_mean": 18.587630295441112,
+              "event_clustered_ci95": [
+                13.91023431184135,
+                29.999411443246657
+              ]
+            }
+          },
+          {
+            "gap_bucket": ">30pp",
+            "observations": 8,
+            "markets": 8,
+            "events": 7,
+            "absolute_move_pp": {
+              "mean": 15.587499999999999,
+              "median_market_mean": 8.75,
+              "event_clustered_ci95": [
+                2.2295191796193876,
+                28.94548082038061
+              ]
+            },
+            "signed_toward_q_pp": {
+              "mean": 15.462499999999999,
+              "median_market_mean": 8.75,
+              "event_clustered_ci95": [
+                1.9878263226065602,
+                28.93717367739344
+              ]
+            },
+            "move_at_least_2pp_fraction": {
+              "mean": 0.625,
+              "median_market_mean": 1.0,
+              "event_clustered_ci95": [
+                0.31118713279248733,
+                0.9388128672075127
+              ]
+            },
+            "move_at_least_5pp_fraction": {
+              "mean": 0.625,
+              "median_market_mean": 1.0,
+              "event_clustered_ci95": [
+                0.31118713279248733,
+                0.9388128672075127
+              ]
+            },
+            "prior_rv24_pp": {
+              "mean": 26.4380097766398,
+              "median_market_mean": 26.139051245215462,
+              "event_clustered_ci95": [
+                11.476563824183305,
+                41.39945572909629
+              ]
+            }
+          }
+        ],
+        "fully_adjusted": {
+          "observations": 504,
+          "markets": 238,
+          "events": 163,
+          "outcome": "abs_move_pp",
+          "gap_effect_pp_per_10pp_gap": 1.7000495706167946,
+          "event_clustered_ci95": [
+            -0.42880573198419825,
+            3.8289048732177875
+          ],
+          "controls": [
+            "log1p_hours_to_close",
+            "q_direction_yes",
+            "price_bucket_(0.2, 0.4]",
+            "price_bucket_(0.4, 0.6]",
+            "price_bucket_(0.6, 0.8]",
+            "price_bucket_(0.8, 1.0]",
+            "category_Economics",
+            "category_Entertainment",
+            "category_Equities",
+            "category_Geopolitics",
+            "category_Global Elections",
+            "category_Politics",
+            "category_Science & Tech",
+            "category_Unknown",
+            "prior_rv24_per_10pp"
+          ],
+          "design_rank": 17,
+          "weighted_r_squared": 0.3100273100796159
+        }
+      }
+    },
+    "24h": {
+      "observations": 516,
+      "markets": 244,
+      "events": 167,
+      "bins": [
+        {
+          "gap_bucket": "0-5pp",
+          "observations": 143,
+          "markets": 90,
+          "events": 63,
+          "absolute_move_pp": {
+            "mean": 6.853055555555556,
+            "median_market_mean": 3.0000000000000027,
+            "event_clustered_ci95": [
+              4.3926325371807335,
+              9.313478573930379
+            ]
+          },
+          "signed_toward_q_pp": {
+            "mean": -0.07027777777777791,
+            "median_market_mean": 0.24166666666666953,
+            "event_clustered_ci95": [
+              -3.007951074194819,
+              2.867395518639263
+            ]
+          },
+          "move_at_least_2pp_fraction": {
+            "mean": 0.6274074074074074,
+            "median_market_mean": 1.0,
+            "event_clustered_ci95": [
+              0.5234954881273854,
+              0.7313193266874294
+            ]
+          },
+          "move_at_least_5pp_fraction": {
+            "mean": 0.3464814814814815,
+            "median_market_mean": 0.0,
+            "event_clustered_ci95": [
+              0.24130004778201392,
+              0.4516629151809491
+            ]
+          },
+          "prior_rv24_pp": {
+            "mean": 13.846427071909549,
+            "median_market_mean": 8.864716305726457,
+            "event_clustered_ci95": [
+              9.376134107203658,
+              18.31672003661544
+            ]
+          }
+        },
+        {
+          "gap_bucket": "5-10pp",
+          "observations": 159,
+          "markets": 109,
+          "events": 84,
+          "absolute_move_pp": {
+            "mean": 9.639678899082568,
+            "median_market_mean": 4.499999999999993,
+            "event_clustered_ci95": [
+              6.818328164786401,
+              12.461029633378736
+            ]
+          },
+          "signed_toward_q_pp": {
+            "mean": -4.331880733944954,
+            "median_market_mean": 0.0,
+            "event_clustered_ci95": [
+              -7.328262538287972,
+              -1.3354989296019353
+            ]
+          },
+          "move_at_least_2pp_fraction": {
+            "mean": 0.6559633027522935,
+            "median_market_mean": 1.0,
+            "event_clustered_ci95": [
+              0.5664604946381027,
+              0.7454661108664844
+            ]
+          },
+          "move_at_least_5pp_fraction": {
+            "mean": 0.4464831804281346,
+            "median_market_mean": 0.0,
+            "event_clustered_ci95": [
+              0.34621521537293865,
+              0.5467511454833306
+            ]
+          },
+          "prior_rv24_pp": {
+            "mean": 14.358130369629567,
+            "median_market_mean": 10.221668161313008,
+            "event_clustered_ci95": [
+              10.865396593161767,
+              17.850864146097365
+            ]
+          }
+        },
+        {
+          "gap_bucket": "10-20pp",
+          "observations": 169,
+          "markets": 103,
+          "events": 88,
+          "absolute_move_pp": {
+            "mean": 8.438673139158574,
+            "median_market_mean": 4.999999999999998,
+            "event_clustered_ci95": [
+              6.091036061696575,
+              10.786310216620574
+            ]
+          },
+          "signed_toward_q_pp": {
+            "mean": 1.0229773462783165,
+            "median_market_mean": 1.250000000000001,
+            "event_clustered_ci95": [
+              -1.3348519931906118,
+              3.3808066857472445
+            ]
+          },
+          "move_at_least_2pp_fraction": {
+            "mean": 0.6990291262135923,
+            "median_market_mean": 1.0,
+            "event_clustered_ci95": [
+              0.614240745200401,
+              0.7838175072267836
+            ]
+          },
+          "move_at_least_5pp_fraction": {
+            "mean": 0.4983818770226537,
+            "median_market_mean": 0.5,
+            "event_clustered_ci95": [
+              0.3983904811130077,
+              0.5983732729322997
+            ]
+          },
+          "prior_rv24_pp": {
+            "mean": 15.23262618907132,
+            "median_market_mean": 10.349894682596087,
+            "event_clustered_ci95": [
+              12.516790407130202,
+              17.94846197101244
+            ]
+          }
+        },
+        {
+          "gap_bucket": "20-30pp",
+          "observations": 37,
+          "markets": 29,
+          "events": 28,
+          "absolute_move_pp": {
+            "mean": 17.711206896551722,
+            "median_market_mean": 12.500000000000005,
+            "event_clustered_ci95": [
+              11.82640092762453,
+              23.596012865478915
+            ]
+          },
+          "signed_toward_q_pp": {
+            "mean": -0.5008620689655184,
+            "median_market_mean": -1.0000000000000009,
+            "event_clustered_ci95": [
+              -9.090328142653886,
+              8.088604004722848
+            ]
+          },
+          "move_at_least_2pp_fraction": {
+            "mean": 0.8448275862068966,
+            "median_market_mean": 1.0,
+            "event_clustered_ci95": [
+              0.7142407846017289,
+              0.9754143878120642
+            ]
+          },
+          "move_at_least_5pp_fraction": {
+            "mean": 0.6896551724137931,
+            "median_market_mean": 1.0,
+            "event_clustered_ci95": [
+              0.5155430314392606,
+              0.8637673133883257
+            ]
+          },
+          "prior_rv24_pp": {
+            "mean": 21.954822877544004,
+            "median_market_mean": 18.587630295441112,
+            "event_clustered_ci95": [
+              13.91023431184135,
+              29.999411443246657
+            ]
+          }
+        },
+        {
+          "gap_bucket": ">30pp",
+          "observations": 8,
+          "markets": 8,
+          "events": 7,
+          "absolute_move_pp": {
+            "mean": 24.0875,
+            "median_market_mean": 21.25,
+            "event_clustered_ci95": [
+              9.233557619140088,
+              38.94144238085991
+            ]
+          },
+          "signed_toward_q_pp": {
+            "mean": 23.2125,
+            "median_market_mean": 21.25,
+            "event_clustered_ci95": [
+              7.317919752850566,
+              39.10708024714943
+            ]
+          },
+          "move_at_least_2pp_fraction": {
+            "mean": 0.875,
+            "median_market_mean": 1.0,
+            "event_clustered_ci95": [
+              0.6230795119652499,
+              1.12692048803475
+            ]
+          },
+          "move_at_least_5pp_fraction": {
+            "mean": 0.75,
+            "median_market_mean": 1.0,
+            "event_clustered_ci95": [
+              0.4693172386839548,
+              1.0306827613160452
+            ]
+          },
+          "prior_rv24_pp": {
+            "mean": 26.4380097766398,
+            "median_market_mean": 26.139051245215462,
+            "event_clustered_ci95": [
+              11.476563824183305,
+              41.39945572909629
+            ]
+          }
+        }
+      ],
+      "regressions": {
+        "unadjusted": {
+          "observations": 516,
+          "markets": 244,
+          "events": 167,
+          "outcome": "abs_move_pp",
+          "gap_effect_pp_per_10pp_gap": 3.772800605733254,
+          "event_clustered_ci95": [
+            1.401128058256067,
+            6.144473153210441
+          ],
+          "controls": [],
+          "design_rank": 2,
+          "weighted_r_squared": 0.050336534199517335
+        },
+        "price_category_time_direction": {
+          "observations": 516,
+          "markets": 244,
+          "events": 167,
+          "outcome": "abs_move_pp",
+          "gap_effect_pp_per_10pp_gap": 2.7856921311913867,
+          "event_clustered_ci95": [
+            0.9452925361670195,
+            4.626091726215754
+          ],
+          "controls": [
+            "log1p_hours_to_close",
+            "q_direction_yes",
+            "price_bucket_(0.2, 0.4]",
+            "price_bucket_(0.4, 0.6]",
+            "price_bucket_(0.6, 0.8]",
+            "price_bucket_(0.8, 1.0]",
+            "category_Economics",
+            "category_Entertainment",
+            "category_Equities",
+            "category_Geopolitics",
+            "category_Global Elections",
+            "category_Politics",
+            "category_Science & Tech",
+            "category_Unknown"
+          ],
+          "design_rank": 16,
+          "weighted_r_squared": 0.366347572259178
+        },
+        "plus_prior_rv24": {
+          "observations": 504,
+          "markets": 238,
+          "events": 163,
+          "outcome": "abs_move_pp",
+          "gap_effect_pp_per_10pp_gap": 1.996717533740436,
+          "event_clustered_ci95": [
+            0.2279936372022442,
+            3.765441430278628
+          ],
+          "controls": [
+            "log1p_hours_to_close",
+            "q_direction_yes",
+            "price_bucket_(0.2, 0.4]",
+            "price_bucket_(0.4, 0.6]",
+            "price_bucket_(0.6, 0.8]",
+            "price_bucket_(0.8, 1.0]",
+            "category_Economics",
+            "category_Entertainment",
+            "category_Equities",
+            "category_Geopolitics",
+            "category_Global Elections",
+            "category_Politics",
+            "category_Science & Tech",
+            "category_Unknown",
+            "prior_rv24_per_10pp"
+          ],
+          "design_rank": 17,
+          "weighted_r_squared": 0.4206022959901854
+        },
+        "plus_prior_rv24_gap_at_most_30": {
+          "observations": 497,
+          "markets": 233,
+          "events": 163,
+          "outcome": "abs_move_pp",
+          "gap_effect_pp_per_10pp_gap": 1.749239681861687,
+          "event_clustered_ci95": [
+            -0.023136827179806474,
+            3.5216161909031807
+          ],
+          "controls": [
+            "log1p_hours_to_close",
+            "q_direction_yes",
+            "price_bucket_(0.2, 0.4]",
+            "price_bucket_(0.4, 0.6]",
+            "price_bucket_(0.6, 0.8]",
+            "price_bucket_(0.8, 1.0]",
+            "category_Economics",
+            "category_Entertainment",
+            "category_Equities",
+            "category_Geopolitics",
+            "category_Global Elections",
+            "category_Politics",
+            "category_Science & Tech",
+            "category_Unknown",
+            "prior_rv24_per_10pp"
+          ],
+          "design_rank": 17,
+          "weighted_r_squared": 0.39466267802031985
+        },
+        "signed_plus_prior_rv24": {
+          "observations": 504,
+          "markets": 238,
+          "events": 163,
+          "outcome": "signed_toward_q_pp",
+          "gap_effect_pp_per_10pp_gap": 2.51880720791868,
+          "event_clustered_ci95": [
+            -1.2207874959250553,
+            6.258401911762415
+          ],
+          "controls": [
+            "log1p_hours_to_close",
+            "q_direction_yes",
+            "price_bucket_(0.2, 0.4]",
+            "price_bucket_(0.4, 0.6]",
+            "price_bucket_(0.6, 0.8]",
+            "price_bucket_(0.8, 1.0]",
+            "category_Economics",
+            "category_Entertainment",
+            "category_Equities",
+            "category_Geopolitics",
+            "category_Global Elections",
+            "category_Politics",
+            "category_Science & Tech",
+            "category_Unknown",
+            "prior_rv24_per_10pp"
+          ],
+          "design_rank": 17,
+          "weighted_r_squared": 0.16871758465701736
+        }
+      },
+      "same_common_matured_forecasts": {
+        "count": 516,
+        "bins": [
+          {
+            "gap_bucket": "0-5pp",
+            "observations": 143,
+            "markets": 90,
+            "events": 63,
+            "absolute_move_pp": {
+              "mean": 6.853055555555556,
+              "median_market_mean": 3.0000000000000027,
+              "event_clustered_ci95": [
+                4.3926325371807335,
+                9.313478573930379
+              ]
+            },
+            "signed_toward_q_pp": {
+              "mean": -0.07027777777777791,
+              "median_market_mean": 0.24166666666666953,
+              "event_clustered_ci95": [
+                -3.007951074194819,
+                2.867395518639263
+              ]
+            },
+            "move_at_least_2pp_fraction": {
+              "mean": 0.6274074074074074,
+              "median_market_mean": 1.0,
+              "event_clustered_ci95": [
+                0.5234954881273854,
+                0.7313193266874294
+              ]
+            },
+            "move_at_least_5pp_fraction": {
+              "mean": 0.3464814814814815,
+              "median_market_mean": 0.0,
+              "event_clustered_ci95": [
+                0.24130004778201392,
+                0.4516629151809491
+              ]
+            },
+            "prior_rv24_pp": {
+              "mean": 13.846427071909549,
+              "median_market_mean": 8.864716305726457,
+              "event_clustered_ci95": [
+                9.376134107203658,
+                18.31672003661544
+              ]
+            }
+          },
+          {
+            "gap_bucket": "5-10pp",
+            "observations": 159,
+            "markets": 109,
+            "events": 84,
+            "absolute_move_pp": {
+              "mean": 9.639678899082568,
+              "median_market_mean": 4.499999999999993,
+              "event_clustered_ci95": [
+                6.818328164786401,
+                12.461029633378736
+              ]
+            },
+            "signed_toward_q_pp": {
+              "mean": -4.331880733944954,
+              "median_market_mean": 0.0,
+              "event_clustered_ci95": [
+                -7.328262538287972,
+                -1.3354989296019353
+              ]
+            },
+            "move_at_least_2pp_fraction": {
+              "mean": 0.6559633027522935,
+              "median_market_mean": 1.0,
+              "event_clustered_ci95": [
+                0.5664604946381027,
+                0.7454661108664844
+              ]
+            },
+            "move_at_least_5pp_fraction": {
+              "mean": 0.4464831804281346,
+              "median_market_mean": 0.0,
+              "event_clustered_ci95": [
+                0.34621521537293865,
+                0.5467511454833306
+              ]
+            },
+            "prior_rv24_pp": {
+              "mean": 14.358130369629567,
+              "median_market_mean": 10.221668161313008,
+              "event_clustered_ci95": [
+                10.865396593161767,
+                17.850864146097365
+              ]
+            }
+          },
+          {
+            "gap_bucket": "10-20pp",
+            "observations": 169,
+            "markets": 103,
+            "events": 88,
+            "absolute_move_pp": {
+              "mean": 8.438673139158574,
+              "median_market_mean": 4.999999999999998,
+              "event_clustered_ci95": [
+                6.091036061696575,
+                10.786310216620574
+              ]
+            },
+            "signed_toward_q_pp": {
+              "mean": 1.0229773462783165,
+              "median_market_mean": 1.250000000000001,
+              "event_clustered_ci95": [
+                -1.3348519931906118,
+                3.3808066857472445
+              ]
+            },
+            "move_at_least_2pp_fraction": {
+              "mean": 0.6990291262135923,
+              "median_market_mean": 1.0,
+              "event_clustered_ci95": [
+                0.614240745200401,
+                0.7838175072267836
+              ]
+            },
+            "move_at_least_5pp_fraction": {
+              "mean": 0.4983818770226537,
+              "median_market_mean": 0.5,
+              "event_clustered_ci95": [
+                0.3983904811130077,
+                0.5983732729322997
+              ]
+            },
+            "prior_rv24_pp": {
+              "mean": 15.23262618907132,
+              "median_market_mean": 10.349894682596087,
+              "event_clustered_ci95": [
+                12.516790407130202,
+                17.94846197101244
+              ]
+            }
+          },
+          {
+            "gap_bucket": "20-30pp",
+            "observations": 37,
+            "markets": 29,
+            "events": 28,
+            "absolute_move_pp": {
+              "mean": 17.711206896551722,
+              "median_market_mean": 12.500000000000005,
+              "event_clustered_ci95": [
+                11.82640092762453,
+                23.596012865478915
+              ]
+            },
+            "signed_toward_q_pp": {
+              "mean": -0.5008620689655184,
+              "median_market_mean": -1.0000000000000009,
+              "event_clustered_ci95": [
+                -9.090328142653886,
+                8.088604004722848
+              ]
+            },
+            "move_at_least_2pp_fraction": {
+              "mean": 0.8448275862068966,
+              "median_market_mean": 1.0,
+              "event_clustered_ci95": [
+                0.7142407846017289,
+                0.9754143878120642
+              ]
+            },
+            "move_at_least_5pp_fraction": {
+              "mean": 0.6896551724137931,
+              "median_market_mean": 1.0,
+              "event_clustered_ci95": [
+                0.5155430314392606,
+                0.8637673133883257
+              ]
+            },
+            "prior_rv24_pp": {
+              "mean": 21.954822877544004,
+              "median_market_mean": 18.587630295441112,
+              "event_clustered_ci95": [
+                13.91023431184135,
+                29.999411443246657
+              ]
+            }
+          },
+          {
+            "gap_bucket": ">30pp",
+            "observations": 8,
+            "markets": 8,
+            "events": 7,
+            "absolute_move_pp": {
+              "mean": 24.0875,
+              "median_market_mean": 21.25,
+              "event_clustered_ci95": [
+                9.233557619140088,
+                38.94144238085991
+              ]
+            },
+            "signed_toward_q_pp": {
+              "mean": 23.2125,
+              "median_market_mean": 21.25,
+              "event_clustered_ci95": [
+                7.317919752850566,
+                39.10708024714943
+              ]
+            },
+            "move_at_least_2pp_fraction": {
+              "mean": 0.875,
+              "median_market_mean": 1.0,
+              "event_clustered_ci95": [
+                0.6230795119652499,
+                1.12692048803475
+              ]
+            },
+            "move_at_least_5pp_fraction": {
+              "mean": 0.75,
+              "median_market_mean": 1.0,
+              "event_clustered_ci95": [
+                0.4693172386839548,
+                1.0306827613160452
+              ]
+            },
+            "prior_rv24_pp": {
+              "mean": 26.4380097766398,
+              "median_market_mean": 26.139051245215462,
+              "event_clustered_ci95": [
+                11.476563824183305,
+                41.39945572909629
+              ]
+            }
+          }
+        ],
+        "fully_adjusted": {
+          "observations": 504,
+          "markets": 238,
+          "events": 163,
+          "outcome": "abs_move_pp",
+          "gap_effect_pp_per_10pp_gap": 1.996717533740436,
+          "event_clustered_ci95": [
+            0.2279936372022442,
+            3.765441430278628
+          ],
+          "controls": [
+            "log1p_hours_to_close",
+            "q_direction_yes",
+            "price_bucket_(0.2, 0.4]",
+            "price_bucket_(0.4, 0.6]",
+            "price_bucket_(0.6, 0.8]",
+            "price_bucket_(0.8, 1.0]",
+            "category_Economics",
+            "category_Entertainment",
+            "category_Equities",
+            "category_Geopolitics",
+            "category_Global Elections",
+            "category_Politics",
+            "category_Science & Tech",
+            "category_Unknown",
+            "prior_rv24_per_10pp"
+          ],
+          "design_rank": 17,
+          "weighted_r_squared": 0.4206022959901854
+        }
+      }
+    }
+  },
+  "limitations": [
+    "Only about five days out of sample; this is an exploratory association, not a validated forecasting model.",
+    "Absolute endpoint move mixes directional drift with uncertainty; it misses paths that move substantially and return.",
+    "Prior rv24 is the saved trailing hourly reference-price volatility proxy, not reconstructed executable BBO variance.",
+    "Controlled endpoint movement is not a forecast of residual path variance, even when the gap coefficient is positive.",
+    "Category and market end metadata are current graph metadata; timing-valid initial Q is recovered from atomic publication artifacts.",
+    "No test here identifies an optimal quote width, inventory target, ticket size, or profitable maker execution rule."
+  ]
+}

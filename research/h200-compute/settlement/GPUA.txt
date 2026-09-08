@@ -1,0 +1,129 @@
+INDEXVALUE
+Scope:
+	These	rules	shall	apply	to	this	contract.
+Underlying:
+	The	Underlying	for	this	Contract	is	the	value	of	<index>	<in/at>	<time	period>.	Revisions	to	the	Underlying
+	
+made	after	Expiration	will	not	be	accounted	for	in	determining	the	Expiration	Value.
+Source	Agency:
+	The	Source	Agencies	are,	in	hierarchical	order,	
+<index>,	provider	of	<index>,	TradingView,		Trading
+	
+Economics,	Bloomberg	News,	The	New	York	Times,	BBC,	CNBC,	CNN.
+Type:
+	The	type	of	Contract	is	an	Event	Contract.
+Issuance:
+	After	the	initial	Contract,	Contract	iterations	will	be	listed	on	an	as-needed	basis	at	the	discretion	of	the	Exchange
+	
+and	corresponding	to	the	risk	management	needs	of	Members.	
+<above/below/exactly/at	least/between>
+:
+	
+<above/below/exactly/at	least/between>	refers	to	comparison	operators.	"Above"
+	
+means	greater	than	(>),	"below"	means	less	than	(<),	"exactly"	means	equal	to	(=)	when	rounded	to	two	decimal	places,	"at
+	
+least"	means	greater	than	or	equal	to	(≥),	and	"between"	means	within	an	inclusive	range	(≥	lower	bound	and	≤	upper
+	
+bound).
+<value>
+:
+	
+<value>	refers	to	a	specific	numeric	level,	percentage,	or	index	value	specified	by	the	Exchange.	Where
+	
+applicable,	<value>	will	be	expressed	in	line	with	reporting	conventions	for	<index>	and	may	also	be	expressed	to	one	or	two
+	
+decimal	places,	or	in	index	points,	with	any	applicable	rounding	specified	by	the	Exchange.	Two	decimal	places	will	be
+	
+assumed	unless	otherwise	specified.	<value>	may	also	take	the	form	of	“None”.	<value>	may	also	take	the	form	of	a	relative
+	
+value	(e.g.	opening	price,	price	at	4pm),	or	at	a	given	past	or	future	date	and/or	time.	<value>	shall	be	assumed	to	be	in	USD,
+	
+unless	otherwise	specified.	
+<in/at>:	
+<in/at>	refers	to	whether	the	Contracts	will	be	determined	on	the	basis	of	whether	a	given	threshold	is	hit	or
+	
+maintained	within	<time	period>	(<in>)	or	at	a	certain	discrete	time	in	<time	period>	(e.g.	5pm	on	the	27th	of	September)
+	
+(<at>).	
+<time	period>
+:	<time	period>	refers	to	a	specific	range	of	time	as	specified	by	the	Exchange.	This	may	be	defined	by	exact
+	
+dates	(e.g.,	“between	January	1,	2026,	and	December	31,	2026”),	relative	markers	(e.g.,	“before	July	1,	2027”),	an	event
+	
+(e.g.,	“the	duration	of	the	address”),	or	broader	intervals	(e.g.,	“Q1–Q2	2027,”	“January–March	2026”).	“Between”	is
+	
+inclusive	of	both	endpoints,	while	“before”	and	“after”	exclude	the	specified	date	unless	stated	otherwise.	<time	period>	may
+	
+also	refer	to	“Any”	or	“None”,	to	multiple	dates	(even	if	non-consecutive),	or	to	a	singular	and	discrete	date	or	time.	Where	a
+	
+timezone	is	not	explicitly	specified,	all	times	shall	be	assumed	to	be	denoted	in	ET.	The	Exchange	may	additionally	specify
+	
+whether	<time	period>	is	evaluated	per	the	time	the	<index>	value	is	checked	(which	may	at	times	be	contingent	on	delayed
+	
+data	delivery)	or	the	value	of	<index>	for	a	given	time,	checked	as	soon	as	that	data	is	available.	
+<index>:	
+<index>	refers	to	a	formally	constituted	and	widely	recognized	benchmark	of	the	value	of	a	defined	set	of
+	
+financial	instruments,	items,	or	contracts,	maintained	and	published	on	a	regular	basis	by	an	identifiable	administrator	or
+	
+sponsor,	specified	by	the	Exchange.	
+<date>
+:	<date>	refers	to	a	calendar	date	specified	by	the	Exchange.	The	Exchange	may	list	iterations	of	the	Contract
+	
+corresponding	to	variations	of	<date>.
+Payout	Criterion:
+	The	Payout	Criterion	for	the	Contract	encompasses	the	Expiration	Values	that	the	value	of	<index>	is
+	
+<above/below/exactly/at	least/between>	<value>	<in/at>	<time	period>.	
+Additional	clarification(s):	
+The	“USD”	iteration	of	<index>	will	be	used	for	the	resolution	of	this	Contract,	unless	explicitly	stated	otherwise.	
+If	no	data	is	available	for	<time	period>	by	the	Expiration	Date,	all	strikes,	excluding	“No	data”	or	“None”,	will
+	
+resolve	to	“No”.
+Where	<in/at>	is	“in”,	for	all	values	excluding	“between”	and	“at	least”	it	is	enough	for	<value>	to	cross	the	threshold
+	
+value	(or	meet,	in	the	case	of	<exactly>)	once	at	any	point	in	<time	period>,	in	the	specified	direction	where
+	
+applicable,	for	the	Contract	to	resolve	to	“Yes”.	If	“between”	or	“at	least”	are	specified,	the	Exchange	may	provide
+	
+additional	instruction	as	to	whether	the	threshold	values	must	be	continuously	satisfied	throughout	<time	period>,	or
+	
+whether	meeting	the	thresholds	stated/operating	within	the	stated	thresholds	for	any	period	in	<time	period>	is	enough.
+Where	<in/at>	is	“at”,	<value>	must	meet	the	threshold	conditions	at	the	exactly	specified	point/point(s)	of	<time
+	
+period>.
+Minimum	Tick:
+	The	Minimum	Tick	size	for	the	Contract	shall	be	$0.01.
+Position	Accountability	Level:
+	The	Position	Accountability	Level	for	the	Contract	shall	be	$25,000	per	strike,	per
+	
+Member.
+Last	Trading	Date:
+	The	Last	Trading	Date	of	the	Contract	will	be	the	Expiration	Date.	The	Last	Trading	Time	will	be	the
+	
+Expiration	time.	
+Settlement	Date:
+	The	Settlement	Date	of	the	Contract	shall	be	no	later	than	the	day	after	the	Expiration	Date,	unless	the
+	
+Market	Outcome	is	under	review	pursuant	to	Rule	7.1.
+Expiration	Date:
+	The	latest	Expiration	Date	of	the	Contract	shall	be	one	week	after	the	last	day	of	<time	period>.	If	an
+	
+event	described	in	the	Payout	Criterion	occurs,	expiration	will	be	moved	to	an	earlier	date	and	time	in	accordance	with	Rule
+	
+7.2.
+Expiration	time:
+	The	Expiration	time	of	the	Contract	shall	be	10:00	AM	ET.
+Settlement	Value:
+	The	Settlement	Value	for	this	Contract	is	$1.00.
+Expiration	Value:
+	The	Expiration	Value	is	the	value	of	the	Underlying	as	documented	by	the	Source	Agency	on	the
+	
+Expiration	Date	at	the	Expiration	time.	
+Contingencies:
+	Before	Settlement,	Kalshi	may,	at	its	sole	discretion,	initiate	the	Market	Outcome	Review	Process	pursuant
+	
+to	Rule	7.1	of	the	Rulebook.	If	an	Expiration	Value	cannot	be	determined	on	the	Expiration	Date,	Kalshi	has	the	right	to
+	
+determine	payouts	pursuant	to	Rule	7.1	in	the	Rulebook.	

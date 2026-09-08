@@ -34,8 +34,7 @@ describe("SetupContext.pollSkippable", () => {
 
     expect(result).toBe(500.15);
     expect(check).toHaveBeenCalledOnce();
-    expect(output.mock.calls.flat().join("")).toContain("Ctrl-C aborts; polling every 15s");
-    expect(output.mock.calls.flat().join("")).not.toContain("press s to skip");
+    expect(output.mock.calls.flat().join("")).toBe("waiting for bridge credit\n");
   });
 
   it("returns null promptly on s and restores the terminal state", async () => {
@@ -61,6 +60,6 @@ describe("SetupContext.pollSkippable", () => {
     expect(setRawMode).toHaveBeenLastCalledWith(false);
     expect(pause).toHaveBeenCalledOnce();
     expect(process.stdin.listenerCount("data")).toBe(initialDataListeners);
-    expect(output.mock.calls.flat().join("")).toContain("press s to skip");
+    expect(output.mock.calls.flat().join("")).toContain("waiting for bridge credit\nPress s to skip\n");
   });
 });

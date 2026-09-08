@@ -12,6 +12,8 @@ import {
   MarketMakeConfigSchema,
   MarketMakeReplayBundleSchema,
   marketMakeConfigHash,
+  createTwoSidedMarketMakeConfig,
+  createAdaptiveMarketMakeConfig,
   replayMarketMake,
   type MarketMakeConfig,
   type MarketMakeReplayReport,
@@ -29,6 +31,8 @@ import {
 export interface MarketMakeConfigureOptions {
   /** A complete q-directed-polymarket-mm/1 JSON document. */
   config?: string;
+  twoSided?: boolean;
+  adaptive?: boolean;
   /** Legacy fixed-bankroll sizing. Prefer the live-funded default. */
   bankrollUsd?: string;
   /** Optional ceiling for the default live-funded sizing mode. */
@@ -45,6 +49,18 @@ export interface MarketMakeConfigureOptions {
   yesMinEdgePp?: string;
   maxEdgePp?: string;
   maxBookSpreadPp?: string;
+  maxForecastAgeHours?: string;
+  staleForecastExitHours?: string;
+  minVolumeUsd?: string;
+  sourceMinDepth2cUsd?: string;
+  entryStabilitySeconds?: string;
+  maxMoveAwayFromQPp?: string;
+  allowDeadVolatility?: boolean;
+  allowExtremeVolatility?: boolean;
+  allowCurrentQAfterShock?: boolean;
+  correlatedShocksForGlobalPause?: string;
+  marketDataStaleSeconds?: string;
+  venueQuoteMaxAgeSeconds?: string;
   convergenceEdgePp?: string;
   gapCapturePct?: string;
   reviewHours?: string;
@@ -109,6 +125,8 @@ type JsonObject = Record<string, unknown>;
 
 const CONFIG_OPTION_NAMES: ReadonlyArray<keyof MarketMakeConfigureOptions> = [
   "config",
+  "twoSided",
+  "adaptive",
   "bankrollUsd",
   "bankrollCeilingUsd",
   "liveBankroll",
@@ -122,6 +140,18 @@ const CONFIG_OPTION_NAMES: ReadonlyArray<keyof MarketMakeConfigureOptions> = [
   "yesMinEdgePp",
   "maxEdgePp",
   "maxBookSpreadPp",
+  "maxForecastAgeHours",
+  "staleForecastExitHours",
+  "minVolumeUsd",
+  "sourceMinDepth2cUsd",
+  "entryStabilitySeconds",
+  "maxMoveAwayFromQPp",
+  "allowDeadVolatility",
+  "allowExtremeVolatility",
+  "allowCurrentQAfterShock",
+  "correlatedShocksForGlobalPause",
+  "marketDataStaleSeconds",
+  "venueQuoteMaxAgeSeconds",
   "convergenceEdgePp",
   "gapCapturePct",
   "reviewHours",
@@ -174,7 +204,12 @@ export function resolveMarketMakeConfig(
     : current && isObject(current) && Object.keys(current).length > 0
       ? current
       : MARKET_MAKE_PRESET;
-  const parsed = MarketMakeConfigSchema.parse(source);
+  if (opts.adaptive && opts.twoSided) throw new Error("--adaptive and --two-sided select different policies; choose one");
+  const parsed = opts.adaptive
+    ? createAdaptiveMarketMakeConfig(MarketMakeConfigSchema.parse(source))
+    : opts.twoSided
+    ? createTwoSidedMarketMakeConfig(MarketMakeConfigSchema.parse(source))
+    : MarketMakeConfigSchema.parse(source);
   const next = structuredClone(parsed) as unknown as JsonObject;
 
   if (opts.bankrollUsd !== undefined && (opts.bankrollCeilingUsd !== undefined || opts.liveBankroll === true)) {
@@ -232,6 +267,74 @@ export function resolveMarketMakeConfig(
       percentagePoints("--max-book-spread-pp", opts.maxBookSpreadPp),
     );
   }
+  if (opts.maxForecastAgeHours !== undefined) {
+    const seconds = hoursToSeconds("--max-forecast-age-hours", opts.maxForecastAgeHours);
+    setNested(next, ["quotient_feed", "new_entry_max_forecast_age_seconds"], seconds);
+    setNested(next, ["quotient_feed", "no_add_forecast_age_seconds"], seconds);
+  }
+  if (opts.staleForecastExitHours !== undefined) {
+    setNested(
+      next,
+      ["quotient_feed", "stale_forecast_exit_seconds"],
+      hoursToSeconds("--stale-forecast-exit-hours", opts.staleForecastExitHours),
+    );
+  }
+  if (opts.minVolumeUsd !== undefined) {
+    setNested(next, ["eligibility", "min_volume_24h_usd"], nonnegativeNumber("--min-volume-usd", opts.minVolumeUsd));
+  }
+  if (opts.sourceMinDepth2cUsd !== undefined) {
+    setNested(
+      next,
+      ["eligibility", "min_live_depth_usd_within_2c"],
+      nonnegativeNumber("--source-min-depth-2c-usd", opts.sourceMinDepth2cUsd),
+    );
+  }
+  if (opts.entryStabilitySeconds !== undefined) {
+    setNested(
+      next,
+      ["eligibility", "entry_stability_seconds"],
+      nonnegativeNumber("--entry-stability-seconds", opts.entryStabilitySeconds),
+    );
+  }
+  if (opts.maxMoveAwayFromQPp !== undefined) {
+    setNested(
+      next,
+      ["eligibility", "max_move_away_from_q_during_entry_stability_pp"],
+      nonnegativePercentagePoints("--max-move-away-from-q-pp", opts.maxMoveAwayFromQPp),
+    );
+  }
+  if (opts.allowDeadVolatility === true) {
+    setNested(next, ["volatility", "regimes", "dead", "new_entry_enabled"], true);
+    setNested(next, ["volatility", "regimes", "dead", "size_multiplier"], 0.5);
+  }
+  if (opts.allowExtremeVolatility === true) {
+    setNested(next, ["volatility", "regimes", "extreme", "new_entry_enabled"], true);
+    setNested(next, ["volatility", "regimes", "extreme", "size_multiplier"], 0.25);
+  }
+  if (opts.allowCurrentQAfterShock === true) {
+    setNested(next, ["market_shock", "require_new_q_version_after_adverse_shock"], false);
+  }
+  if (opts.correlatedShocksForGlobalPause !== undefined) {
+    setNested(
+      next,
+      ["market_shock", "correlated_shocks_for_global_pause"],
+      positiveInteger("--correlated-shocks-for-global-pause", opts.correlatedShocksForGlobalPause),
+    );
+  }
+  if (opts.marketDataStaleSeconds !== undefined) {
+    setNested(
+      next,
+      ["market_data", "market_data_stale_seconds"],
+      positiveNumber("--market-data-stale-seconds", opts.marketDataStaleSeconds),
+    );
+  }
+  if (opts.venueQuoteMaxAgeSeconds !== undefined) {
+    setNested(
+      next,
+      ["market_data", "venue_quote_max_age_seconds"],
+      positiveNumber("--venue-quote-max-age-seconds", opts.venueQuoteMaxAgeSeconds),
+    );
+  }
   if (opts.convergenceEdgePp !== undefined) {
     setNested(
       next,
@@ -251,6 +354,7 @@ export function resolveMarketMakeConfig(
   }
   if (opts.maxHoldHours !== undefined) {
     setNested(next, ["exit_policy", "default_hard_hold_seconds"], hoursToSeconds("--max-hold-hours", opts.maxHoldHours));
+    if (parsed.two_sided?.adaptive) setNested(next, ["two_sided", "maximum_inventory_age_seconds"], hoursToSeconds("--max-hold-hours", opts.maxHoldHours));
   }
   if (opts.absoluteMaxHoldHours !== undefined) {
     setNested(
@@ -317,6 +421,29 @@ export function resolveMarketMakeConfig(
     opts.maxMarketDepth2cPct,
   );
 
+  if (parsed.two_sided) {
+    setNonnegativeUsd(next, ["two_sided", "minimum_volume_24h_usd"], "--min-volume-usd", opts.minVolumeUsd);
+    setNonnegativeUsd(next, ["two_sided", "minimum_depth_usd"], "--min-depth-2c-usd", opts.minDepth2cUsd);
+    if (opts.maxBookSpreadPp !== undefined) {
+      setNested(next, ["two_sided", "maximum_spread_pp"], positiveNumber("--max-book-spread-pp", opts.maxBookSpreadPp));
+    }
+    if (opts.maxHoldHours !== undefined) setNested(next, ["two_sided", "maximum_inventory_age_seconds"], hoursToSeconds("--max-hold-hours", opts.maxHoldHours));
+    if (parsed.two_sided.adaptive) {
+      if (opts.maxForecastAgeHours !== undefined && opts.staleForecastExitHours !== undefined
+        && Number(opts.maxForecastAgeHours) !== Number(opts.staleForecastExitHours)) {
+        throw new Error("adaptive quoting has one forecast-expiry limit; provide matching forecast-age flags or only one");
+      }
+      const age = opts.maxForecastAgeHours ?? opts.staleForecastExitHours;
+      if (age !== undefined) {
+        const seconds = hoursToSeconds("forecast age", age);
+        setNested(next, ["two_sided", "adaptive", "forecast_max_age_seconds"], seconds);
+        setNested(next, ["two_sided", "adaptive", "forecast_full_weight_seconds"], Math.min(seconds, parsed.two_sided.adaptive.forecast_full_weight_seconds));
+      }
+      if (opts.maxEdgePp !== undefined) setNested(next, ["two_sided", "adaptive", "directional_maximum_gap_pp"], percentagePoints("--max-edge-pp", opts.maxEdgePp));
+      if (opts.marketDataStaleSeconds !== undefined) setNested(next, ["two_sided", "adaptive", "book_max_age_seconds"], positiveNumber("--market-data-stale-seconds", opts.marketDataStaleSeconds));
+    }
+  }
+
   // Re-parse after all overrides so cross-field invariants fail before any
   // bot file is replaced.
   return MarketMakeConfigSchema.parse(next);
@@ -347,20 +474,16 @@ export function createMarketMakeCommandHandlers(
         },
       });
       deps.saveConfig(saved);
-      deps.log(pc.green(`saved market-make configuration for ${botId} (${marketMakeConfigHash(resolved)})`));
+      deps.log(`Configuration saved: ${botId}`);
       printConfig(deps.log, resolved);
       if (bot.deployment) {
-        deps.log(
-          pc.yellow(
-            `the deployed runtime still has its prior config — run \`cassie deploy ${botId}\`; the new deployment will remain halted until reconcile and resume`,
-          ),
-        );
+        deps.log("The deployed runtime still has its prior config.");
+        deps.log("Redeploy; entries remain halted until reconcile and resume.");
+        deps.log(`cassie deploy ${botId}`);
       } else if (deps.localRuntimeAvailable(botId)) {
-        deps.log(
-          pc.yellow(
-            `the running local runtime still has its prior config — stop and restart \`cassie run ${botId}\`; it will remain halted until reconcile and resume`,
-          ),
-        );
+        deps.log("The local runtime still has its prior config.");
+        deps.log("Stop and restart; entries remain halted until reconcile and resume.");
+        deps.log(`cassie run ${botId}`);
       }
     },
 
@@ -374,7 +497,7 @@ export function createMarketMakeCommandHandlers(
         runtime = {
           strategyId: "market-make",
           lifecycle: "OFFLINE",
-          message: `no local runtime control socket; start one with cassie run ${botId}`,
+          message: `Local runtime offline.\ncassie run ${botId}`,
         };
       } else {
         runtime = asObject(await deps.control(bot, "/market-make/status")) as RuntimeStatus;
@@ -399,7 +522,10 @@ export function createMarketMakeCommandHandlers(
       const bot = deps.loadConfig(botId);
       requireMarketMakeBot(bot);
       requireReachableRuntime(bot, deps);
-      deps.log(pc.dim("dry run: reads live Q/Gamma/CLOB state and proposes actions; it places no orders and changes no trading state (metered API spend is recorded)."));
+      const config = MarketMakeConfigSchema.parse(bot.strategy.config);
+      deps.log(config.two_sided && !config.two_sided.adaptive
+        ? "Dry run: live quotes; no orders or trading-state changes."
+        : "Dry run: metered Quotient calls; no orders or trading-state changes.");
       const report = await deps.control(bot, "/market-make/dry-run", { method: "POST" });
       deps.log(JSON.stringify(report, null, 2));
     },
@@ -422,9 +548,13 @@ export function createMarketMakeCommandHandlers(
         }
       }
       const action = liquidate
-        ? `Halt additions, cancel resting orders, and start urgent bounded exits for all inventory (${config.exit_policy.urgent_exit_max_attempts} FAK attempts, at most ${config.exit_policy.urgent_exit_max_concession_pp}pp concession)?`
-        : "Halt additions and cancel all resting orders while continuing mandatory exits?";
-      if (!(await deps.confirm(`${action} ${exposureSummary(status)}. ${limitSummary(config, status)}`, false))) {
+        ? config.two_sided
+          ? "Halt new buys, cancel resting quotes, and continue passive inventory-reducing sells?"
+          : `Halt additions, cancel resting orders, and start urgent bounded exits for all inventory (${config.exit_policy.urgent_exit_max_attempts} FAK attempts, at most ${config.exit_policy.urgent_exit_max_concession_pp}pp concession)?`
+        : config.two_sided ? "Halt two-sided quoting and cancel all resting orders?" : "Halt additions and cancel all resting orders while continuing mandatory exits?";
+      deps.log(exposureSummary(status));
+      deps.log(limitSummary(config, status));
+      if (!(await deps.confirm(action, false))) {
         deps.log("halt canceled");
         return;
       }
@@ -432,7 +562,9 @@ export function createMarketMakeCommandHandlers(
         method: "POST",
         body: JSON.stringify({ liquidate }),
       });
-      deps.log(pc.green(liquidate ? "market-make halted; bounded liquidation requested" : "market-make halted; mandatory exits remain active"));
+      deps.log(pc.green(config.two_sided
+        ? liquidate ? "two-sided buys halted; passive inventory reduction remains active" : "two-sided quoting halted"
+        : liquidate ? "market-make halted; bounded liquidation requested" : "market-make halted; mandatory exits remain active"));
       printControlResult(deps.log, result);
     },
 
@@ -455,10 +587,10 @@ export function createMarketMakeCommandHandlers(
           "loss limits are latched; inspect status and reconcile, then pass --acknowledge-loss-reset to make that reset explicit",
         );
       }
-      const lossText = opts.acknowledgeLossReset
-        ? " This also rebases the reviewed loss state, including an intentional flat-account withdrawal."
-        : "";
-      if (!(await deps.confirm(`Resume live market-making? ${exposureSummary(status)}. ${limitSummary(config, status)}${lossText}`, false))) {
+      deps.log(exposureSummary(status));
+      deps.log(limitSummary(config, status));
+      if (opts.acknowledgeLossReset) deps.log("This resets reviewed loss limits, including any intentional flat-account withdrawal.");
+      if (!(await deps.confirm(opts.acknowledgeLossReset ? "Resume live market-making and reset reviewed loss limits?" : "Resume live market-making?", false))) {
         deps.log("resume canceled");
         return;
       }
@@ -482,17 +614,25 @@ export function createMarketMakeCommandHandlers(
       }));
       deps.log(JSON.stringify(preview, null, 2));
       if (!apply) {
-        deps.log(pc.dim("report only; rerun with --apply to review and commit this exact proposal"));
+        deps.log("Report only. Review and apply:");
+        deps.log(`cassie market-make reconcile ${botId} --apply`);
         return;
       }
       const proposalHash = preview.proposalHash;
       if (typeof proposalHash !== "string" || !/^[0-9a-f]{64}$/.test(proposalHash)) {
         throw new Error("runtime reconciliation preview did not return a valid SHA-256 proposal hash; refusing to apply");
       }
-      if (!(await deps.confirm(
-        `Apply the reconciliation proposal shown above (hash ${proposalHash})? This may cancel the listed unknown orders and authorize repeated observation of the listed residual mismatches; inventory changes still require the configured repeated-snapshot and late-fill gates. ${exposureSummary(status)}`,
-        false,
-      ))) {
+      deps.log("Proposal hash:");
+      deps.log(proposalHash);
+      deps.log(exposureSummary(status));
+      if (bot.strategy.config.two_sided) {
+        deps.log("Cancels listed unowned orders and adopts verified YES/NO balances.");
+        deps.log("Quoting remains halted until resumed.");
+      } else {
+        deps.log("May cancel listed unknown orders and authorize observation of listed residual mismatches.");
+        deps.log("Inventory changes still require repeated-snapshot and late-fill checks.");
+      }
+      if (!(await deps.confirm("Apply this reconciliation proposal?", false))) {
         deps.log("reconciliation apply canceled");
         return;
       }
@@ -509,6 +649,7 @@ export function createMarketMakeCommandHandlers(
       const config = MarketMakeConfigSchema.parse(
         opts.config ? readJsonFile(opts.config, "market-make config") : MARKET_MAKE_PRESET,
       );
+      if (config.two_sided) throw new Error("the legacy forecast replay does not model two-sided fills; use two-sided controller tests and a live dry run");
       const models = replayModels(opts.fillModel);
       const reports: MarketMakeReplayReport[] = models.map((fillModel) =>
         replayMarketMake(bundle, config, { fillModel }),
@@ -521,7 +662,8 @@ export function createMarketMakeCommandHandlers(
       if (opts.output) {
         const outputPath = replayOutputPath(opts.output);
         atomicWritePrivateFile(outputPath, rendered);
-        deps.log(pc.green(`replay report written to ${outputPath}`));
+        deps.log("Replay report saved.");
+        deps.log(outputPath);
       } else {
         deps.log(rendered.trimEnd());
       }
@@ -597,6 +739,10 @@ function setPositiveUsd(root: JsonObject, path: string[], flag: string, raw: str
   if (raw !== undefined) setNested(root, path, positiveNumber(flag, raw));
 }
 
+function setNonnegativeUsd(root: JsonObject, path: string[], flag: string, raw: string | undefined): void {
+  if (raw !== undefined) setNested(root, path, nonnegativeNumber(flag, raw));
+}
+
 function setParticipationFraction(root: JsonObject, path: string[], flag: string, raw: string | undefined): void {
   if (raw !== undefined) setNested(root, path, percentage(flag, raw) / 100);
 }
@@ -625,6 +771,7 @@ function scaleCapitalDollarLimits(root: JsonObject, bankrollUsd: number): void {
     ["loss_limits", "max_rolling_24h_loss_usd"],
     ["loss_limits", "max_strategy_drawdown_usd"],
   ];
+  if (isObject(root.two_sided)) scalablePaths.push(["two_sided", "maximum_unpaired_notional_usd"]);
   for (const path of scalablePaths) setNested(root, path, nestedNumber(root, path) * ratio);
   setNested(root, ["capital", "initial_bankroll_usd"], bankrollUsd);
   setNested(root, ["capital", "sizing_bankroll_usd"], bankrollUsd);
@@ -633,6 +780,12 @@ function scaleCapitalDollarLimits(root: JsonObject, bankrollUsd: number): void {
 function positiveNumber(flag: string, raw: string): number {
   const value = Number(raw);
   if (!Number.isFinite(value) || value <= 0) throw new Error(`${flag} must be a positive number`);
+  return value;
+}
+
+function nonnegativeNumber(flag: string, raw: string): number {
+  const value = Number(raw);
+  if (!Number.isFinite(value) || value < 0) throw new Error(`${flag} must be a nonnegative number`);
   return value;
 }
 
@@ -655,6 +808,12 @@ function percentage(flag: string, raw: string): number {
 
 function percentagePoints(flag: string, raw: string): number {
   const value = positiveNumber(flag, raw);
+  if (value > 100) throw new Error(`${flag} must be at most 100 percentage points`);
+  return value;
+}
+
+function nonnegativePercentagePoints(flag: string, raw: string): number {
+  const value = nonnegativeNumber(flag, raw);
   if (value > 100) throw new Error(`${flag} must be at most 100 percentage points`);
   return value;
 }
@@ -699,11 +858,30 @@ function printConfig(log: (message: string) => void, config: MarketMakeConfig): 
   log(`  free / reserve:       $${nestedNumber(value, ["capital", "minimum_free_collateral_usd"]).toFixed(2)} / $${nestedNumber(value, ["capital", "operational_reserve_usd"]).toFixed(2)}`);
   log(`  active / live orders: ${nestedNumber(value, ["capital", "max_active_markets"])} / ${nestedNumber(value, ["capital", "max_live_orders"])}`);
   log(`  base / max order:     $${nestedNumber(value, ["capital", "base_order_notional_usd"]).toFixed(2)} / $${nestedNumber(value, ["capital", "max_order_notional_usd"]).toFixed(2)}`);
+  if (config.two_sided) {
+    const policy = config.two_sided;
+    log(policy.adaptive ? "  execution:            Q-adaptive liquidity; experimental policy" : "  execution:            two-sided spread quoting; inventory-aware exits");
+    if (policy.adaptive) log(`  forecast freshness:   full weight ${policy.adaptive.forecast_full_weight_seconds / 3600}h; expires ${policy.adaptive.forecast_max_age_seconds / 3600}h`);
+    log(`  target markets:       ${policy.target_markets}`);
+    log(`  volume / exit depth:  $${policy.minimum_volume_24h_usd.toFixed(2)} / $${policy.minimum_depth_usd.toFixed(2)} per outcome`);
+    log(`  spread / rest:        ${policy.maximum_spread_pp}pp / ${policy.minimum_rest_seconds}s`);
+    log(`  hard market cap:      $${config.capital.hard_market_cost_usd.toFixed(2)}`);
+    log(`  unpaired cap:         $${policy.maximum_unpaired_notional_usd.toFixed(2)}`);
+    log(`  loss market/24h/max:  $${config.loss_limits.max_marked_loss_per_market_usd.toFixed(2)} / $${config.loss_limits.max_rolling_24h_loss_usd.toFixed(2)} / $${config.loss_limits.max_strategy_drawdown_usd.toFixed(2)}`);
+    return;
+  }
   log(`  NO / YES size mult:   ${nestedNumber(value, ["direction_policy", "NO", "size_multiplier"])}x / ${nestedNumber(value, ["direction_policy", "YES", "size_multiplier"])}x (before volatility)`);
   log(`  normal / high vol:    ${nestedNumber(value, ["volatility", "regimes", "normal", "size_multiplier"])}x / ${nestedNumber(value, ["volatility", "regimes", "high", "size_multiplier"])}x`);
   log(`  hard market cap:      $${nestedNumber(value, ["capital", "hard_market_cost_usd"]).toFixed(2)}`);
   log(`  NO edge / target:     ${nestedNumber(value, ["direction_policy", "NO", "minimum_edge_pp"])}–${nestedNumber(value, ["direction_policy", "NO", "maximum_edge_pp"])}pp / $${nestedNumber(value, ["direction_policy", "NO", "target_market_cost_usd"]).toFixed(2)}`);
   log(`  YES edge / target:    ${nestedNumber(value, ["direction_policy", "YES", "minimum_edge_pp"])}–${nestedNumber(value, ["direction_policy", "YES", "maximum_edge_pp"])}pp / $${nestedNumber(value, ["direction_policy", "YES", "target_market_cost_usd"]).toFixed(2)}`);
+  log(`  forecast entry / exit:${secondsAsHours(nestedNumber(value, ["quotient_feed", "new_entry_max_forecast_age_seconds"]))}h / ${secondsAsHours(nestedNumber(value, ["quotient_feed", "stale_forecast_exit_seconds"]))}h`);
+  log(`  data / quote max age: ${nestedNumber(value, ["market_data", "market_data_stale_seconds"])}s / ${nestedNumber(value, ["market_data", "venue_quote_max_age_seconds"])}s`);
+  log(`  volume / source depth:$${nestedNumber(value, ["eligibility", "min_volume_24h_usd"]).toFixed(2)} / $${nestedNumber(value, ["eligibility", "min_live_depth_usd_within_2c"]).toFixed(2)}`);
+  log(`  stability / Q move:   ${nestedNumber(value, ["eligibility", "entry_stability_seconds"])}s / ${nestedNumber(value, ["eligibility", "max_move_away_from_q_during_entry_stability_pp"])}pp`);
+  log(`  dead / extreme entry: ${nestedBoolean(value, ["volatility", "regimes", "dead", "new_entry_enabled"]) ? "yes" : "no"} / ${nestedBoolean(value, ["volatility", "regimes", "extreme", "new_entry_enabled"]) ? "yes" : "no"}`);
+  log(`  new Q after shock:    ${nestedBoolean(value, ["market_shock", "require_new_q_version_after_adverse_shock"]) ? "required" : "not required"}`);
+  log(`  global shock count:   ${nestedNumber(value, ["market_shock", "correlated_shocks_for_global_pause"])}`);
   log(`  event / family / corr:$${nestedNumber(value, ["portfolio_risk", "max_event_cost_usd"]).toFixed(2)} / $${nestedNumber(value, ["portfolio_risk", "max_category_family_cost_usd"]).toFixed(2)} / $${nestedNumber(value, ["portfolio_risk", "max_manual_correlation_group_cost_usd"]).toFixed(2)}`);
   log(`  markets per event:    ${nestedNumber(value, ["portfolio_risk", "max_open_markets_per_event"])}`);
   log(`  loss market/24h/max:  $${nestedNumber(value, ["loss_limits", "max_marked_loss_per_market_usd"]).toFixed(2)} / $${nestedNumber(value, ["loss_limits", "max_rolling_24h_loss_usd"]).toFixed(2)} / $${nestedNumber(value, ["loss_limits", "max_strategy_drawdown_usd"]).toFixed(2)}`);
@@ -781,6 +959,8 @@ function printStatus(
   const runtime = report.runtime;
   log(pc.bold(`${report.botId}  market-make  ${String(runtime.lifecycle ?? (runtime.halted ? "HALTED" : "ACTIVE"))}`));
   log(`  runtime:              ${report.deployed ? "deployed" : "local"}`);
+  if (runtime.mode === "two-sided") log("  execution:            two-sided spread quoting");
+  if (runtime.mode === "q-adaptive") log("  execution:            Q-adaptive liquidity; experimental policy");
   log(`  config:               ${report.localConfigHash}${report.runtimeConfigHash ? ` (runtime ${report.runtimeConfigHash})` : ""}`);
   if (report.configDrift) log(pc.yellow("  configuration drift:  yes — deploy/restart before resume"));
   if (runtime.activationCurrent === false) {
@@ -810,7 +990,9 @@ function printStatus(
     const authorization = observed
       ? refreshPending
         ? "entries paused for bankroll refresh"
-        : entryReady ? "entries authorized" : "entries awaiting repeated clean snapshots"
+        : entryReady
+          ? runtime.halted === true || runtime.activationCurrent === false ? "sizing ready; trading halted" : "entries authorized"
+          : "entries awaiting repeated clean snapshots"
       : "entries awaiting first snapshot";
     log(`  bankroll:             automatic — ${capital}${effective}; ceiling ${ceilingUsd === undefined ? "none" : `$${ceilingUsd.toFixed(2)}`}; ${authorization}`);
   } else {

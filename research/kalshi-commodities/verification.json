@@ -1,0 +1,40 @@
+{
+  "verifiedAt": "2026-09-05T07:21:16.114646+00:00",
+  "checks": {
+    "workspaceBuild": "passed via pnpm test",
+    "workspaceTypecheck": "passed: pnpm -r typecheck",
+    "workspaceTests": {
+      "files": 110,
+      "tests": 1368,
+      "failed": 0,
+      "command": "pnpm test",
+      "localSocketAccess": "required for existing runtime ownership tests"
+    },
+    "liveOrdersSubmitted": 0,
+    "deployments": 0
+  },
+  "liveScan": {
+    "observedAt": "2026-09-05T07:20:37.931000+00:00",
+    "verifiedContracts": 12,
+    "byAsset": {
+      "oil": 6,
+      "btc": 6
+    },
+    "candidates": 0,
+    "actions": 0,
+    "exclusions": {
+      "unsupported or conflicting Kalshi identity": 168,
+      "forecast, horizon or quote unavailable": 319,
+      "outside entry horizon": 29,
+      "balanced research candidate limit": 22,
+      "raw executable edge outside band": 7,
+      "insufficient edge after shrinkage, uncertainty and fees": 5
+    },
+    "paidUsage": {
+      "successfulReads": 2,
+      "estimatedListUsd": 0.02,
+      "accounting": "nominal-list-price-not-account-debit"
+    },
+    "sha256": "8402cce8486a9617e449aa5044541c38ba34ec1f8ddb10b067363b8c7ebc9513"
+  }
+}

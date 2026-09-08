@@ -1,7 +1,6 @@
 // packages/cli/src/surplus-config.ts
 // Resolve and verify the Surplus Intelligence API key (the agent strategy's
-// LLM credential). Mirrors ares-config.ts: origin strings name the winning
-// source and never contain key material.
+// LLM credential). Origin strings identify the source without key material.
 
 import { KeyRoles, SurplusClient } from "@quotient-forecasting/cassie-core";
 import { getKeystoreSecret } from "./context.js";
@@ -21,7 +20,7 @@ export async function resolveSurplusApiKey(botId: string): Promise<ResolvedSurpl
   const direct = discoverSurplusApiKey();
   if (direct) return direct;
   const stored = await getKeystoreSecret(botId, KeyRoles.surplusApiKey);
-  return stored ? { value: stored, origin: `bot ${botId} keystore entry ${KeyRoles.surplusApiKey}` } : null;
+  return stored ? { value: stored, origin: `keystore: ${botId}/${KeyRoles.surplusApiKey}` } : null;
 }
 
 /** Read-only trust-boundary check: a model-list read on the standard route. */

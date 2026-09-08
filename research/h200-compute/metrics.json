@@ -1,0 +1,510 @@
+{
+  "retrievedAt": "2026-09-05T18:45:25.500845+00:00",
+  "total_forecasts": 71,
+  "total_markets": 18,
+  "first_forecast": "2026-08-18T12:12:15.764Z",
+  "last_forecast": "2026-08-31T15:58:56.253Z",
+  "settled_forecasts": 45,
+  "open_forecasts": 26,
+  "historical_books_present": {
+    "bestBid": 0,
+    "bestAsk": 0,
+    "cap2c": 0
+  },
+  "coherence_tagged": 13,
+  "coherence_changed": 6,
+  "model_paths": {
+    "tinker://548339f9-bf4b-5e96-92fb-f101df22b269:train:0/sampler_weights/research_market_v1-4f56bf37295a-final": 70,
+    "tinker://046f2744-f1f1-552d-9cbb-b7f91693f6e5:train:0/sampler_weights/union_v4-821d1728c0b1-final": 1
+  },
+  "samples": {
+    "all": {
+      "forecasts": 45,
+      "markets": 12,
+      "fixing_dates": 3,
+      "brier": {
+        "raw_q": 0.1901869105529084,
+        "blend_before_later_repairs": 0.23999921062331225,
+        "stored_published_q": 0.2389772026510464,
+        "market": 0.17187777777777774
+      },
+      "log_loss": {
+        "raw_q": 0.5658555725965808,
+        "blend_before_later_repairs": 0.6729104706977482,
+        "stored_published_q": 0.6705415745014042,
+        "market": 0.5266495249603754
+      },
+      "favorite_accuracy": {
+        "raw_q": 0.7111111111111111,
+        "blend_before_later_repairs": 0.6,
+        "stored_published_q": 0.5777777777777777,
+        "market": 0.8888888888888888
+      },
+      "mean_probability": {
+        "raw_q": 0.4753930050372028,
+        "blend_before_later_repairs": 0.5534579129688937,
+        "stored_published_q": 0.5534579129688938,
+        "market": 0.46022222222222214
+      },
+      "yes_outcome_rate": 0.15555555555555556,
+      "blend_selected_side_win_rate": 0.28888888888888886,
+      "blend_selected_side_mean_quote": 0.4882222222222222,
+      "gross_payoff_per_contract_at_quote": -0.19933333333333328
+    },
+    "first_per_market": {
+      "forecasts": 12,
+      "markets": 12,
+      "fixing_dates": 3,
+      "brier": {
+        "raw_q": 0.2180578166472074,
+        "blend_before_later_repairs": 0.2614799867964878,
+        "stored_published_q": 0.2720533225869454,
+        "market": 0.179725
+      },
+      "log_loss": {
+        "raw_q": 0.6493663969654201,
+        "blend_before_later_repairs": 0.7297790407747241,
+        "stored_published_q": 0.7510925607294671,
+        "market": 0.5407224008543273
+      },
+      "favorite_accuracy": {
+        "raw_q": 0.75,
+        "blend_before_later_repairs": 0.5833333333333334,
+        "stored_published_q": 0.5,
+        "market": 0.75
+      },
+      "mean_probability": {
+        "raw_q": 0.5151091834124982,
+        "blend_before_later_repairs": 0.5828708174710207,
+        "stored_published_q": 0.5939918758755697,
+        "market": 0.4825
+      },
+      "yes_outcome_rate": 0.16666666666666666,
+      "blend_selected_side_win_rate": 0.25,
+      "blend_selected_side_mean_quote": 0.4841666666666667,
+      "gross_payoff_per_contract_at_quote": -0.23416666666666663
+    },
+    "last_per_market": {
+      "forecasts": 12,
+      "markets": 12,
+      "fixing_dates": 3,
+      "brier": {
+        "raw_q": 0.11693398852842506,
+        "blend_before_later_repairs": 0.1774404629234548,
+        "stored_published_q": 0.17360793302745792,
+        "market": 0.13143333333333332
+      },
+      "log_loss": {
+        "raw_q": 0.39280189262337917,
+        "blend_before_later_repairs": 0.531572623043893,
+        "stored_published_q": 0.5226892623076028,
+        "market": 0.4418835331087272
+      },
+      "favorite_accuracy": {
+        "raw_q": 0.9166666666666666,
+        "blend_before_later_repairs": 0.75,
+        "stored_published_q": 0.6666666666666666,
+        "market": 1.0
+      },
+      "mean_probability": {
+        "raw_q": 0.4283518428339448,
+        "blend_before_later_repairs": 0.5124917612963632,
+        "stored_published_q": 0.5124917612963632,
+        "market": 0.425
+      },
+      "yes_outcome_rate": 0.16666666666666666,
+      "blend_selected_side_win_rate": 0.3333333333333333,
+      "blend_selected_side_mean_quote": 0.45999999999999996,
+      "gross_payoff_per_contract_at_quote": -0.12666666666666668
+    },
+    "hash_selected_per_market": {
+      "forecasts": 12,
+      "markets": 12,
+      "fixing_dates": 3,
+      "brier": {
+        "raw_q": 0.18343998883074586,
+        "blend_before_later_repairs": 0.22652291287532558,
+        "stored_published_q": 0.2417164753078368,
+        "market": 0.14583333333333334
+      },
+      "log_loss": {
+        "raw_q": 0.5550294416959847,
+        "blend_before_later_repairs": 0.6378342130902092,
+        "stored_published_q": 0.6689307166657761,
+        "market": 0.47350766825080254
+      },
+      "favorite_accuracy": {
+        "raw_q": 0.75,
+        "blend_before_later_repairs": 0.5833333333333334,
+        "stored_published_q": 0.5,
+        "market": 1.0
+      },
+      "mean_probability": {
+        "raw_q": 0.4981449733800985,
+        "blend_before_later_repairs": 0.5589378025485624,
+        "stored_published_q": 0.5759896763030654,
+        "market": 0.4449999999999999
+      },
+      "yes_outcome_rate": 0.16666666666666666,
+      "blend_selected_side_win_rate": 0.25,
+      "blend_selected_side_mean_quote": 0.4783333333333333,
+      "gross_payoff_per_contract_at_quote": -0.22833333333333336
+    },
+    "quote_gap_5_to_25pp": {
+      "forecasts": 28,
+      "markets": 11,
+      "fixing_dates": 3,
+      "brier": {
+        "raw_q": 0.23960573407438163,
+        "blend_before_later_repairs": 0.26274197669410687,
+        "stored_published_q": 0.2630484701728028,
+        "market": 0.1724642857142857
+      },
+      "log_loss": {
+        "raw_q": 0.6753134411868188,
+        "blend_before_later_repairs": 0.7191725583491042,
+        "stored_published_q": 0.7193196030460512,
+        "market": 0.5262624467464878
+      },
+      "favorite_accuracy": {
+        "raw_q": 0.6071428571428571,
+        "blend_before_later_repairs": 0.5357142857142857,
+        "stored_published_q": 0.5,
+        "market": 0.8571428571428571
+      },
+      "mean_probability": {
+        "raw_q": 0.5960147498784213,
+        "blend_before_later_repairs": 0.629782504219284,
+        "stored_published_q": 0.6320136808078697,
+        "market": 0.49642857142857144
+      },
+      "yes_outcome_rate": 0.25,
+      "blend_selected_side_win_rate": 0.25,
+      "blend_selected_side_mean_quote": 0.49642857142857144,
+      "gross_payoff_per_contract_at_quote": -0.24642857142857144
+    },
+    "quote_gap_10_to_25pp": {
+      "forecasts": 19,
+      "markets": 8,
+      "fixing_dates": 3,
+      "brier": {
+        "raw_q": 0.3027090734343025,
+        "blend_before_later_repairs": 0.30978182520484976,
+        "stored_published_q": 0.30753723161709196,
+        "market": 0.19669999999999999
+      },
+      "log_loss": {
+        "raw_q": 0.8176738762779042,
+        "blend_before_later_repairs": 0.8231915458357902,
+        "stored_published_q": 0.8176722615230767,
+        "market": 0.5789038147511691
+      },
+      "favorite_accuracy": {
+        "raw_q": 0.42105263157894735,
+        "blend_before_later_repairs": 0.42105263157894735,
+        "stored_published_q": 0.3684210526315789,
+        "market": 0.8421052631578947
+      },
+      "mean_probability": {
+        "raw_q": 0.6766336040899508,
+        "blend_before_later_repairs": 0.6817541483739479,
+        "stored_published_q": 0.6814814215437689,
+        "market": 0.5226315789473683
+      },
+      "yes_outcome_rate": 0.2631578947368421,
+      "blend_selected_side_win_rate": 0.2631578947368421,
+      "blend_selected_side_mean_quote": 0.5226315789473683,
+      "gross_payoff_per_contract_at_quote": -0.2594736842105263
+    }
+  },
+  "brier_of_mean_forecast_per_market": {
+    "raw_q": 0.15787852974347547,
+    "blend_before_later_repairs": 0.21841281586079012,
+    "stored_published_q": 0.2279951202737872,
+    "market": 0.1533827523148148
+  },
+  "mean_brier_with_equal_market_weights": {
+    "raw_q": 0.17134886681235853,
+    "blend_before_later_repairs": 0.2248932331282707,
+    "stored_published_q": 0.23480520266760493,
+    "market": 0.1573898611111111
+  },
+  "by_event": {
+    "KXH200MON-26AUG31": {
+      "forecasts": 28,
+      "markets": 7,
+      "fixing_dates": 1,
+      "brier": {
+        "raw_q": 0.15526174902540482,
+        "blend_before_later_repairs": 0.23458922408060065,
+        "stored_published_q": 0.23294671126803057,
+        "market": 0.16914999999999997
+      },
+      "log_loss": {
+        "raw_q": 0.4773430208832235,
+        "blend_before_later_repairs": 0.660345791082803,
+        "stored_published_q": 0.6565386364815359,
+        "market": 0.5234419931517785
+      },
+      "favorite_accuracy": {
+        "raw_q": 0.75,
+        "blend_before_later_repairs": 0.6071428571428571,
+        "stored_published_q": 0.5714285714285714,
+        "market": 0.9642857142857143
+      },
+      "mean_probability": {
+        "raw_q": 0.34791748592448385,
+        "blend_before_later_repairs": 0.46422851799207226,
+        "stored_published_q": 0.4642285179920723,
+        "market": 0.4
+      },
+      "yes_outcome_rate": 0.0,
+      "blend_selected_side_win_rate": 0.21428571428571427,
+      "blend_selected_side_mean_quote": 0.445,
+      "gross_payoff_per_contract_at_quote": -0.23071428571428573
+    },
+    "KXH200WS-26AUG28": {
+      "forecasts": 12,
+      "markets": 4,
+      "fixing_dates": 1,
+      "brier": {
+        "raw_q": 0.328192874053346,
+        "blend_before_later_repairs": 0.3349813744164793,
+        "stored_published_q": 0.3349813744164793,
+        "market": 0.20169166666666663
+      },
+      "log_loss": {
+        "raw_q": 0.9055990604352377,
+        "blend_before_later_repairs": 0.888500091942376,
+        "stored_published_q": 0.888500091942376,
+        "market": 0.5804396329298975
+      },
+      "favorite_accuracy": {
+        "raw_q": 0.5,
+        "blend_before_later_repairs": 0.4166666666666667,
+        "stored_published_q": 0.4166666666666667,
+        "market": 0.6666666666666666
+      },
+      "mean_probability": {
+        "raw_q": 0.6423497671347186,
+        "blend_before_later_repairs": 0.6593108831024518,
+        "stored_published_q": 0.6593108831024518,
+        "market": 0.5175000000000001
+      },
+      "yes_outcome_rate": 0.16666666666666666,
+      "blend_selected_side_win_rate": 0.16666666666666666,
+      "blend_selected_side_mean_quote": 0.5175000000000001,
+      "gross_payoff_per_contract_at_quote": -0.35083333333333333
+    },
+    "KXH200WS-26SEP04": {
+      "forecasts": 5,
+      "markets": 1,
+      "fixing_dates": 1,
+      "brier": {
+        "raw_q": 0.054553502705878144,
+        "blend_before_later_repairs": 0.04233794215889631,
+        "stored_published_q": 0.04233794215889631,
+        "market": 0.11559999999999997
+      },
+      "log_loss": {
+        "raw_q": 0.24614149137860605,
+        "blend_before_later_repairs": 0.22585758555433416,
+        "stored_published_q": 0.22585758555433416,
+        "market": 0.41551544396166584
+      },
+      "favorite_accuracy": {
+        "raw_q": 1.0,
+        "blend_before_later_repairs": 1.0,
+        "stored_published_q": 1.0,
+        "market": 1.0
+      },
+      "mean_probability": {
+        "raw_q": 0.7885596830343906,
+        "blend_before_later_repairs": 0.799095396518553,
+        "stored_published_q": 0.799095396518553,
+        "market": 0.66
+      },
+      "yes_outcome_rate": 1.0,
+      "blend_selected_side_win_rate": 1.0,
+      "blend_selected_side_mean_quote": 0.66,
+      "gross_payoff_per_contract_at_quote": 0.33999999999999997
+    }
+  },
+  "by_series": {
+    "KXH200MON": {
+      "forecasts": 28,
+      "markets": 7,
+      "fixing_dates": 1,
+      "brier": {
+        "raw_q": 0.15526174902540482,
+        "blend_before_later_repairs": 0.23458922408060065,
+        "stored_published_q": 0.23294671126803057,
+        "market": 0.16914999999999997
+      },
+      "log_loss": {
+        "raw_q": 0.4773430208832235,
+        "blend_before_later_repairs": 0.660345791082803,
+        "stored_published_q": 0.6565386364815359,
+        "market": 0.5234419931517785
+      },
+      "favorite_accuracy": {
+        "raw_q": 0.75,
+        "blend_before_later_repairs": 0.6071428571428571,
+        "stored_published_q": 0.5714285714285714,
+        "market": 0.9642857142857143
+      },
+      "mean_probability": {
+        "raw_q": 0.34791748592448385,
+        "blend_before_later_repairs": 0.46422851799207226,
+        "stored_published_q": 0.4642285179920723,
+        "market": 0.4
+      },
+      "yes_outcome_rate": 0.0,
+      "blend_selected_side_win_rate": 0.21428571428571427,
+      "blend_selected_side_mean_quote": 0.445,
+      "gross_payoff_per_contract_at_quote": -0.23071428571428573
+    },
+    "KXH200WS": {
+      "forecasts": 17,
+      "markets": 5,
+      "fixing_dates": 2,
+      "brier": {
+        "raw_q": 0.2477107060099731,
+        "blend_before_later_repairs": 0.24890977669366077,
+        "stored_published_q": 0.24890977669366077,
+        "market": 0.1763705882352941
+      },
+      "log_loss": {
+        "raw_q": 0.7116409518891698,
+        "blend_before_later_repairs": 0.6936052371223637,
+        "stored_published_q": 0.6936052371223637,
+        "market": 0.5319325185274764
+      },
+      "favorite_accuracy": {
+        "raw_q": 0.6470588235294118,
+        "blend_before_later_repairs": 0.5882352941176471,
+        "stored_published_q": 0.5882352941176471,
+        "market": 0.7647058823529411
+      },
+      "mean_probability": {
+        "raw_q": 0.6853526835757986,
+        "blend_before_later_repairs": 0.7004239752836581,
+        "stored_published_q": 0.7004239752836581,
+        "market": 0.5594117647058824
+      },
+      "yes_outcome_rate": 0.4117647058823529,
+      "blend_selected_side_win_rate": 0.4117647058823529,
+      "blend_selected_side_mean_quote": 0.5594117647058824,
+      "gross_payoff_per_contract_at_quote": -0.14764705882352944
+    }
+  },
+  "open_reads": [
+    {
+      "marketId": "kalshi:KXH200WS-26SEP25-4.000",
+      "q": 0.7108257378556242,
+      "createdAt": "2026-08-31T15:58:56.253000000Z",
+      "forecast_age_days": 5.115616294502315,
+      "bid": 0.71,
+      "ask": 0.95,
+      "midpoint": 0.83,
+      "side": "NO",
+      "quote_gap_pp": 11.917426214437576,
+      "executable_gap_pp": -0.08257378556242312,
+      "spread_cents": 24.0,
+      "quote_observed_at": "2026-09-05T18:46:26.047Z",
+      "market_updated_at": "2026-09-02T00:28:38.207093Z"
+    },
+    {
+      "marketId": "kalshi:KXH200WS-26SEP25-5.500",
+      "q": 0.3959786594853684,
+      "createdAt": "2026-08-25T04:33:46.096000000Z",
+      "forecast_age_days": 11.59142829681713,
+      "bid": 0.02,
+      "ask": 0.42,
+      "midpoint": 0.22,
+      "side": "YES",
+      "quote_gap_pp": 17.597865948536842,
+      "executable_gap_pp": -2.402134051463156,
+      "spread_cents": 40.0,
+      "quote_observed_at": "2026-09-05T18:46:26.047Z",
+      "market_updated_at": "2026-09-02T00:28:38.158925Z"
+    },
+    {
+      "marketId": "kalshi:KXH200WS-26SEP18-4.500",
+      "q": 0.6424147541504839,
+      "createdAt": "2026-08-25T04:33:00.982000000Z",
+      "forecast_age_days": 11.591950449594908,
+      "bid": 0.41,
+      "ask": 0.69,
+      "midpoint": 0.5499999999999999,
+      "side": "YES",
+      "quote_gap_pp": 9.241475415048395,
+      "executable_gap_pp": -4.758524584951607,
+      "spread_cents": 27.999999999999996,
+      "quote_observed_at": "2026-09-05T18:46:26.047Z",
+      "market_updated_at": "2026-09-02T00:28:36.343365Z"
+    },
+    {
+      "marketId": "kalshi:KXH200WS-26SEP18-4.000",
+      "q": 0.8070797107823183,
+      "createdAt": "2026-08-24T16:57:04.162000000Z",
+      "forecast_age_days": 12.075246977372686,
+      "bid": 0.79,
+      "ask": 0.96,
+      "midpoint": 0.875,
+      "side": "NO",
+      "quote_gap_pp": 6.792028921768168,
+      "executable_gap_pp": -1.7079710782318291,
+      "spread_cents": 16.999999999999993,
+      "quote_observed_at": "2026-09-05T18:46:26.047Z",
+      "market_updated_at": "2026-09-02T00:28:36.343365Z"
+    },
+    {
+      "marketId": "kalshi:KXH200WS-26SEP11-5.000",
+      "q": 0.6169513424061233,
+      "createdAt": "2026-08-24T16:54:31.081000000Z",
+      "forecast_age_days": 12.077018748206019,
+      "bid": 0.03,
+      "ask": 0.6,
+      "midpoint": 0.315,
+      "side": "YES",
+      "quote_gap_pp": 30.195134240612326,
+      "executable_gap_pp": 1.6951342406123282,
+      "spread_cents": 56.99999999999999,
+      "quote_observed_at": "2026-09-05T18:46:26.047Z",
+      "market_updated_at": "2026-09-02T00:28:34.262002Z"
+    },
+    {
+      "marketId": "kalshi:KXH200WS-26SEP18-5.500",
+      "q": 0.4790245150124982,
+      "createdAt": "2026-08-24T12:27:27.532000000Z",
+      "forecast_age_days": 12.262476491261575,
+      "bid": 0.01,
+      "ask": 0.28,
+      "midpoint": 0.14500000000000002,
+      "side": "YES",
+      "quote_gap_pp": 33.40245150124982,
+      "executable_gap_pp": 19.902451501249818,
+      "spread_cents": 27.0,
+      "quote_observed_at": "2026-09-05T18:46:26.047Z",
+      "market_updated_at": "2026-09-02T00:28:36.343365Z"
+    }
+  ],
+  "limitations": [
+    "Only three fixing dates; repeated forecasts and related strikes are not independent observations.",
+    "All settled forecasts use research_market_v1. The only union_v4 forecast is unsettled.",
+    "Pre-coherence blend recovers the preserved pre-repair stage, not an immutable archive of every probability served at publication.",
+    "Stored published probability can reflect later repairs. Six monthly rows were changed with last coherence timestamp Aug30.",
+    "Quote-gap bands use the preserved blend and contemporaneously stored quote, not executable historical asks.",
+    "No historical bid/ask, depth, positions, fills, fees or account-return ledger; no realized profit or Sharpe inference.",
+    "Current forecasts are 5\u201312 days old; present quote comparisons are descriptive and do not establish fresh edge.",
+    "KXH200MS monthly averages and KXH200MAX annual products have no forecasts in this extract and are excluded."
+  ],
+  "source_sha256": {
+    "forecasts.csv.gz": "480032945f02407daaca9b7e215edd982c3a51a27107a8dfc19670af2b52c4a4",
+    "stages.json": "4124128c7a1d08add9a51aba1a433f8e90ff5b6977dbe148209a0d84eb4ea0b2",
+    "current-forecasts.json": "bed56c94c25901e2b11b29f54467ab86281779bd75828ed6ffc96c65afd11d3b",
+    "settlement/KXH200WS-markets.json": "fb9a6fbcb92cfb525da1ff7ecf8985c058c564ee6d3472ee47c42a130a4f2955",
+    "settlement/KXH200MON-markets.json": "d17b3ce77357565d388446101780582094ec1ed2a735705ad261aaccad878768"
+  }
+}

@@ -99,8 +99,9 @@ describe("Polymarket funding top-ups", () => {
     expect(skippable).toHaveBeenCalledTimes(1);
     expect(collateralBalance).toHaveBeenCalledTimes(2);
     expect(printed.some((line) => line.startsWith("Deposit credited:"))).toBe(false);
-    expect(printed).toContain("Deposit polling skipped. Balance: 145.13 pUSD; continuing to trading approvals.");
+    expect(printed).toContain("Deposit polling skipped.");
+    expect(printed).toContain("Balance: 145.13 pUSD.");
     expect(ensureTradingApprovals).toHaveBeenCalledTimes(1);
-    expect(printed.at(-1)).toBe("Funding flow complete. L2 credentials derived and stored.");
+    expect(printed.at(-1)).toBe("Funding complete.");
   });
 });

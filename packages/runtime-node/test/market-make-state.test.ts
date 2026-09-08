@@ -708,19 +708,40 @@ describe("MarketMakeStateStore", () => {
     expect(state.readEvents(3).map((event) => event.eventId)).toEqual(["event-new"]);
     expect(state.status().counts.events).toBe(1);
   });
-  it("bounds decision telemetry by count and age without ever reading it back", () => {
-    const state = open({ maxDecisions: 3, maxDecisionAgeMs: 500 });
-    // Pruning runs every thousand inserts; a flat market maker watching
-    // dozens of markets writes that many rejections in a few minutes.
-    for (let i = 0; i < 1_000; i += 1) {
-      state.appendDecision({ decisionId: `d-${i}`, ts: BASE_TS + i, kind: "entry-rejected", decision: { i } });
-    }
-    const rows = () => (state.exportSnapshot().mm_decisions as Array<{ decision_id: string }>).map((row) => row.decision_id);
-    expect(rows()).toEqual(["d-997", "d-998", "d-999"]);
-    for (let i = 0; i < 1_000; i += 1) {
-      state.appendDecision({ decisionId: `late-${i}`, ts: BASE_TS + 2_000 + i, kind: "entry-rejected", decision: { i } });
-    }
-    expect(rows()).toEqual(["late-997", "late-998", "late-999"]);
+  it("purges research telemetry when the trading store opens", () => {
+    let state = open();
+    state.appendDecision({ decisionId: "decision", ts: BASE_TS, kind: "entry-rejected", decision: { reason: "test" } });
+    state.appendMarkout({
+      markoutId: "markout",
+      ts: BASE_TS,
+      marketKey: "market-1",
+      horizonSeconds: 300,
+      markPrice: 0.5,
+    });
+    expect(state.exportSnapshot().mm_decisions).toHaveLength(1);
+    expect(state.exportSnapshot().mm_markouts).toHaveLength(1);
+
+    state = closeAndReopen();
+    expect(state.exportSnapshot().mm_decisions).toEqual([]);
+    expect(state.exportSnapshot().mm_markouts).toEqual([]);
+  });
+
+  it("compacts checkpointed recovery payloads while retaining later events", () => {
+    const state = open();
+    state.appendEvent({ eventId: "event-1", ts: BASE_TS, type: "BOOK", payload: { large: "payload" } });
+    state.appendEvent({ eventId: "event-2", ts: BASE_TS + 1, type: "BOOK", payload: { large: "payload" } });
+    state.appendEvent({ eventId: "event-3", ts: BASE_TS + 2, type: "BOOK", payload: { keep: true } });
+    const rows = state.readEvents(3);
+
+    state.compactEventsThrough(rows[1]!.seq);
+
+    const raw = state.exportSnapshot().mm_events as Array<{ event_id: string; payload_json: string }>;
+    expect(raw.map((row) => [row.event_id, row.payload_json])).toEqual([
+      ["event-1", "null"],
+      ["event-2", "null"],
+      ["event-3", JSON.stringify({ keep: true })],
+    ]);
+    expect(state.readEventsAfter(rows[1]!.seq).map((event) => event.eventId)).toEqual(["event-3"]);
   });
 
   it("replays only events after a sequence and reports the newest fill without exporting tables", () => {

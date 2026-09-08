@@ -24,17 +24,21 @@ export async function runDestroy(botId: string, opts: DestroyOpts = {}): Promise
   }
 
   const target: Target = { host: deployment.host, user: deployment.user };
-  console.log(pc.bold(`destroying droplet cassie-${botId} in ${deployment.region} (${deployment.host})`));
-  console.log(pc.dim("Resting orders are canceled first. The keystore and your venue balance stay as they are."));
-  if (!opts.yes && !(await confirm("Destroy it?", false))) return;
+  console.log(`Droplet: cassie-${botId}`);
+  console.log(`Region: ${deployment.region}`);
+  console.log(deployment.host);
+  console.log("Keys and venue balances are not deleted.");
+  console.log("Open positions are not closed.");
+  console.log(opts.force ? "Forced deletion skips order cancellation." : "Attempts to cancel working orders before deletion.");
+  if (!opts.yes && !(await confirm("Delete droplet?", false))) return;
 
   if (!opts.force && sshExec(target, "true").ok) {
     try {
       controlCall(target, botId, "POST", "/shutdown");
-      console.log(pc.green("bot stopped, resting orders canceled"));
+      console.log("Bot stopped.");
     } catch (error) {
       console.log(pc.yellow(`clean stop failed: ${(error as Error).message.slice(0, 160)}`));
-      if (!(await confirm("Delete the droplet anyway?", false))) return;
+      if (!(await confirm("Delete droplet with orders or positions possibly still open?", false))) return;
     }
     sshExec(target, `systemctl disable --now cassie@${botId} || true`);
   }
@@ -46,7 +50,7 @@ export async function runDestroy(botId: string, opts: DestroyOpts = {}): Promise
 
   const { deployment: _dropped, ...rest } = cfg;
   saveBotConfig(rest);
-  console.log(pc.green(`droplet deleted. run \`cassie run ${botId}\` locally, or \`cassie deploy ${botId}\` for a new one.`));
+  console.log("Droplet deleted.");
 }
 
 async function deleteDroplet(client: DigitalOcean, id: number): Promise<void> {

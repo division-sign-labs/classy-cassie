@@ -267,10 +267,18 @@ describe("LiveSignalSource (gateway contract, verified 2026-08-13)", () => {
     await expect(src.latest({})).rejects.toThrow();
   });
 
-  it("throws on non-2xx", async () => {
-    const fetchImpl = (async () => new Response("nope", { status: 500 })) as typeof fetch;
-    const src = new LiveSignalSource({ baseUrl: "https://x.example", path: "/s" }, "t", fetchImpl);
-    await expect(src.latest({})).rejects.toThrow(/signal API 500/);
+  it("retries a 5xx three times, then throws", async () => {
+    const fetchImpl = vi.fn(async () => new Response("nope", { status: 500 })) as unknown as typeof fetch;
+    const src = new LiveSignalSource({ baseUrl: "https://x.example", path: "/s", retry: { sleep: async () => {} } }, "t", fetchImpl);
+    await expect(src.latest({})).rejects.toThrow(/\/s → 500/);
+    expect(fetchImpl).toHaveBeenCalledTimes(3);
+  });
+
+  it("does not retry a rejected key", async () => {
+    const fetchImpl = vi.fn(async () => new Response("revoked", { status: 401 })) as unknown as typeof fetch;
+    const src = new LiveSignalSource({ baseUrl: "https://x.example", path: "/s", retry: { sleep: async () => {} } }, "t", fetchImpl);
+    await expect(src.latest({})).rejects.toMatchObject({ status: 401, unauthorized: true });
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
   });
 
   it("has no surface that accepts account state (hard rule)", () => {

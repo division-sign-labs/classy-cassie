@@ -37,9 +37,9 @@ describe("market-make deploy safety", () => {
     expect(deploymentIdFor({ ...deployment, deployedAt: "2026-08-31T12:01:00.000Z" })).not.toBe(first);
   });
 
-  it("starts halted and leaves reconciliation unapplied for later hash-bound operator review", () => {
+  it("starts halted and leaves reconciliation unapplied for later hash-bound operator review", async () => {
     const calls: Array<{ method: string; path: string; body?: string }> = [];
-    const result = startRuntimeAfterPreflights(bot("market-make"), (method, path, body) => {
+    const result = await startRuntimeAfterPreflights(bot("market-make"), (method, path, body) => {
       calls.push({ method, path, body });
       if (path === "/init") return { ok: true };
       if (path === "/market-make/status") return { lifecycle: "HALTED" };
@@ -53,18 +53,18 @@ describe("market-make deploy safety", () => {
     expect(result.marketMakeStatus?.lifecycle).toBe("HALTED");
   });
 
-  it("fails closed if startup activates a market-maker", () => {
-    expect(() =>
+  it("fails closed if startup activates a market-maker", async () => {
+    await expect(
       startRuntimeAfterPreflights(bot("market-make"), (_method, path) => {
         if (path === "/init") return { ok: true };
         return { lifecycle: "ACTIVE" };
       }),
-    ).toThrow(/expected HALTED/);
+    ).rejects.toThrow(/expected HALTED/);
   });
 
-  it("retains resume-then-init behavior for other strategies", () => {
+  it("retains resume-then-init behavior for explicit legacy strategies", async () => {
     const paths: string[] = [];
-    startRuntimeAfterPreflights(bot("signals"), (_method, path) => {
+    await startRuntimeAfterPreflights({ ...bot("signals"), execution: { mode: "legacy", entryDeadlineSec: 120, exitPassiveSec: 60 } }, (_method, path) => {
       paths.push(path);
       return { ok: true };
     });

@@ -1,0 +1,17 @@
+{
+  "as_of": "2026-09-05T18:45:30.594Z",
+  "historical": false,
+  "query": "H200",
+  "group_by": "market",
+  "markets": [],
+  "events": null,
+  "facets": {
+    "tags": [],
+    "categories": []
+  },
+  "retrieval": {
+    "graph": "ok",
+    "typesense": "ok",
+    "semantic": "error"
+  }
+}

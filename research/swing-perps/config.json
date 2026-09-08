@@ -1,0 +1,13 @@
+{
+ "minGapSigma": 0.15,
+ "maxGapSigma": 1.0,
+ "stopSigmaMultiple": 3.0,
+ "maxHoldHours": 48,
+ "riskBasePct": 5,
+ "riskMaxPct": 10,
+ "grossNotionalNav": 4,
+ "classShare": {
+  "commodity": 0.3333,
+  "equity": 0.6667
+ }
+}

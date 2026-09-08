@@ -16,7 +16,12 @@ export interface PollingSignalSourceOptions {
   now?: () => number;
   onRefresh?: (count: number, nextRefreshAt: number) => void;
   onForecastRefresh?: (count: number, nextRefreshAt: number) => void;
+  /** A refresh failed; `servedFromCache` says whether an older snapshot answered instead. */
+  onRefreshFailure?: (error: unknown, servedFromCache: boolean) => void;
 }
+
+/** How long a failed refresh waits before the next attempt, so a dead gateway is not hit every tick. */
+export const REFRESH_FAILURE_BACKOFF_MS = 60_000;
 
 /**
  * Fetch the complete upstream snapshot no more than once per interval, then
@@ -29,6 +34,7 @@ export class PollingSignalSource implements SignalSource {
   readonly #now: () => number;
   readonly #onRefresh?: PollingSignalSourceOptions["onRefresh"];
   readonly #onForecastRefresh?: PollingSignalSourceOptions["onForecastRefresh"];
+  readonly #onRefreshFailure?: PollingSignalSourceOptions["onRefreshFailure"];
   #cached?: { refreshedAt: number; signals: Signal[] };
   #refreshing?: Promise<Signal[]>;
   readonly #forecastCache = new Map<string, { refreshedAt: number; forecast?: MarketForecast }>();
@@ -43,6 +49,7 @@ export class PollingSignalSource implements SignalSource {
     this.#now = opts.now ?? (() => Date.now());
     this.#onRefresh = opts.onRefresh;
     this.#onForecastRefresh = opts.onForecastRefresh;
+    this.#onRefreshFailure = opts.onRefreshFailure;
   }
 
   async latest(query: SignalQuery): Promise<Signal[]> {
@@ -53,6 +60,8 @@ export class PollingSignalSource implements SignalSource {
         (!query.marketRef || signal.marketRef === query.marketRef),
     );
   }
+
+  refreshedAt(): number | undefined { return this.#cached?.refreshedAt; }
 
   /**
    * Refresh held-market Q forecasts on the slower signal cadence while the
@@ -92,6 +101,19 @@ export class PollingSignalSource implements SignalSource {
           });
         }
         this.#onForecastRefresh?.(forecasts.length, refreshedAt + this.#intervalMs);
+      }, (error: unknown) => {
+        // Quotient is unreachable after the source's own retries. Keep every
+        // cached forecast, so exits keep evaluating on the last committed Q,
+        // and back the next attempt off. Refs never fetched stay absent.
+        const retryAt = this.#now() - this.#intervalMs + REFRESH_FAILURE_BACKOFF_MS;
+        let served = false;
+        for (const marketRef of stale) {
+          const key = forecastKey(query.venue, marketRef);
+          const cached = this.#forecastCache.get(key);
+          if (cached?.forecast) served = true;
+          this.#forecastCache.set(key, { refreshedAt: retryAt, forecast: cached?.forecast });
+        }
+        this.#onRefreshFailure?.(error, served);
       });
       this.#forecastRefreshing = refresh;
       try {
@@ -120,6 +142,14 @@ export class PollingSignalSource implements SignalSource {
       this.#cached = { refreshedAt, signals: snapshot };
       this.#onRefresh?.(snapshot.length, refreshedAt + this.#intervalMs);
       return snapshot;
+    }, (error: unknown) => {
+      // Serve the previous snapshot through an outage; a bot that has never
+      // seen one has nothing to serve and the engine handles the rejection.
+      const previous = this.#cached;
+      this.#onRefreshFailure?.(error, previous !== undefined);
+      if (!previous) throw error;
+      this.#cached = { refreshedAt: this.#now() - this.#intervalMs + REFRESH_FAILURE_BACKOFF_MS, signals: previous.signals };
+      return previous.signals;
     });
     this.#refreshing = refresh;
     try {

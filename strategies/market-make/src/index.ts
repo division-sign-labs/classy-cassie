@@ -10,3 +10,6 @@ export * from "./exit.js";
 export * from "./risk.js";
 export * from "./reducer.js";
 export * from "./replay.js";
+export * from "./two-sided.js";
+export * from "./adaptive-policy.js";
+export * from "./adaptive.js";

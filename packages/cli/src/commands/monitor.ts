@@ -3,7 +3,7 @@
 // log into, so checking on one means reading its journal over SSH.
 
 import pc from "picocolors";
-import type { BotConfig, BotPortfolio } from "@quotient-forecasting/cassie-core";
+import type { BotConfig, BotPortfolio, PredictionExecutionSnapshot } from "@quotient-forecasting/cassie-core";
 import { SqliteStateStore } from "@quotient-forecasting/cassie-runtime-node";
 import { isDeployed, targetFor } from "../context.js";
 import { loadBotConfig, statePath } from "../paths.js";
@@ -39,7 +39,7 @@ export async function showLogs(botId: string, opts: LogsOpts): Promise<void> {
   }
 
   if (opts.follow) {
-    console.log(pc.yellow("--follow needs a deployed bot; a local run already prints to this terminal"));
+    console.log("--follow requires a deployed bot. Local logs appear in its running terminal.");
     return;
   }
 
@@ -53,7 +53,7 @@ export async function showLogs(botId: string, opts: LogsOpts): Promise<void> {
     : await localErrors(botId, opts);
 
   if (errors.length === 0) {
-    console.log(isDeployed(cfg) ? "no recorded errors" : `no recorded errors — \`cassie logs ${botId}\` after a run`);
+    console.log("No recorded errors.");
     return;
   }
   for (const e of errors) {
@@ -90,7 +90,8 @@ async function localErrors(botId: string, opts: LogsOpts): Promise<ErrorRow[]> {
 export async function runSsh(botId: string): Promise<void> {
   const cfg = loadBotConfig(botId);
   const target = targetFor(cfg);
-  console.log(pc.dim(`${target.user}@${target.host} — the bot runs as cassie@${botId}`));
+  console.log(`${target.user}@${target.host}`);
+  console.log(`Service: cassie@${botId}`);
   const code = await sshInteractive(target);
   if (code !== 0) process.exitCode = code;
 }
@@ -121,6 +122,8 @@ interface RuntimeStatus {
   lastTickAt?: number;
   region?: string;
   version?: string;
+  buildId?: string;
+  execution?: PredictionExecutionSnapshot;
 }
 
 /** A bot that is down should still print a status page, not a stack trace. */
@@ -140,7 +143,12 @@ function compactNumber(value: number): string {
   return String(Number(value.toFixed(4)));
 }
 
-function cadence(cfg: BotConfig): string {
+export function statusCadence(cfg: BotConfig): string {
+  if (cfg.strategy.id === "market-make" && cfg.strategy.config.two_sided) {
+    const reconciliation = cfg.strategy.config.reconciliation as { rest_reconcile_seconds?: number } | undefined;
+    const seconds = Math.max(60, reconciliation?.rest_reconcile_seconds ?? cfg.tickIntervalMin * 60);
+    return `two-sided quotes on book updates, routine account checks every ${compactNumber(seconds)}s; fills trigger reconciliation`;
+  }
   const signalMin = Number(
     (cfg.strategy.config as Record<string, unknown>).signalPollIntervalMin ?? 5,
   );
@@ -155,10 +163,12 @@ export async function showStatus(botId: string): Promise<void> {
   if (!isDeployed(cfg)) {
     console.log(pc.bold(`${botId}  ${cfg.venue}  not deployed`));
     console.log("");
-    row("strategy", `${cfg.strategy.id}, ${cadence(cfg)}`);
-    row("account", accountAddress(cfg) ?? "not provisioned — run cassie init");
+    row("strategy", `${cfg.strategy.id}, ${statusCadence(cfg)}`);
+    console.log("account");
+    console.log(accountAddress(cfg) ?? "not provisioned");
     console.log("");
-    console.log(pc.dim(`cassie run ${botId} runs it here. cassie deploy ${botId} puts it on a droplet.`));
+    console.log(`cassie run ${botId}`);
+    console.log(`cassie deploy ${botId}`);
     return;
   }
 
@@ -209,15 +219,33 @@ export async function showStatus(botId: string): Promise<void> {
   row(
     "engine",
     runtime
-      ? `${runtime.paused ? "paused" : "live"}, last tick ${ago(runtime.lastTickAt)}, ${cadence(cfg)}`
+      ? `${runtime.paused ? "paused" : "live"}, last tick ${ago(runtime.lastTickAt)}, ${statusCadence(cfg)}`
       : "not answering on the control socket",
   );
+
+  if (runtime?.execution) {
+    const execution = runtime.execution;
+    const working = execution.parents.filter(parent => parent.status === "active").length;
+    const pending = execution.parents.filter(parent => parent.status === "canceling" || parent.status === "blocked").length;
+    const filled = execution.parents.reduce((sum, parent) => sum + parent.filledNotionalUsd, 0);
+    const fees = execution.parents.reduce((sum, parent) => sum + parent.feeUsd, 0);
+    row("execution", execution.blocked
+      ? `blocked: ${execution.haltReason ?? "reconciliation required"}`
+      : `adaptive, ${working} working, ${pending} reconciling; fills ${money(filled)}, fees ${money(fees)}`);
+    const makerShares = execution.parents.reduce((sum, parent) => sum + (parent.metrics?.makerFillSize ?? 0), 0);
+    const takerShares = execution.parents.reduce((sum, parent) => sum + (parent.metrics?.takerFillSize ?? 0), 0);
+    if (makerShares + takerShares > 0) {
+      const improvement = execution.parents.reduce((sum, parent) => sum + (parent.metrics?.priceImprovementUsd ?? 0), 0);
+      row("fill quality", `${(100 * makerShares / (makerShares + takerShares)).toFixed(1)}% maker; ${money(improvement)} gross improvement vs arrival quotes`);
+    }
+  }
 
   if (runtime && !runtime.paused) {
     const portfolio = await tryControl<BotPortfolio>(target, botId, "/portfolio");
     if (portfolio) row("book", describePortfolio(portfolio));
   }
   row("runtime", `${runtime?.version ?? "unknown"} in ${runtime?.region ?? deployment.region}`);
+  if (runtime?.buildId) row("build", runtime.buildId.slice(0, 16));
 
   if (reachable) {
     const recent = sshExec(target, `journalctl -u ${JOURNAL_UNIT(botId)} --no-pager -n 5 -o short-iso`);

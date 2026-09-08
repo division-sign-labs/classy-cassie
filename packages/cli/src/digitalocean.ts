@@ -59,7 +59,7 @@ const TOKEN_NAMES = ["DIGITALOCEAN_TOKEN", "DIGITALOCEAN_ACCESS_TOKEN", "DO_API_
 
 export function findToken(): { token: string; origin: string } | null {
   // Nearest .local.env first, then the exported environment — the same order
-  // the Quotient and Ares keys resolve in, so all three live in one file.
+  // used by the Quotient and Surplus credential resolvers.
   const resolved = resolveLocalValue(TOKEN_NAMES);
   if (resolved) return { token: resolved.value, origin: resolved.origin };
   const path = tokenPath();
@@ -215,7 +215,7 @@ export async function ensureDigitalOceanReady(opts: { quiet?: boolean } = {}): P
       const { account } = await client.account();
       // `status` reads the droplet as one line of its own output; naming the
       // token source there is noise. `deploy` says it, because it is about to act.
-      if (!opts.quiet) console.log(pc.dim(`DigitalOcean account ${account.email} (token from ${found.origin})`));
+      if (!opts.quiet) console.log(`DigitalOcean: ${account.email}`);
       return { client, email: account.email };
     } catch (error) {
       if (!(error instanceof DigitalOceanError) || error.status !== 401) throw error;
@@ -223,21 +223,19 @@ export async function ensureDigitalOceanReady(opts: { quiet?: boolean } = {}): P
     }
   }
 
-  console.log("");
-  console.log(pc.bold("cassie needs a DigitalOcean API token."));
-  console.log("Your bot runs on a droplet in an account you own and pay for.");
-  console.log(pc.dim("cassie holds no infrastructure on your behalf. Your account, your bill, your kill switch."));
-  console.log("");
-  console.log(`Create a token with read and write scope at ${pc.cyan(TOKEN_PAGE)}`);
-  if (await confirm("Open that page now?", true)) openUrl(TOKEN_PAGE);
+  console.log("DigitalOcean bills your account for the droplet.");
+  console.log("Create an API token with read and write scope:");
+  console.log(TOKEN_PAGE);
+  if (await confirm("Open the token page?", true)) openUrl(TOKEN_PAGE);
 
   const token = (await ask("Paste the token", { secret: true })).trim();
-  if (!token) throw new Error("no token entered — run `cassie deploy` again when you have one");
+  if (!token) throw new Error("No DigitalOcean token entered. Add one and retry deployment.");
   const client = new DigitalOcean(token);
   const { account } = await client.account();
   const at = tokenPath();
   atomicWritePrivateFile(at, token);
-  console.log(pc.green(`token accepted for ${account.email}`));
-  console.log(pc.dim(`stored at ${at} (0600)`));
+  console.log(`Token accepted: ${account.email}`);
+  console.log("Saved with owner-only permissions (0600):");
+  console.log(at);
   return { client, email: account.email };
 }

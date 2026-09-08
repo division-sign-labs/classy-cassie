@@ -21,14 +21,14 @@ import { resolveSurplusApiKey } from "../surplus-config.js";
 import { QUOTIENT_CALL_COST_USD } from "@quotient-forecasting/cassie-core";
 
 export const AGENT_STRATEGY_SUMMARY =
-  "agent — describe what to look for in plain language; each wake it scans the venue, checks Quotient forecasts, and lets the model pick entries, sized by quarter-Kelly inside your budget";
+  "agent — model-selected entries, Quotient forecasts, quarter-Kelly sizing";
 
 function requireAgentBot(cfg: BotConfig): void {
   if (cfg.strategy.id !== "agent") {
     const guidance = cfg.strategy.id === "market-make"
-      ? "market-make durable state is bound to this bot id; create a separate bot id with `cassie init` and choose the agent strategy"
-      : "re-run `cassie init` and choose the agent strategy";
-    throw new Error(`bot "${cfg.id}" runs the "${cfg.strategy.id}" strategy — ${guidance}`);
+      ? "Create a separate agent bot; market-make state cannot be reused."
+      : "Choose the agent strategy in setup.";
+    throw new Error(`${cfg.id} uses ${cfg.strategy.id}. ${guidance}\ncassie init`);
   }
 }
 
@@ -38,20 +38,19 @@ function personaRawPath(botId: string): string {
 
 /** Elicit the agent strategy's config (persona is wired separately, in init). */
 export async function elicitAgentConfig(existing: Record<string, unknown>): Promise<Record<string, unknown>> {
-  console.log(pc.dim("The model decides what and whether; quarter-Kelly code decides how much. Every order still crosses the risk module."));
-  const prompt = (await ask("Agent mandate (plain language: what should it look for?)", {
+  const prompt = (await ask("Agent mandate", {
     default: typeof existing.prompt === "string" ? existing.prompt : undefined,
   })).trim();
   if (!prompt) throw new Error("the agent strategy needs a mandate prompt");
   const existingCriteria = (existing.criteria ?? {}) as Record<string, unknown>;
-  const budgetUsd = Number(await ask("Agent bankroll, USD (caps Kelly sizing and total deployed)", {
+  const budgetUsd = Number(await ask("Maximum deployed bankroll, USD", {
     default: String(existing.budgetUsd ?? 100),
   }));
   if (!Number.isFinite(budgetUsd) || budgetUsd <= 0) throw new Error("bankroll must be a positive dollar amount");
-  const riskBudgetPct = Number(await ask("Per-trade risk cap, % of bankroll (quarter-Kelly may size below it)", {
+  const riskBudgetPct = Number(await ask("Per-trade risk cap, % of bankroll", {
     default: String(existing.riskBudgetPct ?? 5),
   }));
-  const maxDaysRaw = (await ask('Only markets ending within how many days? (or "any")', {
+  const maxDaysRaw = (await ask('Maximum days to resolution (or "any")', {
     default: existingCriteria.maxDaysToEnd !== undefined ? String(existingCriteria.maxDaysToEnd) : "any",
   })).trim().toLowerCase();
   const minVolume24h = Number(await ask("Minimum 24h volume, USD", {
@@ -62,7 +61,8 @@ export async function elicitAgentConfig(existing: Record<string, unknown>): Prom
       ? (existingCriteria.categories as string[]).join(", ")
       : "any",
   })).trim();
-  const agentIntervalMin = Number(await ask("Wake interval, minutes (paid research runs each wake)", {
+  console.log("Each scan uses paid research.");
+  const agentIntervalMin = Number(await ask("Scan interval, minutes", {
     default: String(existing.agentIntervalMin ?? 60),
   }));
 
@@ -101,14 +101,15 @@ export async function fetchAndStorePersona(
   if (!cleaned) return undefined;
   const token = (await resolveQuotientToken(botId))?.token;
   if (!token) throw new Error("persona profiling needs a Quotient API key (environment, .local.env, or bot keystore)");
-  if (!(await confirm(`Profile @${cleaned} via Quotient now? This call costs $${QUOTIENT_CALL_COST_USD.profileX.toFixed(2)}.`, true))) {
+  if (!(await confirm(`Profile @${cleaned} via Quotient for $${QUOTIENT_CALL_COST_USD.profileX.toFixed(2)}?`, true))) {
     return undefined;
   }
   const research = new QuotientResearchClient({ baseUrl: cfg.signals.baseUrl, token });
   const raw = await research.profileX({ handle: cleaned, lookbackDays: 120, focus: "trading" });
   const brief = renderPersonaBrief({ handle: cleaned, ...(raw as Record<string, unknown>) });
   atomicWritePrivateFile(personaRawPath(botId), JSON.stringify(raw, null, 2) + "\n");
-  console.log(pc.green(`persona stored (${brief.length} chars); raw profile at ${personaRawPath(botId)}`));
+  console.log("Persona saved.");
+  console.log(personaRawPath(botId));
   return { handle: cleaned, brief, fetchedAt: new Date().toISOString() };
 }
 
@@ -129,7 +130,10 @@ export async function agentPrompt(botId: string, opts: { set?: string }): Promis
   AgentConfigSchema.parse(next);
   saveBotConfig(parseBotConfig({ ...cfg, strategy: { id: "agent", config: next } }));
   console.log(pc.green("mandate updated"));
-  if (cfg.deployment) console.log(pc.yellow(`the droplet still runs the old prompt — apply it with cassie deploy ${botId}`));
+  if (cfg.deployment) {
+    console.log("Redeploy to apply the mandate.");
+    console.log(`cassie deploy ${botId}`);
+  }
 }
 
 export async function agentPersona(botId: string, opts: { handle?: string; refresh?: boolean }): Promise<void> {
@@ -140,7 +144,8 @@ export async function agentPersona(botId: string, opts: { handle?: string; refre
 
   if (!opts.handle && !opts.refresh) {
     if (!persona) {
-      console.log("no persona configured — add one with: cassie agent persona " + botId + " --handle <x-handle>");
+      console.log("No persona configured.");
+      console.log(`cassie agent persona ${botId} --handle X_HANDLE`);
       return;
     }
     console.log(pc.bold(`persona: @${persona.handle} (fetched ${persona.fetchedAt})`));
@@ -156,7 +161,10 @@ export async function agentPersona(botId: string, opts: { handle?: string; refre
   AgentConfigSchema.parse(next);
   saveBotConfig(parseBotConfig({ ...cfg, strategy: { id: "agent", config: next } }));
   console.log(pc.green(`persona @${fetched.handle} saved to the bot config`));
-  if (cfg.deployment) console.log(pc.yellow(`the droplet still runs the old persona — apply it with cassie deploy ${botId}`));
+  if (cfg.deployment) {
+    console.log("Redeploy to apply the persona.");
+    console.log(`cassie deploy ${botId}`);
+  }
 }
 
 export async function agentStatus(botId: string): Promise<void> {
@@ -189,7 +197,7 @@ export async function agentStatus(botId: string): Promise<void> {
 export async function agentDryRun(botId: string): Promise<void> {
   const cfg = loadBotConfig(botId);
   requireAgentBot(cfg);
-  console.log(pc.dim("dry run: full scan + decide cycle — spends real Quotient/Surplus calls, places nothing, persists nothing."));
+  console.log("Dry run: paid Quotient/Surplus calls; no orders or saved decisions.");
 
   let report: AgentRunReport;
   if (isDeployed(cfg)) {

@@ -26,7 +26,6 @@ environment file:
 | `CASSIE_REQUIRED_REGION` | the region the bot is pinned to |
 | `QUOTIENT_API_TOKEN` | signals |
 | `TELEGRAM_BOT_TOKEN` | optional |
-| `ARES_API_KEY` | optional, required when reporting posts |
 
 On start it asks DigitalOcean's metadata service which region it is in and refuses to run
 anywhere but `CASSIE_REQUIRED_REGION`. Venue access is decided by where orders leave from,

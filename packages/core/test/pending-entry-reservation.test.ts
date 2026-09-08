@@ -90,6 +90,8 @@ function build(input: { lagTicks: number; signals: Signal[]; config?: Record<str
   const config = parseBotConfig({
     id: "reservation-test",
     venue: "polymarket",
+    // Preserve coverage of the legacy after-ACK reservation path.
+    execution: { mode: "legacy" },
     strategy: {
       id: "flip-flat",
       config: {
@@ -236,6 +238,7 @@ describe("pending-entry reservation across a venue handoff lag", () => {
     const config = parseBotConfig({
       id: "vanish-test",
       venue: "polymarket",
+      execution: { mode: "legacy" },
       strategy: {
         id: "flip-flat",
         config: { allocationMode: "portfolio-kelly", minExitDepth2cUsd: 0, convergenceExitPp: null, pendingEntryReservationSec: 600 },

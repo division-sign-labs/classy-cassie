@@ -1,0 +1,42 @@
+[
+  {
+    "path": "/Users/jordanolmstead/dev/q-trade-analysis/data/asset_rule_universe.csv.gz",
+    "bytes": 81046,
+    "sha256": "866b7fcf58f834fd0251692c4543d5485ca0b090612f83fa73a9afc630f78bee"
+  },
+  {
+    "path": "/Users/jordanolmstead/dev/q-trade-analysis/data/asset_rule_kalshi_markets.csv",
+    "bytes": 59627,
+    "sha256": "5a99f05fd9c304733a014a8b7316ba4080293d08bb98d40060d3bc283f10b915"
+  },
+  {
+    "path": "/Users/jordanolmstead/dev/q-trade-analysis/data/asset_rule_kalshi_candles.csv.gz",
+    "bytes": 285507,
+    "sha256": "f51035d8e5f0e7abad44875c7e484571916cff08b278d35a5d05d2fb52d048df"
+  },
+  {
+    "path": "/Users/jordanolmstead/dev/classy-cassie/research/kalshi-commodities/performance/forecasts.csv.gz",
+    "bytes": 543091,
+    "sha256": "253746a6ecd87194ff6c0dd9132218bfb9b350b14a1586f2b72a710660aa4fe7"
+  },
+  {
+    "path": "/Users/jordanolmstead/dev/classy-cassie/research/kalshi-commodities/performance/kalshi_markets.json",
+    "bytes": 2249043,
+    "sha256": "ead7409c8dbb787b1750970bbc1a26571a4eef0fe376c3b6c12902ff73a591e6"
+  },
+  {
+    "path": "/Users/jordanolmstead/dev/classy-cassie/research/kalshi-commodities/performance/outcomes.json",
+    "bytes": 621175,
+    "sha256": "09b58bbcc909937c0c39ac67f99089c252008b28dd4cff9c3ed758a0c4890860"
+  },
+  {
+    "path": "/Users/jordanolmstead/dev/classy-cassie/research/kalshi-commodities/performance/scored_outlooks.json",
+    "bytes": 268840,
+    "sha256": "774d03fae66b6d120fb5a14da297474028f37757f204b683a759a9f1c9c7c1d3"
+  },
+  {
+    "path": "/Users/jordanolmstead/dev/classy-cassie/research/kalshi-commodities/performance/horizon_outlooks.json",
+    "bytes": 228907,
+    "sha256": "2bd81cd8fa9635e9317b63c853fe0604af496047f70b2b349fd320d2e22cd09d"
+  }
+]

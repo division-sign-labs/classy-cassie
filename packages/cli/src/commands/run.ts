@@ -8,9 +8,10 @@ import { runLocal } from "@quotient-forecasting/cassie-runtime-node";
 import { buildRuntimeCreds, getKeystoreSecret, requireAccount } from "../context.js";
 import { dirs, loadBotConfig, statePath } from "../paths.js";
 import { resolveQuotientToken } from "../quotient-token.js";
-import { resolveAresApiKey } from "../ares-config.js";
 import { resolveSurplusApiKey } from "../surplus-config.js";
 import { MarketMakeConfigSchema } from "@quotient-forecasting/strategy-market-make";
+import { QuotientSwingConfigSchema } from "@quotient-forecasting/strategy-quotient-swing";
+import { resolvePolymarketGaslessAuth } from "../polymarket-gasless.js";
 
 export interface RunOpts {
   debug?: boolean;
@@ -18,17 +19,22 @@ export interface RunOpts {
 
 export async function runBot(botId: string, opts: RunOpts): Promise<void> {
   const cfg = loadBotConfig(botId);
+  if (cfg.strategy.id === "quotient-swing") QuotientSwingConfigSchema.parse(cfg.strategy.config);
+  if (cfg.deployment) {
+    throw new Error(`Bot ${botId} is assigned to a droplet.\ncassie deploy ${botId} --from-workspace`);
+  }
   const account = requireAccount(cfg);
   const creds = await buildRuntimeCreds(cfg);
-  const quotientToken = (await resolveQuotientToken(botId))?.token;
+  const polymarketGaslessAuth = await resolvePolymarketGaslessAuth(cfg);
+  const twoSidedMaker = cfg.strategy.id === "market-make" && Boolean(cfg.strategy.config.two_sided) && !MarketMakeConfigSchema.parse(cfg.strategy.config).two_sided?.adaptive;
+  const quotientToken = twoSidedMaker ? undefined : (await resolveQuotientToken(botId))?.token;
   const telegramToken =
     process.env.TELEGRAM_BOT_TOKEN ?? (await getKeystoreSecret(botId, KeyRoles.telegramToken)) ?? undefined;
-  const reportingApiKey = cfg.reporting ? (await resolveAresApiKey(botId))?.value : undefined;
   let surplusApiKey: string | undefined;
   if (cfg.strategy.id === "agent") {
     const resolved = await resolveSurplusApiKey(botId);
     if (!resolved) {
-      throw new Error("this bot runs the agent strategy and needs SURPLUS_API_KEY (environment, nearest .local.env, or bot keystore)");
+      throw new Error(`the ${cfg.strategy.id} strategy needs SURPLUS_API_KEY (environment, nearest .local.env, or bot keystore)`);
     }
     console.log(pc.dim(`Surplus credential: ${resolved.origin}`));
     surplusApiKey = resolved.value;
@@ -36,42 +42,42 @@ export async function runBot(botId: string, opts: RunOpts): Promise<void> {
 
   if (cfg.strategy.id === "market-make") {
     const maker = MarketMakeConfigSchema.parse(cfg.strategy.config);
-    console.log(
-      pc.bold(
-        `running ${botId} on Polymarket (strategy market-make, reconcile every ` +
-          `${Number((cfg.tickIntervalMin * 60).toFixed(4))}s, Q every ` +
-          `${Number((maker.quotient_feed.active_poll_seconds / 60).toFixed(4))}m active / ` +
-          `${Number((maker.quotient_feed.idle_poll_seconds / 60).toFixed(4))}m idle)`,
-      ),
-    );
-    console.log(
-      pc.yellow(
-        `The controller remains halted until cassie market-make reconcile ${botId} --apply and explicit resume.`,
-      ),
-    );
+    console.log(`Starting ${botId}: market-make on Polymarket.`);
+    console.log(`Position checks: ${Number((cfg.tickIntervalMin * 60).toFixed(4))}s`);
+    if (maker.two_sided?.adaptive) console.log(`Forecast refresh: ${maker.two_sided.adaptive.forecast_refresh_seconds}s`);
+    else if (!maker.two_sided) console.log(`Forecast refresh: ${maker.quotient_feed.active_poll_seconds}s active / ${maker.quotient_feed.idle_poll_seconds}s idle`);
+    console.log("New configurations require reviewed activation.");
+    if (!maker.two_sided) {
+      console.log(`cassie market-make reconcile ${botId}`);
+      console.log(`cassie market-make reconcile ${botId} --apply`);
+      console.log(`cassie market-make resume ${botId}`);
+    }
+  } else if (cfg.strategy.id === "quotient-swing") {
+    const swing = QuotientSwingConfigSchema.parse(cfg.strategy.config);
+    console.log(`Starting ${botId}: quotient-swing on Hyperliquid.`);
+    console.log(`Decisions: ${Number((swing.tickIntervalMin * 60).toFixed(4))}s`);
+    console.log(`Forecast refresh: ${swing.signalPollIntervalMin}m`);
+    console.log("Live trading starts after account checks.");
+    console.log("Existing operator and safety halts remain in effect.");
   } else {
     const signalPollIntervalMin = Number(
       (cfg.strategy.config as Record<string, unknown>).signalPollIntervalMin ?? 5,
     );
-    console.log(
-      pc.bold(
-        `running ${botId} on ${cfg.venue} (strategy ${cfg.strategy.id}, ` +
-          `positions every ${Number((cfg.tickIntervalMin * 60).toFixed(4))}s, ` +
-          `signals every ${Number(signalPollIntervalMin.toFixed(4))}m)`,
-      ),
-    );
+    console.log(`Starting ${botId}: ${cfg.strategy.id} on ${cfg.venue}.`);
+    console.log(`Position checks: ${Number((cfg.tickIntervalMin * 60).toFixed(4))}s`);
+    console.log(`Signal refresh: ${Number(signalPollIntervalMin.toFixed(4))}m`);
   }
-  console.log(pc.dim("Ctrl-C cancels resting orders before exit."));
+  console.log(pc.dim(cfg.strategy.id === "quotient-swing" ? "Ctrl-C cancels working orders and retains exchange-native protective stops." : "Ctrl-C cancels resting orders before exit."));
 
   await runLocal({
     config: cfg,
     account,
     creds,
+    polymarketGaslessAuth,
     statePath: statePath(botId),
     controlSocket: join(dirs.run(), `${botId}.sock`),
     quotientToken,
     telegramToken,
-    reportingApiKey,
     surplusApiKey,
     log: consoleLogger(botId, opts.debug ? "debug" : "info"),
   });

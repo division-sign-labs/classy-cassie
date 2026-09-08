@@ -51,6 +51,12 @@ WantedBy=multi-user.target
 `;
 }
 
+/** Override only this bot's executable; other instances keep the base unit. */
+export function renderWorkspaceOverride(botId: string): string {
+  if (!/^[a-z0-9][a-z0-9-]{0,31}$/.test(botId)) throw new Error("invalid bot id for workspace runtime override");
+  return `[Service]\nExecStart=\nExecStart=/usr/bin/node /opt/cassie/bots/${botId}/current/packages/runtime-node/dist/main.js\n`;
+}
+
 /** Shell command that installs the runtime at an exact version. */
 export function installRuntimeCommand(runtimeVersion: string): string {
   return `npm install --global --omit=dev --no-audit --no-fund ${RUNTIME_PACKAGE}@${runtimeVersion}`;
@@ -68,13 +74,13 @@ function indent(text: string, spaces: number): string {
 export interface CloudInitParams {
   /** Runtime version to install. Pinned to the CLI's version so the two agree. */
   runtimeVersion: string;
-  /** Overrides the npm install with a tarball uploaded after boot. */
+  /** Skip npm installation; workspace artifacts are uploaded after boot. */
   tarball?: boolean;
 }
 
 export function renderCloudInit(params: CloudInitParams): string {
   const install = params.tarball
-    ? "echo 'awaiting runtime tarball from cassie deploy'"
+    ? "echo 'awaiting workspace runtime from cassie deploy'"
     : installRuntimeCommand(params.runtimeVersion);
 
   return `#cloud-config

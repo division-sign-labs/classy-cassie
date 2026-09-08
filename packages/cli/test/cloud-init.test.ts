@@ -1,7 +1,7 @@
 // packages/cli/test/cloud-init.test.ts
 
 import { describe, expect, it } from "vitest";
-import { DEFAULT_REGION, DEFAULT_SIZE, READY_MARKER, RUNTIME_PACKAGE, renderCloudInit } from "../src/cloud-init.js";
+import { DEFAULT_REGION, DEFAULT_SIZE, READY_MARKER, RUNTIME_PACKAGE, renderCloudInit, renderWorkspaceOverride } from "../src/cloud-init.js";
 
 describe("renderCloudInit", () => {
   const rendered = renderCloudInit({ runtimeVersion: "1.2.3" });
@@ -57,5 +57,21 @@ describe("renderCloudInit", () => {
   it("defaults to a Bangalore droplet", () => {
     expect(DEFAULT_REGION).toBe("blr1");
     expect(DEFAULT_SIZE).toBe("s-1vcpu-1gb");
+  });
+
+  it("can provision Node and the completion marker while waiting for workspace artifacts", () => {
+    const workspace = renderCloudInit({ runtimeVersion: "1.2.3", tarball: true });
+    expect(workspace).toContain("apt-get install -y nodejs");
+    expect(workspace).toContain(READY_MARKER);
+    expect(workspace).toContain("awaiting workspace runtime");
+    expect(workspace).not.toContain("npm install");
+    expect(workspace).not.toContain("CASSIE_BOT_CREDS");
+  });
+
+  it("overrides one bot's executable without changing its sandbox or the global binary", () => {
+    expect(renderWorkspaceOverride("local-build")).toBe(
+      "[Service]\nExecStart=\nExecStart=/usr/bin/node /opt/cassie/bots/local-build/current/packages/runtime-node/dist/main.js\n",
+    );
+    expect(() => renderWorkspaceOverride("../other-bot")).toThrow(/invalid bot id/);
   });
 });

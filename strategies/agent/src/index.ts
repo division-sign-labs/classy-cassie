@@ -1,7 +1,7 @@
 // strategies/agent/src/index.ts
 // The monitoring-agent strategy: on each paid wake it discovers markets on the
-// bot's venue, enriches them with Quotient forecasts (metered, batched,
-// cached), asks one structured Surplus completion to select/rank/veto, and
+// bot's venue, enriches them with Quotient forecasts (batched and cached),
+// asks one structured Surplus completion to select/rank/veto, and
 // sizes every accepted entry deterministically (quarter-Kelly via
 // buildPredictionSize) inside the configured bankroll. The engine's risk
 // module still gates every resulting order — this strategy only returns
@@ -35,13 +35,13 @@ import {
   type HeldBrief,
 } from "./schema.js";
 import { buildSystemPrompt, buildUserMessage } from "./prompt.js";
-import { QuotientCallBudget, cachedForecast, storeForecast } from "./budget.js";
+import { cachedForecast, storeForecast } from "./cache.js";
 import { gateAndSize, quotientRowMatches, rankCandidates, toCandidate } from "./pipeline.js";
 import { QUOTIENT_CALL_COST_USD, QUOTIENT_LOOKUP_BATCH_LIMIT } from "@quotient-forecasting/cassie-core";
 
 export * from "./schema.js";
 export * from "./pipeline.js";
-export * from "./budget.js";
+export * from "./cache.js";
 export { buildSystemPrompt, buildUserMessage } from "./prompt.js";
 
 /** Structural slices of the core clients, so tests inject plain fakes. */
@@ -145,7 +145,7 @@ export class AgentStrategy implements Strategy, PreviewableStrategy {
       throw new Error(`the agent strategy runs on prediction venues; this bot trades ${ctx.venueId}`);
     }
     const now = ctx.now();
-    const spend = new QuotientCallBudget(cfg.maxQuotientSpendUsdPerWake);
+    let quotientSpendUsd = 0;
     const cacheTtlMs = cfg.quotientCacheTtlMin * 60_000;
 
     // 1. Discovery — free venue catalog reads, filtered deterministically.
@@ -171,21 +171,17 @@ export class AgentStrategy implements Strategy, PreviewableStrategy {
       const cached = await cachedForecast(ctx.memory, row.marketRef, cacheTtlMs, now);
       if (cached) qByRef.set(row.marketRef, cached);
     }
-    if (spend.canSpend(QUOTIENT_CALL_COST_USD.mispriced)) {
-      try {
-        attach(await this.deps.research.mispriced({ venue: ctx.venueId }));
-        spend.spend(QUOTIENT_CALL_COST_USD.mispriced);
-      } catch (err) {
-        ctx.log.warn(`mispriced feed unavailable: ${(err as Error).message}`);
-      }
+    try {
+      attach(await this.deps.research.mispriced({ venue: ctx.venueId }));
+      quotientSpendUsd += QUOTIENT_CALL_COST_USD.mispriced;
+    } catch (err) {
+      ctx.log.warn(`mispriced feed unavailable: ${(err as Error).message}`);
     }
-    if (spend.canSpend(QUOTIENT_CALL_COST_USD.search)) {
-      try {
-        attach(await this.deps.research.searchMarkets({ q: cfg.prompt.slice(0, 200), venue: ctx.venueId, limit: 50 }));
-        spend.spend(QUOTIENT_CALL_COST_USD.search);
-      } catch (err) {
-        ctx.log.warn(`market search unavailable: ${(err as Error).message}`);
-      }
+    try {
+      attach(await this.deps.research.searchMarkets({ q: cfg.prompt.slice(0, 200), venue: ctx.venueId, limit: 50 }));
+      quotientSpendUsd += QUOTIENT_CALL_COST_USD.search;
+    } catch (err) {
+      ctx.log.warn(`market search unavailable: ${(err as Error).message}`);
     }
 
     const provisional = rankCandidates(
@@ -205,12 +201,6 @@ export class AgentStrategy implements Strategy, PreviewableStrategy {
       if (cand.qProb === undefined && !needsLookup.includes(cand.marketRef)) needsLookup.push(cand.marketRef);
     }
     for (let i = 0; i < needsLookup.length; i += QUOTIENT_LOOKUP_BATCH_LIMIT) {
-      if (!spend.canSpend(QUOTIENT_CALL_COST_USD.lookup)) {
-        ctx.log.info(
-          `quotient spend cap $${cfg.maxQuotientSpendUsdPerWake.toFixed(2)} reached; ${needsLookup.length - i} markets stay unenriched this wake`,
-        );
-        break;
-      }
       const chunk = needsLookup.slice(i, i + QUOTIENT_LOOKUP_BATCH_LIMIT);
       try {
         const rows =
@@ -222,7 +212,7 @@ export class AgentStrategy implements Strategy, PreviewableStrategy {
                   .filter((c): c is string => Boolean(c)),
                 venue: "polymarket",
               });
-        spend.spend(QUOTIENT_CALL_COST_USD.lookup);
+        quotientSpendUsd += QUOTIENT_CALL_COST_USD.lookup;
         attach(rows);
         // Direct key match for rows that didn't join through discovery (held markets).
         for (const q of rows) {
@@ -279,7 +269,7 @@ export class AgentStrategy implements Strategy, PreviewableStrategy {
       candidates,
       held,
       executed: [],
-      quotientSpendUsd: Number(spend.spentUsd.toFixed(3)),
+      quotientSpendUsd: Number(quotientSpendUsd.toFixed(3)),
     };
 
     if (candidates.length === 0 && held.length === 0) {

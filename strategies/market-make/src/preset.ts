@@ -5,7 +5,7 @@ import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { MarketMakeConfigSchema, type MarketMakeConfig } from "./schema.js";
 
-export const MARKET_MAKE_SOURCE_SHA256 = "699b59faaecd43037555cdb114cc577445ba71ab0bb8dd48034e118ea526c857";
+export const MARKET_MAKE_SOURCE_SHA256 = "8e7809667d9eb28c0996f75c17d50d735714aac8fa09b59d372ce2933bbe8056";
 
 export interface MarketMakePresetProvenance {
   source_repository: string;
@@ -79,6 +79,33 @@ export function createMarketMakeConfig(overrides: DeepPartial<MarketMakeConfig> 
   return MarketMakeConfigSchema.parse(mergeObjects(MARKET_MAKE_PRESET, overrides));
 }
 
+/** Separate spread strategy; legacy forecast-policy fields are retained only for config compatibility. */
+export function createTwoSidedMarketMakeConfig(overrides: DeepPartial<MarketMakeConfig> = {}): MarketMakeConfig {
+  return createMarketMakeConfig({
+    ...overrides,
+    schema_version: "polymarket-two-sided-mm/1",
+    strategy_id: "two-sided-spread-v1",
+    mode: "two_sided_spread_and_inventory",
+    decision_probability: "executable venue book with inventory skew",
+    two_sided: { ...overrides.two_sided, adaptive: undefined },
+  });
+}
+
+/** Opt-in experimental policy. Dollar caps remain explicit operator choices. */
+export function createAdaptiveMarketMakeConfig(overrides: DeepPartial<MarketMakeConfig> = {}): MarketMakeConfig {
+  return createMarketMakeConfig({
+    ...overrides,
+    schema_version: "polymarket-adaptive-mm/1",
+    strategy_id: "quotient-adaptive-liquidity-v1",
+    mode: "forecast_conditioned_liquidity",
+    decision_probability: "Q disagreement, executable books and inventory",
+    exit_policy: { ...overrides.exit_policy, forecast_refresh_can_extend_once: false },
+    two_sided: { ...overrides.two_sided,
+      maximum_inventory_age_seconds: overrides.exit_policy?.default_hard_hold_seconds ?? MARKET_MAKE_PRESET.exit_policy.default_hard_hold_seconds,
+      adaptive: overrides.two_sided?.adaptive ?? {} },
+  });
+}
+
 /** Stable SHA-256 of the resolved config, independent of object key insertion order. */
 export function marketMakeConfigHash(config: MarketMakeConfig): string {
   const resolved = MarketMakeConfigSchema.parse(config);
@@ -119,6 +146,10 @@ export function marketMakeConfigForBankroll(
 
   return MarketMakeConfigSchema.parse({
     ...config,
+    ...(config.two_sided ? { two_sided: {
+      ...config.two_sided,
+      maximum_unpaired_notional_usd: scale(config.two_sided.maximum_unpaired_notional_usd),
+    } } : {}),
     capital: {
       ...config.capital,
       initial_bankroll_usd: bankrollUsd,

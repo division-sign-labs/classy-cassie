@@ -1,0 +1,541 @@
+{
+  "source_sha256": "2934ca0fdb5a44b427ff828abf2d18f3c29ff0e35329d43af74c78c8af67b27e",
+  "source_rows": 6667,
+  "matched_rows": 6667,
+  "missing_comparison_rows": 0,
+  "fields": {
+    "raw_q": "qRaw",
+    "stored_published_blend": "qProb",
+    "market": "yesOdds"
+  },
+  "semantics": {
+    "raw_q": "Persisted rawProbability: temperature-calibrated pre-market-blend adapter Q; not raw model logits.",
+    "stored_published_blend": "Persisted probability: canonical published value, potentially including coherence adjustment.",
+    "market": "Persisted yesOddsAtCreation: contemporaneously stored venue probability, not executable bid/ask.",
+    "qCalGated": "All values absent in this cohort; not substituted for publication."
+  },
+  "limitations": [
+    "Frozen September 5 audit; no new outcome or forecast fetch.",
+    "Contains repeated forecasts and multiple model/serving versions.",
+    "Stored probability is not an immutable archived publication snapshot.",
+    "No trade fills, spread, fee or account-return inference."
+  ],
+  "samples": {
+    "all": [
+      {
+        "asset": "Bitcoin",
+        "forecasts": 1218,
+        "markets": 174,
+        "settlement_clusters": 16,
+        "brier": {
+          "raw_q": 0.19323747221598894,
+          "stored_published_blend": 0.18442026143178378,
+          "market": 0.17079753694581282
+        },
+        "differences": {
+          "raw_q_minus_stored_published_blend": {
+            "mean": 0.008817210784205184,
+            "cluster_ci95": [
+              -0.008222615708463384,
+              0.02207342538891743
+            ]
+          },
+          "raw_q_minus_market": {
+            "mean": 0.022439935270176133,
+            "cluster_ci95": [
+              -0.0026451745471409885,
+              0.05456523415136093
+            ]
+          },
+          "stored_published_blend_minus_market": {
+            "mean": 0.01362272448597095,
+            "cluster_ci95": [
+              -0.000808075453357934,
+              0.03685355199000284
+            ]
+          }
+        }
+      },
+      {
+        "asset": "Copper",
+        "forecasts": 1221,
+        "markets": 134,
+        "settlement_clusters": 13,
+        "brier": {
+          "raw_q": 0.1938591314583846,
+          "stored_published_blend": 0.17052006555670066,
+          "market": 0.16544373464373463
+        },
+        "differences": {
+          "raw_q_minus_stored_published_blend": {
+            "mean": 0.023339065901683942,
+            "cluster_ci95": [
+              0.01961140023581637,
+              0.03152000974625701
+            ]
+          },
+          "raw_q_minus_market": {
+            "mean": 0.028415396814649944,
+            "cluster_ci95": [
+              0.007727227092243694,
+              0.05818319510562871
+            ]
+          },
+          "stored_published_blend_minus_market": {
+            "mean": 0.005076330912966002,
+            "cluster_ci95": [
+              -0.01514054691062782,
+              0.03151857661033746
+            ]
+          }
+        }
+      },
+      {
+        "asset": "Gold",
+        "forecasts": 1707,
+        "markets": 177,
+        "settlement_clusters": 14,
+        "brier": {
+          "raw_q": 0.21722492476990723,
+          "stored_published_blend": 0.1610680578671366,
+          "market": 0.1361596367896895
+        },
+        "differences": {
+          "raw_q_minus_stored_published_blend": {
+            "mean": 0.05615686690277062,
+            "cluster_ci95": [
+              0.020822244067549154,
+              0.08186152312978155
+            ]
+          },
+          "raw_q_minus_market": {
+            "mean": 0.08106528798021771,
+            "cluster_ci95": [
+              0.012876074389514103,
+              0.13873089646097203
+            ]
+          },
+          "stored_published_blend_minus_market": {
+            "mean": 0.024908421077447097,
+            "cluster_ci95": [
+              -0.012190779403224862,
+              0.05892824375213766
+            ]
+          }
+        }
+      },
+      {
+        "asset": "Silver",
+        "forecasts": 1473,
+        "markets": 149,
+        "settlement_clusters": 13,
+        "brier": {
+          "raw_q": 0.19777675894191027,
+          "stored_published_blend": 0.14038367116690756,
+          "market": 0.12171305159538356
+        },
+        "differences": {
+          "raw_q_minus_stored_published_blend": {
+            "mean": 0.05739308777500269,
+            "cluster_ci95": [
+              0.019219789053872467,
+              0.08038622663625956
+            ]
+          },
+          "raw_q_minus_market": {
+            "mean": 0.07606370734652668,
+            "cluster_ci95": [
+              0.003750072646065636,
+              0.1351776033687758
+            ]
+          },
+          "stored_published_blend_minus_market": {
+            "mean": 0.01867061957152399,
+            "cluster_ci95": [
+              -0.020570913674058354,
+              0.059151034881463734
+            ]
+          }
+        }
+      },
+      {
+        "asset": "WTI Crude Oil",
+        "forecasts": 1048,
+        "markets": 123,
+        "settlement_clusters": 12,
+        "brier": {
+          "raw_q": 0.16583627378226462,
+          "stored_published_blend": 0.19248414967097227,
+          "market": 0.20124184160305345
+        },
+        "differences": {
+          "raw_q_minus_stored_published_blend": {
+            "mean": -0.026647875888707616,
+            "cluster_ci95": [
+              -0.042793929592256565,
+              0.010931520708745288
+            ]
+          },
+          "raw_q_minus_market": {
+            "mean": -0.035405567820788804,
+            "cluster_ci95": [
+              -0.052363150327406294,
+              0.010323101270354884
+            ]
+          },
+          "stored_published_blend_minus_market": {
+            "mean": -0.008757691932081186,
+            "cluster_ci95": [
+              -0.01728727609413132,
+              0.010636453067368153
+            ]
+          }
+        }
+      }
+    ],
+    "first_per_market": [
+      {
+        "asset": "Bitcoin",
+        "forecasts": 174,
+        "markets": 174,
+        "settlement_clusters": 16,
+        "brier": {
+          "raw_q": 0.21279375939685488,
+          "stored_published_blend": 0.19757816786224297,
+          "market": 0.19418706896551724
+        },
+        "differences": {
+          "raw_q_minus_stored_published_blend": {
+            "mean": 0.015215591534611907,
+            "cluster_ci95": [
+              0.0022846264736152496,
+              0.02706996725240525
+            ]
+          },
+          "raw_q_minus_market": {
+            "mean": 0.01860669043133766,
+            "cluster_ci95": [
+              -0.019634659739964703,
+              0.05942452697528426
+            ]
+          },
+          "stored_published_blend_minus_market": {
+            "mean": 0.003391098896725755,
+            "cluster_ci95": [
+              -0.033012928944856426,
+              0.040086477971768404
+            ]
+          }
+        }
+      },
+      {
+        "asset": "Copper",
+        "forecasts": 134,
+        "markets": 134,
+        "settlement_clusters": 13,
+        "brier": {
+          "raw_q": 0.20423532143687326,
+          "stored_published_blend": 0.1869608748798577,
+          "market": 0.1947727611940299
+        },
+        "differences": {
+          "raw_q_minus_stored_published_blend": {
+            "mean": 0.017274446557015554,
+            "cluster_ci95": [
+              -0.0033912332798550038,
+              0.038866387013376025
+            ]
+          },
+          "raw_q_minus_market": {
+            "mean": 0.009462560242843423,
+            "cluster_ci95": [
+              -0.023285736869858357,
+              0.04327837049244259
+            ]
+          },
+          "stored_published_blend_minus_market": {
+            "mean": -0.007811886314172133,
+            "cluster_ci95": [
+              -0.03645891249707655,
+              0.02569761212612219
+            ]
+          }
+        }
+      },
+      {
+        "asset": "Gold",
+        "forecasts": 177,
+        "markets": 177,
+        "settlement_clusters": 14,
+        "brier": {
+          "raw_q": 0.26352775528326944,
+          "stored_published_blend": 0.22406627777904964,
+          "market": 0.20877316384180788
+        },
+        "differences": {
+          "raw_q_minus_stored_published_blend": {
+            "mean": 0.03946147750421977,
+            "cluster_ci95": [
+              0.014767367075296182,
+              0.06278477916483036
+            ]
+          },
+          "raw_q_minus_market": {
+            "mean": 0.0547545914414615,
+            "cluster_ci95": [
+              -0.006874366906675876,
+              0.10873027805447792
+            ]
+          },
+          "stored_published_blend_minus_market": {
+            "mean": 0.015293113937241738,
+            "cluster_ci95": [
+              -0.03180225138794547,
+              0.059402627948543875
+            ]
+          }
+        }
+      },
+      {
+        "asset": "Silver",
+        "forecasts": 149,
+        "markets": 149,
+        "settlement_clusters": 13,
+        "brier": {
+          "raw_q": 0.23624943078171165,
+          "stored_published_blend": 0.1893488540915679,
+          "market": 0.1861159395973154
+        },
+        "differences": {
+          "raw_q_minus_stored_published_blend": {
+            "mean": 0.046900576690143796,
+            "cluster_ci95": [
+              0.01299309284720352,
+              0.07894531901166368
+            ]
+          },
+          "raw_q_minus_market": {
+            "mean": 0.050133491184396264,
+            "cluster_ci95": [
+              -0.02910599276913742,
+              0.11563706685705642
+            ]
+          },
+          "stored_published_blend_minus_market": {
+            "mean": 0.0032329144942524674,
+            "cluster_ci95": [
+              -0.04523199595636155,
+              0.042203912156131035
+            ]
+          }
+        }
+      },
+      {
+        "asset": "WTI Crude Oil",
+        "forecasts": 123,
+        "markets": 123,
+        "settlement_clusters": 12,
+        "brier": {
+          "raw_q": 0.24365419767873825,
+          "stored_published_blend": 0.2551302666017433,
+          "market": 0.24807378048780485
+        },
+        "differences": {
+          "raw_q_minus_stored_published_blend": {
+            "mean": -0.011476068923005067,
+            "cluster_ci95": [
+              -0.0384897066687579,
+              0.014496009360266692
+            ]
+          },
+          "raw_q_minus_market": {
+            "mean": -0.004419582809066619,
+            "cluster_ci95": [
+              -0.04375341026439826,
+              0.042254149685724954
+            ]
+          },
+          "stored_published_blend_minus_market": {
+            "mean": 0.007056486113938441,
+            "cluster_ci95": [
+              -0.022228810016778098,
+              0.040505753082373565
+            ]
+          }
+        }
+      }
+    ],
+    "hash_selected_per_market": [
+      {
+        "asset": "Bitcoin",
+        "forecasts": 174,
+        "markets": 174,
+        "settlement_clusters": 16,
+        "brier": {
+          "raw_q": 0.1822213340878265,
+          "stored_published_blend": 0.16250942718940156,
+          "market": 0.15990718390804598
+        },
+        "differences": {
+          "raw_q_minus_stored_published_blend": {
+            "mean": 0.019711906898424926,
+            "cluster_ci95": [
+              0.00709590904866903,
+              0.033693892109759746
+            ]
+          },
+          "raw_q_minus_market": {
+            "mean": 0.02231415017978051,
+            "cluster_ci95": [
+              -0.010739461146725393,
+              0.0564262593045057
+            ]
+          },
+          "stored_published_blend_minus_market": {
+            "mean": 0.002602243281355586,
+            "cluster_ci95": [
+              -0.028689279794931216,
+              0.033056595730216666
+            ]
+          }
+        }
+      },
+      {
+        "asset": "Copper",
+        "forecasts": 134,
+        "markets": 134,
+        "settlement_clusters": 13,
+        "brier": {
+          "raw_q": 0.1839504996973573,
+          "stored_published_blend": 0.15036007943423005,
+          "market": 0.15898339552238805
+        },
+        "differences": {
+          "raw_q_minus_stored_published_blend": {
+            "mean": 0.03359042026312723,
+            "cluster_ci95": [
+              0.01450660327568097,
+              0.058371204534190486
+            ]
+          },
+          "raw_q_minus_market": {
+            "mean": 0.024967104174969244,
+            "cluster_ci95": [
+              -0.008525757664971238,
+              0.06582439913364606
+            ]
+          },
+          "stored_published_blend_minus_market": {
+            "mean": -0.008623316088157982,
+            "cluster_ci95": [
+              -0.03411477509735713,
+              0.025436452700684658
+            ]
+          }
+        }
+      },
+      {
+        "asset": "Gold",
+        "forecasts": 177,
+        "markets": 177,
+        "settlement_clusters": 14,
+        "brier": {
+          "raw_q": 0.19435078849197385,
+          "stored_published_blend": 0.15552021224980606,
+          "market": 0.15204816384180792
+        },
+        "differences": {
+          "raw_q_minus_stored_published_blend": {
+            "mean": 0.038830576242167805,
+            "cluster_ci95": [
+              0.018263405288986123,
+              0.05899500378739373
+            ]
+          },
+          "raw_q_minus_market": {
+            "mean": 0.04230262465016595,
+            "cluster_ci95": [
+              -0.012361295383076759,
+              0.09083300774430708
+            ]
+          },
+          "stored_published_blend_minus_market": {
+            "mean": 0.0034720484079981424,
+            "cluster_ci95": [
+              -0.03532058980838572,
+              0.03913595175400451
+            ]
+          }
+        }
+      },
+      {
+        "asset": "Silver",
+        "forecasts": 149,
+        "markets": 149,
+        "settlement_clusters": 13,
+        "brier": {
+          "raw_q": 0.19075264324726898,
+          "stored_published_blend": 0.14618310331877526,
+          "market": 0.13988489932885909
+        },
+        "differences": {
+          "raw_q_minus_stored_published_blend": {
+            "mean": 0.0445695399284937,
+            "cluster_ci95": [
+              0.01884531170148393,
+              0.06835533051967184
+            ]
+          },
+          "raw_q_minus_market": {
+            "mean": 0.05086774391840991,
+            "cluster_ci95": [
+              -0.01721044193664065,
+              0.11121659426061897
+            ]
+          },
+          "stored_published_blend_minus_market": {
+            "mean": 0.006298203989916224,
+            "cluster_ci95": [
+              -0.03832011031139106,
+              0.046550436956703634
+            ]
+          }
+        }
+      },
+      {
+        "asset": "WTI Crude Oil",
+        "forecasts": 123,
+        "markets": 123,
+        "settlement_clusters": 12,
+        "brier": {
+          "raw_q": 0.20471689343307037,
+          "stored_published_blend": 0.21131788284502218,
+          "market": 0.20421788617886177
+        },
+        "differences": {
+          "raw_q_minus_stored_published_blend": {
+            "mean": -0.006600989411951827,
+            "cluster_ci95": [
+              -0.02793462958945239,
+              0.01549507447243825
+            ]
+          },
+          "raw_q_minus_market": {
+            "mean": 0.0004990072542085702,
+            "cluster_ci95": [
+              -0.03422285602065909,
+              0.04777321071542157
+            ]
+          },
+          "stored_published_blend_minus_market": {
+            "mean": 0.007099996666160399,
+            "cluster_ci95": [
+              -0.019736181629763695,
+              0.040785738641841165
+            ]
+          }
+        }
+      }
+    ]
+  }
+}

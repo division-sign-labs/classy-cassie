@@ -1,0 +1,142 @@
+{
+  "fetched_at_utc": "2026-09-05T18:49:53.009395+00:00",
+  "sources": {
+    "KXH200WS-26SEP11-5.000-book.json": {
+      "sha256": "8f4e4ebc2925e454d9cb24304ee23ccb7845226a89a9a1b769befbb51586013c",
+      "bytes": 332
+    },
+    "KXH200MS.json": {
+      "sha256": "656a09d2b0325f267ea06dcd7e2f5d9b9e98d3c9ef2367e229918af9dbbb7cb3",
+      "bytes": 1001
+    },
+    "GPUMON.txt": {
+      "sha256": "e779bdbcfe53664e2a52f00953d49ebabf966398b1db74ac95722573bf056c6f",
+      "bytes": 6084
+    },
+    "KXH200MON-26AUG31-event.json": {
+      "sha256": "a8128efd0a35ff8bcfaf53ae0d2a2024015c24cfbd60fe43190cb72fd7590624",
+      "bytes": 60001
+    },
+    "ornn-h200-page.html": {
+      "sha256": "f076648a553f8e552f47f6cfc200ed64d7860e6860d81060a02c279941fa242d",
+      "bytes": 105028
+    },
+    "KXH200MAX-markets.json": {
+      "sha256": "868a4bd59cccee81958c7abaf537af0692c571bbe73f301362cf62e3a4444cb4",
+      "bytes": 14016
+    },
+    "KXH200WS.json": {
+      "sha256": "0342a2160376fe415870049e74d3d2d014dbef71245809698f3bcd2e5a046dde",
+      "bytes": 791
+    },
+    "GPUMON.pdf": {
+      "sha256": "976464527104be7f19309b75c6e0e1aba1431fa7550f2e4d1876f027628859e6",
+      "bytes": 29913
+    },
+    "KXH200WS-26SEP11-event.json": {
+      "sha256": "26f2c73b25fe57504b54763fc9a59e37f1e35c1628b22bc27731a5f2d0f356e6",
+      "bytes": 22301
+    },
+    "ornn-index-history.json": {
+      "sha256": "3db403e6797fb8f89960af9b797d8193745b6b0e5f3dc7b60a585f6b601c0993",
+      "bytes": 5569
+    },
+    "KXH200MS-markets.json": {
+      "sha256": "d250afe24d36eb1e36aee735df8b69c45246f352f7131ccb79a30ad03e927821",
+      "bytes": 374064
+    },
+    "h200-series-all.json": {
+      "sha256": "97890147dee764e554045e715d6270ff029bd9a9b2efb6c24dd3674489be94b9",
+      "bytes": 9066
+    },
+    "KXH200MS-26SEP-4.500-book.json": {
+      "sha256": "b2795306ce5439fb61cb2ebbc524e20c16037fdacc70c20560245f8b9572eaa9",
+      "bytes": 490
+    },
+    "GPUAVGA.pdf": {
+      "sha256": "6a7061506a39c3e33eff7f6c37582a399473b25f4056874466a937598846acd2",
+      "bytes": 31252
+    },
+    "GPUA.txt": {
+      "sha256": "e5e6ffa45f0f8a9de7ba074171ede3e1021849d0b7cb7a8b74253f52cbf7bd4f",
+      "bytes": 6059
+    },
+    "GPUW.txt": {
+      "sha256": "e779bdbcfe53664e2a52f00953d49ebabf966398b1db74ac95722573bf056c6f",
+      "bytes": 6084
+    },
+    "KXH200Q.json": {
+      "sha256": "1c25d54ead80488c16ed0138ade841f2ff2500f603a462738e8e2d8ef5d4bedc",
+      "bytes": 821
+    },
+    "ornn-daily.json": {
+      "sha256": "93567bae59af1b1328c4e5e865d58674d0af35f5b8fab93caf69658c27cad18b",
+      "bytes": 127
+    },
+    "KXH200MAX-26DEC31-event.json": {
+      "sha256": "cf626b6f37b56463627bc3bd64c8560b92d862faec156ddea491afc4d08d9692",
+      "bytes": 12074
+    },
+    "KXH200WS-26SEP11-4.500-book.json": {
+      "sha256": "91b75b0b59317fcb0a037de0815a82d1cdd748f019b3c4dcba9711fe403024c7",
+      "bytes": 685
+    },
+    "GPUAVGA.txt": {
+      "sha256": "e5e6ffa45f0f8a9de7ba074171ede3e1021849d0b7cb7a8b74253f52cbf7bd4f",
+      "bytes": 6059
+    },
+    "KXH200W-markets.json": {
+      "sha256": "bd6af5dfd5c8ed2ea9379fe3164793e444175bc464f3bf0215284ffcd9d8d58f",
+      "bytes": 21002
+    },
+    "ornn-price-index-docs.html": {
+      "sha256": "1fe75f9c41af6b67e0931f86a607c91215e21ef22ace646e37807bb4b60ac5e6",
+      "bytes": 570927
+    },
+    "KXH200W.json": {
+      "sha256": "f8065a9853ec287bac7197af80b1dcf6c4d956b5792a8993e95a9ed00afa2b0a",
+      "bytes": 746
+    },
+    "KXH200WS-markets.json": {
+      "sha256": "fb9a6fbcb92cfb525da1ff7ecf8985c058c564ee6d3472ee47c42a130a4f2955",
+      "bytes": 332348
+    },
+    "KXH200MAX.json": {
+      "sha256": "378731dad51b22906dc537c7677761c2c53e74ac40099ef1d472f4bd4200ea57",
+      "bytes": 1007
+    },
+    "ornn-methodology.html": {
+      "sha256": "136c445e17efbb292e1e3674819ca99c269a0138abd50751b84ff6c19ff02dcb",
+      "bytes": 173009
+    },
+    "KXH200MON.json": {
+      "sha256": "492524a1c4ec7d1a404a2ce974ae3778cf6aaec82942dd83131994298dc3e998",
+      "bytes": 810
+    },
+    "KXH200Q-markets.json": {
+      "sha256": "04e8f1d898cb39221cd145857f2f770e24c4f27dd7fa965f42f70b7e19e0746c",
+      "bytes": 39630
+    },
+    "GPUA.pdf": {
+      "sha256": "5a21e25246182af26b1f927d7efec1df7ea5fdfa58fd13b61d93bbe3f305aaa6",
+      "bytes": 31252
+    },
+    "KXH200MON-markets.json": {
+      "sha256": "d17b3ce77357565d388446101780582094ec1ed2a735705ad261aaccad878768",
+      "bytes": 158619
+    },
+    "GPUW.pdf": {
+      "sha256": "48c5f068f6b473ef1798dbf21a2d65e9c0ec7281bfcf5beb0dfadf5645dd86a3",
+      "bytes": 29913
+    },
+    "KXH200MS-26SEP-event.json": {
+      "sha256": "a30339a2cd6b4c234c69c3db895eaa72a6e0593f368c2a7e84f6556e78a023ed",
+      "bytes": 20930
+    }
+  },
+  "limitations": [
+    "Public daily series is rounded to cents; exact hourly history requires authorized Ornn paid access.",
+    "Current source history may contain subsequent corrections; official Kalshi outcomes used for scoring.",
+    "history-range requires an API key; index-history is explicitly public and succeeded."
+  ]
+}

@@ -31,9 +31,8 @@ cassie passphrase remember <botId>
 
 For non-interactive automation, Cassie also accepts `CASSIE_PASSPHRASE` from the nearest
 `.local.env` or the exported environment. Native per-bot storage is preferable because
-it does not leave the passphrase in a project file. There is no `ARES_PASSPHRASE`:
-`ARES_API_KEY` and `ARES_BUILDER_CODE` are separate optional reporting credentials. A
-Splits passkey is likewise separate and remains in the official Splits/browser flow.
+it does not leave the passphrase in a project file. A Splits passkey is separate and
+remains in the official Splits/browser flow.
 
 ## Configure the strategy
 

@@ -1,0 +1,30 @@
+{
+  "series": {
+    "additional_prohibitions": [
+      "Persons who are employed by any of the Source Agencies are not permitted to trade on the Contract.",
+      "Persons who hold any material, non-public information on the Underlying are not permitted to trade on the Contract."
+    ],
+    "category": "Commodities",
+    "contract_terms_url": "https://assets.kalshi.com/contract_terms/COMMODITYSETTLE.pdf",
+    "contract_url": "https://assets.kalshi.com/regulatory/product-certifications/COMMODITYSETTLE.pdf",
+    "exchange_index": 0,
+    "fee_multiplier": 1,
+    "fee_type": "quadratic",
+    "frequency": "daily",
+    "last_updated_ts": "2026-05-21T20:23:15.922986Z",
+    "product_metadata": {
+      "scope": "WTI Crude"
+    },
+    "settlement_sources": [
+      {
+        "name": "ICE",
+        "url": "https://www.theice.com/products/213/WTI-Crude-Futures"
+      }
+    ],
+    "tags": [
+      "Oil & Gas"
+    ],
+    "ticker": "KXWTI",
+    "title": "WTI oil on day"
+  }
+}

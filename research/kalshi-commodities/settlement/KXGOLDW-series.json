@@ -1,0 +1,36 @@
+{
+  "series": {
+    "additional_prohibitions": [
+      "Persons who are employed by any of the Source Agencies are not permitted to trade on the Contract.",
+      "Persons who hold any material, non-public information on the Underlying are not permitted to trade on the Contract."
+    ],
+    "category": "Commodities",
+    "contract_terms_url": "https://assets.kalshi.com/contract_terms/COMMODITIES.pdf",
+    "contract_url": "https://assets.kalshi.com/regulatory/product-certifications/COMMODITIES.pdf",
+    "exchange_index": 0,
+    "fee_multiplier": 1,
+    "fee_type": "quadratic",
+    "frequency": "weekly",
+    "last_updated_ts": "2026-09-01T17:50:55.493297Z",
+    "product_metadata": {
+      "important_info": {
+        "id": "COMMODITIES-bulk-2026-04-14",
+        "markdown": "**Important information:** Effective starting the conclusion of Friday, July 31st event, weekly Gold markets resolution will transition to a continuous index feed (Metal.Index.GOLD/USD, ID 3153).",
+        "message": "",
+        "title": ""
+      },
+      "scope": "Gold"
+    },
+    "settlement_sources": [
+      {
+        "name": "Pyth - Gold",
+        "url": "https://app.pyth.com/explore/Metal.Index.GOLD%2FUSD?returnUrl=%2Fexplore%3Fstate%3Dstable"
+      }
+    ],
+    "tags": [
+      "Metals"
+    ],
+    "ticker": "KXGOLDW",
+    "title": "Gold Weekly price "
+  }
+}

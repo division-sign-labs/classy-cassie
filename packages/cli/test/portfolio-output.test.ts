@@ -84,6 +84,34 @@ afterEach(() => {
 });
 
 describe("portfolio output breakdown", () => {
+  it("separates newly bridged funding from an unfunded swing trading account", async () => {
+    portfolios.set("swing", portfolio("swing", { venue: "hyperliquid", equity: 0,
+      balances: [{ asset: "USDC", total: 0, available: 0 }],
+      perpScope: { dex: "xyz", accountMode: "default", fundingBalance: 600.064501, fundingAvailable: 600.064501 } }));
+    const output = captureOutput();
+    await showPortfolio("swing");
+    expect(output).toContain("Hyperliquid funding balance $600.06");
+    expect(output).toContain("xyz trading NAV $0.00");
+    expect(output).toContain("Exposure $0.00");
+    expect(output).toContain("Account mode default");
+    expect(output.join("\n")).not.toContain("cash $");
+  });
+
+  it("labels perp notional as exposure and excludes funding and notional from total trading equity", async () => {
+    portfolios.set("swing", portfolio("swing", { venue: "hyperliquid", equity: 150, unrealizedPnl: 10,
+      balances: [{ asset: "USDC", total: 150, available: 100 }],
+      positions: [{ marketRef: "xyz:NVDA", side: "LONG", size: 4, avgPrice: 100, markPrice: 102.5, value: 410, unrealizedPnl: 10 }],
+      perpScope: { dex: "xyz", accountMode: "standard", fundingBalance: 600, fundingAvailable: 600 } }));
+    portfolios.set("prediction", portfolio("prediction", { equity: 50, unrealizedPnl: -2 }));
+    const output = captureOutput();
+    await showPortfolio();
+    expect(output).toContain("xyz trading NAV $150.00");
+    expect(output).toContain("Exposure $410.00");
+    expect(output.join("\n")).toContain("notional");
+    expect(output.join("\n")).toContain("TOTAL  trading equity $200.00  uPnL $8.00");
+    expect(output.join("\n")).not.toContain("TOTAL  cash");
+  });
+
   it("labels cash, position value, equity, and uPnL for one bot without counting open orders", async () => {
     portfolios.set(
       "solo",

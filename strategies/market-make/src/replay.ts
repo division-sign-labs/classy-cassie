@@ -718,6 +718,7 @@ export function replayMarketMake(
   }
   const bundle = MarketMakeReplayBundleSchema.parse(bundleInput) as MarketMakeReplayBundle;
   const config = MarketMakeConfigSchema.parse(configInput);
+  if (config.two_sided) throw new Error("legacy forecast replay cannot model two-sided quote execution");
   const indexed = bundle.events.map((event, index) => ({ event, index }));
   indexed.sort((a, b) => a.event.ts - b.event.ts || a.index - b.index);
   const marketMetadata = metadataByMarket(indexed, config);

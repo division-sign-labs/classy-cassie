@@ -1,0 +1,29 @@
+{
+  "retrievedAt": "2026-09-05T06:58:55.031542+00:00",
+  "assets": [
+    "Bitcoin",
+    "Copper",
+    "Gold",
+    "WTI Crude Oil",
+    "Silver"
+  ],
+  "forecasts": {
+    "rows": 9269
+  },
+  "outcomes": {
+    "rows": 197
+  },
+  "scored_outlooks": {
+    "rows": 197
+  },
+  "outlook_coverage": {
+    "rows": 700
+  },
+  "outcome_coverage": {
+    "rows": 279
+  },
+  "horizon_outlooks": {
+    "rows": 293,
+    "retrieval": "Additional read-only fixed-horizon query during the same audit"
+  }
+}

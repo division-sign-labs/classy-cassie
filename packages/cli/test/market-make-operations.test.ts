@@ -80,7 +80,7 @@ describe("market-make operational confirmations", () => {
     });
     for (const bot of [local, deployedBot()]) {
       expect(() => assertGenericOrderMutationAllowed(bot, { cancel: "order-1" })).toThrow(
-        /disabled for market-make.*durable reservations/,
+        /cancellation bypasses market-make reservations/,
       );
       expect(() => assertGenericOrderMutationAllowed(bot, { cancelAll: true })).toThrow(
         /cassie market-make halt/,
@@ -90,12 +90,14 @@ describe("market-make operational confirmations", () => {
   });
 
   it("does not halt or liquidate when the operator declines", async () => {
-    const { handlers, calls, confirm } = harness(false);
+    const { handlers, calls, confirm, log } = harness(false);
     await handlers.halt("maker-1", { liquidate: true });
 
     expect(confirm).toHaveBeenCalledOnce();
     expect(String(confirm.mock.calls[0]?.[0])).toMatch(/urgent bounded exits/i);
-    expect(String(confirm.mock.calls[0]?.[0])).toContain("2 active markets");
+    expect(log.mock.calls.flat().join("\n")).toContain("2 active markets");
+    expect(log.mock.invocationCallOrder[1]).toBeLessThan(confirm.mock.invocationCallOrder[0]!);
+    expect(log.mock.invocationCallOrder[0]).toBeLessThan(confirm.mock.invocationCallOrder[0]!);
     expect(calls).toEqual([{ path: "/market-make/status", init: undefined }]);
   });
 
@@ -157,7 +159,8 @@ describe("market-make operational confirmations", () => {
       proposalHash: "a".repeat(64),
       proposals: { unknownOrdersToCancel: [], residualInventory: [] },
     });
-    expect(String(confirm.mock.calls[0]?.[0])).toContain("a".repeat(64));
+    expect(log).toHaveBeenCalledWith("a".repeat(64));
+    expect(confirm).toHaveBeenCalledWith("Apply this reconciliation proposal?", false);
     expect(calls[2]).toEqual({
       path: "/market-make/reconcile",
       init: {
@@ -245,6 +248,7 @@ describe("market-make configure drift messaging", () => {
     const saved = saveConfig.mock.calls[0]?.[0] as BotConfig;
     expect((saved.strategy.config as { capital: { base_order_notional_usd: number } }).capital.base_order_notional_usd).toBe(13);
     expect(log.mock.calls.flat().join("\n")).toMatch(/deployed runtime still has its prior config/);
+    expect(log).toHaveBeenCalledWith("cassie deploy maker-1");
     expect(log.mock.calls.flat().join("\n")).toMatch(/remain halted/);
   });
 
@@ -265,7 +269,7 @@ describe("market-make configure drift messaging", () => {
     await handlers.configure("local-maker", { baseOrderUsd: "13" });
 
     const output = log.mock.calls.flat().join("\n");
-    expect(output).toMatch(/running local runtime still has its prior config/);
+    expect(output).toMatch(/local runtime still has its prior config/);
     expect(output).toContain("cassie run local-maker");
     expect(output).toMatch(/remain halted/);
   });

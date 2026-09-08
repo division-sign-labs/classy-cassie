@@ -1,0 +1,931 @@
+{
+  "fetchedAt": "2026-09-05T05:34:29.345Z",
+  "command": [
+    "forecast",
+    "polymarket:1163699",
+    "polymarket:2252244",
+    "polymarket:2243896",
+    "polymarket:908713"
+  ],
+  "data": {
+    "results": [
+      {
+        "venue": "polymarket",
+        "nativeMarketId": "2243896",
+        "nativeEventId": null,
+        "seriesTicker": null,
+        "marketKey": "polymarket:2243896",
+        "quotientMarketId": "2243896",
+        "slug": "russia-x-ukraine-ceasefire-agreement-by-october-31-2026",
+        "marketUrl": "https://polymarket.com/event/russia-x-ukraine-ceasefire-agreement-by",
+        "sourceUrl": null,
+        "broker_channels": [],
+        "robinhood_category": null,
+        "robinhood_url": null,
+        "relationships": {
+          "assets": [],
+          "markets": [],
+          "signals": [],
+          "truncated": {
+            "assets": false,
+            "markets": false,
+            "signals": false
+          }
+        },
+        "question": "Russia x Ukraine ceasefire agreement by October 31, 2026?",
+        "end_date": "2026-11-01T03:59:00Z",
+        "quotient_odds": 0.28136250044376676,
+        "market_odds": 0.235,
+        "venue_quote": {
+          "schema_version": "1",
+          "venue": "polymarket",
+          "market_id": "2243896",
+          "yes_bid": null,
+          "yes_ask": null,
+          "yes_last": null,
+          "selected_probability": 0.235,
+          "quote_method": "midpoint",
+          "venue_timestamp": null,
+          "observed_at": "2026-09-05T05:34:26.809Z",
+          "freshness": "verified"
+        },
+        "inDispute": false,
+        "clarifications": null,
+        "bluf": "Core territorial demands remain incompatible, so a Russia-Ukraine ceasefire agreement by October 31 is a meaningful underdog.",
+        "forecast_status": {
+          "state": "converged",
+          "cents": 5,
+          "adverse_move_pct": null,
+          "basis": "since_forecast",
+          "price_source": "live"
+        },
+        "forecast": {
+          "venue": "polymarket",
+          "market": {
+            "venue": "polymarket",
+            "nativeMarketId": "2243896",
+            "nativeEventId": null,
+            "seriesTicker": null,
+            "marketKey": "polymarket:2243896",
+            "quotientMarketId": "2243896",
+            "slug": "russia-x-ukraine-ceasefire-agreement-by-october-31-2026",
+            "marketUrl": "https://polymarket.com/event/russia-x-ukraine-ceasefire-agreement-by",
+            "sourceUrl": null,
+            "broker_channels": [],
+            "robinhood_category": null,
+            "robinhood_url": null
+          },
+          "id": "4b497d0a-ddba-4e06-8e3b-ac1febf86d2e",
+          "probability": 0.28136250044376676,
+          "created_at": "2026-09-05T00:37:21.540000000Z",
+          "thesis": "Core territorial demands remain incompatible, so a Russia-Ukraine ceasefire agreement by October 31 is a meaningful underdog.",
+          "resolution_pathway": {
+            "criteria": "This market will resolve to “Yes” if there is a ceasefire agreement between Russia and Ukraine by the specified date, 11:59 PM ET. Otherwise, this market will resolve to “No”.\n\nA ceasefire agreement refers to any mutually-agreed suspension of direct military engagement between Russia and Ukraine, which is either officially announced by both countries or confirmed by a consensus of credible reporting to have been mutually agreed by both countries.\n\nA broader peace deal, normalization agreement, political framework, truce, or humanitarian pause will qualify if it includes a mutually agreed suspension of direct military engagement, to be effective on a specified date. Agreements that outline future negotiations or de-escalation measures without an explicit, dated commitment to stop fighting will not qualify.\n\nAny form of informal understanding, backchannel communication, de-escalation without an announced agreement, or unilateral pause in hostilities will not be considered a ceasefire agreement.\n\nOnly agreements which constitute a general pause in the conflict will qualify. Agreements which only apply to specific conflict categories (e.g. restrictions on certain target categories or certain locations) will not qualify.\n\nIf a qualifying agreement is officially reached before this market’s end date, this market will resolve to “Yes,” regardless of whether the ceasefire agreement officially takes effect after that date.\n\nThe primary resolution sources for this market will be official information from the governments of Russia and Ukraine and a consensus of credible reporting.",
+            "crux": "Whether Moscow and Kyiv can bridge territorial and security terms before drafting a dated halt.",
+            "deadline": "2026-11-01T03:59:00Z",
+            "source": ""
+          },
+          "relationships": {
+            "assets": [],
+            "markets": [
+              {
+                "relationship": "ON_MARKET",
+                "direction": "outgoing",
+                "via": "direct",
+                "marketKey": "polymarket:2243896",
+                "venue": "polymarket",
+                "nativeMarketId": "2243896",
+                "question": "Russia x Ukraine ceasefire agreement by October 31, 2026?"
+              }
+            ],
+            "signals": [],
+            "truncated": {
+              "assets": false,
+              "markets": false,
+              "signals": false
+            }
+          }
+        },
+        "last_updated": "2026-09-05T00:37:21.540000000Z",
+        "volume_24h": 306203.38852499996,
+        "quotientUrl": "https://quotient.social/markets/2243896",
+        "polymarketUrl": "https://polymarket.com/event/russia-x-ukraine-ceasefire-agreement-by",
+        "key_drivers": [
+          {
+            "factor": "Russia and Ukraine remain divided over territory and postwar security guarantees.",
+            "direction": "against",
+            "impact": "high",
+            "citation": "Trump's peace envoys to visit Moscow and Kyiv - reports say - BBC News"
+          },
+          {
+            "factor": "Continued strikes and threatened retaliation are undermining the renewed diplomatic effort.",
+            "direction": "against",
+            "impact": "high",
+            "citation": "Russian drone hits Ukranian security headquarters, Zelensky says"
+          },
+          {
+            "factor": "Ukraine’s intelligence chief expects viable ceasefire conditions only after the deadline.",
+            "direction": "against",
+            "impact": "moderate",
+            "citation": "Budanov: talks to end war could resume in late September, but ceasefire unlikely before spring – NYT"
+          },
+          {
+            "factor": "Renewed US shuttle diplomacy gives both governments an immediate channel for narrowing differences.",
+            "direction": "for",
+            "impact": "moderate",
+            "citation": "Trump's peace envoys to visit Moscow and Kyiv - reports say - BBC News"
+          },
+          {
+            "factor": "Russia and Ukraine have previously accepted a temporary ceasefire arrangement despite mutual distrust.",
+            "direction": "for",
+            "impact": "low",
+            "citation": "Russia and Ukraine swap accusations of ceasefire violations | AP News"
+          }
+        ],
+        "signals": [
+          {
+            "id": "https://www.state.gov/secretary-of-state-marco-rubio-remarks-to-the-press-at-fairmont-le-manoir-richelieu-charlevoix-canada/",
+            "title": "Secretary of State Marco Rubio Remarks to the Press at Fairmont le Manoir Richelieu, Charlevoix, Canada - United States Department of State",
+            "comment": "",
+            "direction": null,
+            "url": "https://www.state.gov/secretary-of-state-marco-rubio-remarks-to-the-press-at-fairmont-le-manoir-richelieu-charlevoix-canada/",
+            "source": "www.state.gov",
+            "published_at": "2026-09-05T00:37:21.822Z",
+            "correlated_at": "2026-09-05T00:37:21.822Z",
+            "confidence": null,
+            "evidence_quote": null
+          },
+          {
+            "id": "https://www.state.gov/secretary-of-state-marco-rubio-remarks-to-press-3/",
+            "title": "Secretary of State Marco Rubio Remarks to Press - United States Department of State",
+            "comment": "",
+            "direction": null,
+            "url": "https://www.state.gov/secretary-of-state-marco-rubio-remarks-to-press-3/",
+            "source": "www.state.gov",
+            "published_at": "2026-09-05T00:37:21.822Z",
+            "correlated_at": "2026-09-05T00:37:21.822Z",
+            "confidence": null,
+            "evidence_quote": null
+          },
+          {
+            "id": "https://apnews.com/article/russia-ukraine-war-diplomacy-zelenskyy-kushner-witkoff-553d4ed8204070be97b1671db0c5cd53",
+            "title": "Russian attacks kill 3 in Ukraine as Zelenskyy awaits US envoys | AP News",
+            "comment": "",
+            "direction": null,
+            "url": "https://apnews.com/article/russia-ukraine-war-diplomacy-zelenskyy-kushner-witkoff-553d4ed8204070be97b1671db0c5cd53",
+            "source": "apnews.com",
+            "published_at": "2026-09-05T00:37:21.822Z",
+            "correlated_at": "2026-09-05T00:37:21.822Z",
+            "confidence": null,
+            "evidence_quote": null
+          },
+          {
+            "id": "http://en.special.kremlin.ru/catalog/keywords/82/events/80658",
+            "title": "President of Russia",
+            "comment": "",
+            "direction": null,
+            "url": "http://en.special.kremlin.ru/catalog/keywords/82/events/80658",
+            "source": "en.special.kremlin.ru",
+            "published_at": "2026-09-05T00:37:21.822Z",
+            "correlated_at": "2026-09-05T00:37:21.822Z",
+            "confidence": null,
+            "evidence_quote": null
+          },
+          {
+            "id": "https://kyivindependent.com/units-of-ukraines-army-ordered-to-halt-fighting-as-us-envoys-set-to-visit-ukraine-russia/",
+            "title": "Units of Ukraine's army reportedly ordered to halt fighting as Trump confirms US envoys set to travel for peace talks",
+            "comment": "",
+            "direction": null,
+            "url": "https://kyivindependent.com/units-of-ukraines-army-ordered-to-halt-fighting-as-us-envoys-set-to-visit-ukraine-russia/",
+            "source": "kyivindependent.com",
+            "published_at": "2026-09-04T20:59:53Z",
+            "correlated_at": "2026-09-05T00:37:21.822Z",
+            "confidence": null,
+            "evidence_quote": null
+          },
+          {
+            "id": "http://en.kremlin.ru/events/president/news/80690",
+            "title": "Meeting with members of the Security Council • President of Russia",
+            "comment": "",
+            "direction": null,
+            "url": "http://en.kremlin.ru/events/president/news/80690",
+            "source": "en.kremlin.ru",
+            "published_at": "2026-09-04T17:48:15Z",
+            "correlated_at": "2026-09-05T00:37:21.822Z",
+            "confidence": null,
+            "evidence_quote": null
+          },
+          {
+            "id": "https://www.bbc.com/news/articles/c5yep7y48x2o",
+            "title": "Russian drone hits Ukranian security headquarters, Zelensky says",
+            "comment": "",
+            "direction": null,
+            "url": "https://www.bbc.com/news/articles/c5yep7y48x2o",
+            "source": "www.bbc.com",
+            "published_at": "2026-09-04T15:55:16Z",
+            "correlated_at": "2026-09-05T00:37:21.822Z",
+            "confidence": null,
+            "evidence_quote": null
+          },
+          {
+            "id": "https://www.ukrinform.net/rubric-polytics/4160918-conditions-for-ceasefire-unlikely-to-emerge-before-spring-2027-budanov-says.html",
+            "title": "Conditions for ceasefire unlikely to emerge before spring 2027, Budanov says",
+            "comment": "The article quotes Budanov, a senior Ukrainian official, saying conditions for a ceasefire are unlikely before spring 2027, which is after the market's resolution date of October 31, 2026. This directly reduces the likelihood of a ceasefire by that deadline.",
+            "direction": null,
+            "url": "https://www.ukrinform.net/rubric-polytics/4160918-conditions-for-ceasefire-unlikely-to-emerge-before-spring-2027-budanov-says.html",
+            "source": "www.ukrinform.net",
+            "published_at": "2026-09-04T15:12:00Z",
+            "correlated_at": "2026-09-05T00:41:57.671Z",
+            "confidence": "high",
+            "evidence_quote": "Budanov believes that although talks could resume this month, conditions for a ceasefire are unlikely to emerge before spring 2027."
+          },
+          {
+            "id": "https://www.bloomberg.com/news/articles/2026-09-04/us-envoys-to-make-new-ukraine-peace-push-with-russia-pessimistic",
+            "title": "US Envoys to Make New Ukraine Peace Push With Russia Pessimistic",
+            "comment": "",
+            "direction": null,
+            "url": "https://www.bloomberg.com/news/articles/2026-09-04/us-envoys-to-make-new-ukraine-peace-push-with-russia-pessimistic",
+            "source": "Bloomberg Politics",
+            "published_at": "2026-09-04T14:50:27Z",
+            "correlated_at": "2026-09-05T00:37:21.822Z",
+            "confidence": null,
+            "evidence_quote": null
+          },
+          {
+            "id": "https://www.bbc.com/news/articles/c23x0z48x0no",
+            "title": "Trump's peace envoys to visit Moscow and Kyiv",
+            "comment": "",
+            "direction": null,
+            "url": "https://www.bbc.com/news/articles/c23x0z48x0no",
+            "source": "www.bbc.com",
+            "published_at": "2026-09-04T14:27:10Z",
+            "correlated_at": "2026-09-05T00:37:21.822Z",
+            "confidence": null,
+            "evidence_quote": null
+          }
+        ],
+        "source_reads_updated_at": "2026-09-05T00:37:21.822Z"
+      },
+      {
+        "venue": "polymarket",
+        "nativeMarketId": "2252244",
+        "nativeEventId": null,
+        "seriesTicker": null,
+        "marketKey": "polymarket:2252244",
+        "quotientMarketId": "2252244",
+        "slug": "will-there-be-no-change-in-fed-interest-rates-after-the-september-2026-meeting-615",
+        "marketUrl": "https://polymarket.com/event/fed-decision-in-september-762",
+        "sourceUrl": null,
+        "broker_channels": [],
+        "robinhood_category": null,
+        "robinhood_url": null,
+        "relationships": {
+          "assets": [],
+          "markets": [],
+          "signals": [
+            {
+              "relationship": "ON_MARKET",
+              "direction": "incoming",
+              "via": "direct",
+              "id": "cb632257-a077-419f-8c8a-5f140c48d5f6",
+              "signal_type": "prediction_market",
+              "canonical_endpoint": "/api/v1/signals",
+              "side": "NO",
+              "published_at": "2026-08-31T00:34:00.062Z"
+            },
+            {
+              "relationship": "ON_MARKET",
+              "direction": "incoming",
+              "via": "direct",
+              "id": "5616007d-6fe7-4a41-b63b-f43c94c5e154",
+              "signal_type": "prediction_market",
+              "canonical_endpoint": "/api/v1/signals",
+              "side": "YES",
+              "published_at": "2026-08-30T17:13:38.619Z"
+            },
+            {
+              "relationship": "ON_MARKET",
+              "direction": "incoming",
+              "via": "direct",
+              "id": "cb6a8ab5-bbbb-48fb-8fca-e38602e23153",
+              "signal_type": "prediction_market",
+              "canonical_endpoint": "/api/v1/signals",
+              "side": "YES",
+              "published_at": "2026-08-30T14:08:34.517Z"
+            },
+            {
+              "relationship": "ON_MARKET",
+              "direction": "incoming",
+              "via": "direct",
+              "id": "31c89de2-2e82-4036-bbba-569aed5035ca",
+              "signal_type": "prediction_market",
+              "canonical_endpoint": "/api/v1/signals",
+              "side": "YES",
+              "published_at": "2026-08-30T12:29:21.704Z"
+            },
+            {
+              "relationship": "ON_MARKET",
+              "direction": "incoming",
+              "via": "direct",
+              "id": "d48d8c6a-1323-4c75-a130-6047b16d37c4",
+              "signal_type": "prediction_market",
+              "canonical_endpoint": "/api/v1/signals",
+              "side": "YES",
+              "published_at": "2026-08-30T08:20:42.907Z"
+            },
+            {
+              "relationship": "ON_MARKET",
+              "direction": "incoming",
+              "via": "direct",
+              "id": "998aadb0-72bf-41f4-b3c8-df059c275203",
+              "signal_type": "prediction_market",
+              "canonical_endpoint": "/api/v1/signals",
+              "side": "YES",
+              "published_at": "2026-08-30T05:17:02.25Z"
+            },
+            {
+              "relationship": "ON_MARKET",
+              "direction": "incoming",
+              "via": "direct",
+              "id": "a18b6579-4802-4ba0-93c3-96b0ccbefa56",
+              "signal_type": "prediction_market",
+              "canonical_endpoint": "/api/v1/signals",
+              "side": "YES",
+              "published_at": "2026-08-30T01:23:55.936Z"
+            },
+            {
+              "relationship": "ON_MARKET",
+              "direction": "incoming",
+              "via": "direct",
+              "id": "4d028d3e-ec22-4873-996a-7c1d98e9209b",
+              "signal_type": "prediction_market",
+              "canonical_endpoint": "/api/v1/signals",
+              "side": "YES",
+              "published_at": "2026-08-29T22:14:42.678Z"
+            },
+            {
+              "relationship": "ON_MARKET",
+              "direction": "incoming",
+              "via": "direct",
+              "id": "6bf85c31-ad30-40f4-9e35-2b7bcb4ffd90",
+              "signal_type": "prediction_market",
+              "canonical_endpoint": "/api/v1/signals",
+              "side": "YES",
+              "published_at": "2026-08-29T18:10:39.849Z"
+            },
+            {
+              "relationship": "ON_MARKET",
+              "direction": "incoming",
+              "via": "direct",
+              "id": "e6bbe649-4b1b-4611-a856-7b5f9ec6d49b",
+              "signal_type": "prediction_market",
+              "canonical_endpoint": "/api/v1/signals",
+              "side": "YES",
+              "published_at": "2026-08-28T13:45:37.578Z"
+            },
+            {
+              "relationship": "ON_MARKET",
+              "direction": "incoming",
+              "via": "direct",
+              "id": "6c160322-9d7c-4987-97b8-59c5cd44493b",
+              "signal_type": "prediction_market",
+              "canonical_endpoint": "/api/v1/signals",
+              "side": "YES",
+              "published_at": "2026-08-24T13:25:56.076Z"
+            },
+            {
+              "relationship": "ON_MARKET",
+              "direction": "incoming",
+              "via": "direct",
+              "id": "7eca889d-9f62-4244-b5fe-7070eae7d6db",
+              "signal_type": "prediction_market",
+              "canonical_endpoint": "/api/v1/signals",
+              "side": "YES",
+              "published_at": "2026-08-21T14:31:51.64Z"
+            },
+            {
+              "relationship": "ON_MARKET",
+              "direction": "incoming",
+              "via": "direct",
+              "id": "d91c3c98-5028-43c1-a0f0-5f6a950b33e2",
+              "signal_type": "prediction_market",
+              "canonical_endpoint": "/api/v1/signals",
+              "side": "YES",
+              "published_at": "2026-08-20T13:17:15.244Z"
+            }
+          ],
+          "truncated": {
+            "assets": false,
+            "markets": false,
+            "signals": false
+          }
+        },
+        "question": "Will there be no change in Fed interest rates after the September 2026 meeting?",
+        "end_date": "2026-09-16T00:00:00Z",
+        "quotient_odds": 0.5001852267021507,
+        "market_odds": 0.495,
+        "venue_quote": {
+          "schema_version": "1",
+          "venue": "polymarket",
+          "market_id": "2252244",
+          "yes_bid": null,
+          "yes_ask": null,
+          "yes_last": null,
+          "selected_probability": 0.495,
+          "quote_method": "midpoint",
+          "venue_timestamp": null,
+          "observed_at": "2026-09-05T05:34:26.809Z",
+          "freshness": "verified"
+        },
+        "inDispute": false,
+        "clarifications": null,
+        "bluf": "A divided committee and weakening employment favor patience, so an unchanged September federal funds upper bound is narrowly favored.",
+        "forecast_status": {
+          "state": "converging",
+          "cents": 5,
+          "adverse_move_pct": -11.2,
+          "basis": "since_forecast",
+          "price_source": "live"
+        },
+        "forecast": {
+          "venue": "polymarket",
+          "market": {
+            "venue": "polymarket",
+            "nativeMarketId": "2252244",
+            "nativeEventId": null,
+            "seriesTicker": null,
+            "marketKey": "polymarket:2252244",
+            "quotientMarketId": "2252244",
+            "slug": "will-there-be-no-change-in-fed-interest-rates-after-the-september-2026-meeting-615",
+            "marketUrl": "https://polymarket.com/event/fed-decision-in-september-762",
+            "sourceUrl": null,
+            "broker_channels": [],
+            "robinhood_category": null,
+            "robinhood_url": null
+          },
+          "id": "b8c98e13-c00b-42f8-ba1f-dc8950c4c465",
+          "probability": 0.5001852267021507,
+          "created_at": "2026-09-02T23:41:47.408000000Z",
+          "thesis": "A divided committee and weakening employment favor patience, so an unchanged September federal funds upper bound is narrowly favored.",
+          "resolution_pathway": {
+            "criteria": "The FED interest rates are defined in this market by the upper bound of the target federal funds range. The decisions on the target federal funds range are made by the Federal Open Market Committee (FOMC) meetings.\n\nThis market will resolve to the amount of basis points the upper bound of the target federal funds rate is changed by versus the level it was prior to the Federal Reserve's September 2026 meeting.\n\nIf the target federal funds rate is changed to a level not expressed in the displayed options, the change will be rounded up to the nearest 25 and will resolve to the relevant bracket. (e.g. if there's a cut/increase of 12.5 bps it will be considered to be 25 bps)\n\nThe resolution source for this market is the FOMC’s statement after its meeting scheduled for September 15-16, 2026 according to the official calendar: https://www.federalreserve.gov/monetarypolicy/fomccalendars.htm.\n\nThe level and change of the target federal funds rate is also published at the official website of the Federal Reserve at https://www.federalreserve.gov/monetarypolicy/openmarket.htm.\n\nThis market may resolve as soon as the FOMC’s statement for their September meeting with relevant data is issued. If no statement is released by the end date of the next scheduled meeting, this market will resolve to the \"No change\" bracket.",
+            "crux": "The decision turns on whether August inflation gives rate-increase supporters a voting majority.",
+            "deadline": "2026-09-16T00:00:00Z",
+            "source": null
+          },
+          "relationships": {
+            "assets": [],
+            "markets": [
+              {
+                "relationship": "ON_MARKET",
+                "direction": "outgoing",
+                "via": "direct",
+                "marketKey": "polymarket:2252244",
+                "venue": "polymarket",
+                "nativeMarketId": "2252244",
+                "question": "Will there be no change in Fed interest rates after the September 2026 meeting?"
+              }
+            ],
+            "signals": [],
+            "truncated": {
+              "assets": false,
+              "markets": false,
+              "signals": false
+            }
+          }
+        },
+        "last_updated": "2026-09-02T23:41:47.408000000Z",
+        "volume_24h": 1395188.8150600002,
+        "quotientUrl": "https://quotient.social/markets/2252244",
+        "polymarketUrl": "https://polymarket.com/event/fed-decision-in-september-762",
+        "key_drivers": [
+          {
+            "factor": "The committee entered September with a clear majority still supporting unchanged rates.",
+            "direction": "for",
+            "impact": "high",
+            "citation": "Federal Reserve issues FOMC statement"
+          },
+          {
+            "factor": "Weakening employment gives policymakers a concrete reason to avoid tightening immediately.",
+            "direction": "for",
+            "impact": "high",
+            "citation": "Economic Update: Week of August 17, 2026 | Traders' Insight"
+          },
+          {
+            "factor": "Some influential policymakers see no urgent need for a preemptive increase.",
+            "direction": "for",
+            "impact": "moderate",
+            "citation": "Daly Says Bond Market Showing Trust in Fed’s Policy Positioning"
+          },
+          {
+            "factor": "Persistent above-target inflation keeps an increase firmly under consideration.",
+            "direction": "against",
+            "impact": "high",
+            "citation": "Personal Consumption Expenditures Price Index, ..."
+          },
+          {
+            "factor": "Chair Kevin Warsh has publicly left the door open to higher rates.",
+            "direction": "against",
+            "impact": "high",
+            "citation": "An address by Fed Chair Warsh in Jackson Hole takes center stage | AP News"
+          },
+          {
+            "factor": "The final government inflation report could determine whether the committee waits or acts.",
+            "direction": "neutral",
+            "impact": "high",
+            "citation": "Warsh raises stakes for Fed's next meeting and other takeaways from Jackson Hole conference | AP News"
+          }
+        ],
+        "signals": [
+          {
+            "id": "https://www.bloomberg.com/news/articles/2026-09-04/bitcoin-drops-below-80-000-as-hot-jobs-data-spurs-fed-hike-bets",
+            "title": "Bitcoin Price Drops Under $80,000 as US Jobs Report Boosts Fed Hike Expectations - Bloomberg",
+            "comment": "The article reports stronger-than-expected US jobs data that revived bets on a September Federal Reserve rate hike. Since the market asks whether there will be no change in Fed rates after the September 2026 meeting, increased expectations of a rate hike lower the probability of no change.",
+            "direction": null,
+            "url": "https://www.bloomberg.com/news/articles/2026-09-04/bitcoin-drops-below-80-000-as-hot-jobs-data-spurs-fed-hike-bets",
+            "source": "www.bloomberg.com",
+            "published_at": "2026-09-05T05:12:21.268Z",
+            "correlated_at": "2026-09-04T16:42:44.042Z",
+            "confidence": "high",
+            "evidence_quote": "Bitcoin dropped nearly 3% after stronger-than-expected US jobs data revived bets on a September Federal Reserve rate hike, abruptly reversing the cryptocurrency’s latest push above $80,000."
+          },
+          {
+            "id": "https://www.federalreserve.gov/monetarypolicy/files/fomcminutes20260729.pdf",
+            "title": "Minutes of the Federal Open Market Committee -- July 28-29, 2026",
+            "comment": "The article directly reports market pricing for the September 2026 FOMC meeting, indicating a fully priced-in 25 basis point hike. This reduces the probability of no change in the federal funds rate at that meeting, making the article relevant and pushing the market's YES probability down.",
+            "direction": null,
+            "url": "https://www.federalreserve.gov/monetarypolicy/files/fomcminutes20260729.pdf",
+            "source": "www.federalreserve.gov",
+            "published_at": "2026-09-05T02:26:21.959Z",
+            "correlated_at": "2026-09-03T11:40:55.717Z",
+            "confidence": "high",
+            "evidence_quote": "At longer horizons, the market was fully pricing in a 25 basis point hike by the September meeting and another one by the end of the first quarter of next year."
+          },
+          {
+            "id": "https://stockti.com/bitcoin-slips-after-jobs-data-cpi-looms-as-next-catalyst",
+            "title": "Bitcoin Slips After Jobs Data; CPI Looms as Next Catalyst | StockTi",
+            "comment": "The article reports that a stronger-than-expected jobs report increased market expectations for a September rate hike, directly reducing the probability of no change in the federal funds rate at that meeting.",
+            "direction": null,
+            "url": "https://stockti.com/bitcoin-slips-after-jobs-data-cpi-looms-as-next-catalyst",
+            "source": "stockti.com",
+            "published_at": "2026-09-05T00:00:00Z",
+            "correlated_at": "2026-09-05T04:10:42.617Z",
+            "confidence": "high",
+            "evidence_quote": "Fed funds futures now price a 58% chance of a quarter-point increase in September, up from 49.4% on Thursday, according to Decrypt."
+          },
+          {
+            "id": "https://bingx.com/en/flash-news/post/bitcoin-slips-below-after-us-adds-jobs-in-august-and-rate-hike-odds-rise-to",
+            "title": "Bitcoin Slips Back Below $80,000 After Strong U.S. Jobs Report Reshapes Fed Rate Bets",
+            "comment": "The article directly reports on Fed interest rate expectations for the September 2026 FOMC meeting, which is the exact event this market resolves on. It states that traders increased their probability of a rate hike at that meeting, implying a lower probability of no change in rates, thus moving the market's YES probability down.",
+            "direction": null,
+            "url": "https://bingx.com/en/flash-news/post/bitcoin-slips-below-after-us-adds-jobs-in-august-and-rate-hike-odds-rise-to",
+            "source": "bingx.com",
+            "published_at": "2026-09-05T00:00:00Z",
+            "correlated_at": "2026-09-05T04:10:43.765Z",
+            "confidence": "high",
+            "evidence_quote": "CME FedWatch data showed the probability traders assign to a Federal Reserve rate hike at the September 15–16 meeting increased to 58%, up from 49.4% the day before."
+          },
+          {
+            "id": "https://www.federalreserve.gov/monetarypolicy/fomc.htm",
+            "title": "The Fed - Federal Open Market Committee",
+            "comment": "",
+            "direction": null,
+            "url": "https://www.federalreserve.gov/monetarypolicy/fomc.htm",
+            "source": "www.federalreserve.gov",
+            "published_at": "2026-09-04T23:40:14.392Z",
+            "correlated_at": "2026-08-29T13:05:32.41Z",
+            "confidence": null,
+            "evidence_quote": null
+          },
+          {
+            "id": "https://www.federalreserve.gov/monetarypolicy/files/fomcminutes20260617.pdf",
+            "title": "FOMC Minutes, June 16-17, 2026",
+            "comment": "The article discusses the FOMC's June minutes and reports that market participants and survey respondents expect no change in the federal funds rate through the beginning of 2027, which covers the September 2026 meeting. This directly supports the market for 'no change' at that meeting.",
+            "direction": null,
+            "url": "https://www.federalreserve.gov/monetarypolicy/files/fomcminutes20260617.pdf",
+            "source": "www.federalreserve.gov",
+            "published_at": "2026-09-04T23:36:46.362Z",
+            "correlated_at": "2026-08-30T03:46:24.24Z",
+            "confidence": "high",
+            "evidence_quote": "In the Desk survey, the median of the modal paths of the federal funds rate implied no changes in the target range through the beginning of 2027 and one rate cut in the second quarter of next year."
+          },
+          {
+            "id": "https://www.bea.gov/index.php/news/2026/personal-income-and-outlays-july-2026",
+            "title": "Personal Income and Outlays, July 2026 | U.S. Bureau of Economic Analysis (BEA)",
+            "comment": "The July PCE inflation reading of 3.7% year-over-year is well above the Fed's 2% target, suggesting the FOMC is more likely to implement a rate change at its September 2026 meeting, reducing the likelihood of 'no change'.",
+            "direction": null,
+            "url": "https://www.bea.gov/index.php/news/2026/personal-income-and-outlays-july-2026",
+            "source": "www.bea.gov",
+            "published_at": "2026-09-04T23:36:46.362Z",
+            "correlated_at": "2026-09-02T23:26:16.683Z",
+            "confidence": "high",
+            "evidence_quote": "From the same month one year ago, the PCE price index for July increased 3.7 percent."
+          },
+          {
+            "id": "https://www.reuters.com/business/fed-rate-hike-back-focus-after-strong-jobs-report-2026-09-04/",
+            "title": "Strong job gains signal Fed hike as Trump levels new rate-cut demand",
+            "comment": "The article reports on the Federal Reserve's September 15-16 meeting and indicates that strong job gains make a rate hike more likely, reducing the probability of no change in rates.",
+            "direction": null,
+            "url": "https://www.reuters.com/business/fed-rate-hike-back-focus-after-strong-jobs-report-2026-09-04/",
+            "source": "www.reuters.com",
+            "published_at": "2026-09-04T22:23:30.405Z",
+            "correlated_at": "2026-09-05T02:41:40.566Z",
+            "confidence": "high",
+            "evidence_quote": "\"Even the most committed dove would struggle to find anything in the August employment report to justify keeping interest rates unchanged,\" Capital Economics analysts wrote."
+          },
+          {
+            "id": "https://www.cbsnews.com/news/august-jobs-report-us-labor-market/",
+            "title": "August jobs report shows U.S. added 162,000 jobs, more than double economists' forecasts",
+            "comment": "The August jobs report is a key data point released shortly before the September 2026 FOMC meeting. Strong job growth reduces the likelihood of a rate cut, making no change in the Fed funds rate more probable. This directly informs the market's resolution on whether the Fed will hold rates unchanged.",
+            "direction": null,
+            "url": "https://www.cbsnews.com/news/august-jobs-report-us-labor-market/",
+            "source": "Associated Press",
+            "published_at": "2026-09-04T17:45:00-04:00",
+            "correlated_at": "2026-09-04T23:11:12.148Z",
+            "confidence": "high",
+            "evidence_quote": "August jobs report shows U.S. added 162,000 jobs, more than double economists' forecasts"
+          },
+          {
+            "id": "https://www.reuters.com/business/wall-st-week-ahead-investors-pore-over-inflation-data-signals-rate-trajectory-2026-09-04/",
+            "title": "Wall St Week Ahead Investors to pore over inflation data for signals ...",
+            "comment": "The article reports on inflation data that directly informs Fed policy expectations. The prior month's low CPI reading reduces the likelihood of an interest-rate hike at the upcoming September 2026 FOMC meeting, increasing the probability that rates remain unchanged. Thus the article is bullish for the market's YES outcome (no change).",
+            "direction": null,
+            "url": "https://www.reuters.com/business/wall-st-week-ahead-investors-pore-over-inflation-data-signals-rate-trajectory-2026-09-04/",
+            "source": "www.reuters.com",
+            "published_at": "2026-09-04T21:23:30.405Z",
+            "correlated_at": "2026-09-05T02:41:40.322Z",
+            "confidence": "high",
+            "evidence_quote": "But the prior month's CPI reading showed prices barely increased."
+          }
+        ],
+        "source_reads_updated_at": "2026-09-05T05:12:21.268Z"
+      },
+      {
+        "venue": "polymarket",
+        "nativeMarketId": "1163699",
+        "nativeEventId": null,
+        "seriesTicker": null,
+        "marketKey": "polymarket:1163699",
+        "quotientMarketId": "1163699",
+        "slug": "clarity-act-signed-into-law-in-2026",
+        "marketUrl": "https://polymarket.com/event/clarity-act-signed-into-law-in-2026",
+        "sourceUrl": null,
+        "broker_channels": [],
+        "robinhood_category": null,
+        "robinhood_url": null,
+        "relationships": {
+          "assets": [],
+          "markets": [],
+          "signals": [],
+          "truncated": {
+            "assets": false,
+            "markets": false,
+            "signals": false
+          }
+        },
+        "question": "Clarity Act (H.R.3633) signed into law in 2026?",
+        "end_date": "2027-01-01T05:00:00Z",
+        "quotient_odds": 0.163556,
+        "market_odds": 0.145,
+        "venue_quote": {
+          "schema_version": "1",
+          "venue": "polymarket",
+          "market_id": "1163699",
+          "yes_bid": null,
+          "yes_ask": null,
+          "yes_last": null,
+          "selected_probability": 0.145,
+          "quote_method": "midpoint",
+          "venue_timestamp": null,
+          "observed_at": "2026-09-05T05:34:26.809Z",
+          "freshness": "verified"
+        },
+        "inDispute": false,
+        "clarifications": null,
+        "bluf": "The Senate shelved H.R.3633 ahead of recess with no floor vote, an ethics deadlock, and no secured Democratic support, so enactment by December 31 is probably not happening but remains genuinely possible.",
+        "forecast_status": {
+          "state": "converged",
+          "cents": 2,
+          "adverse_move_pct": null,
+          "basis": "since_forecast",
+          "price_source": "live"
+        },
+        "forecast": {
+          "venue": "polymarket",
+          "market": {
+            "venue": "polymarket",
+            "nativeMarketId": "1163699",
+            "nativeEventId": null,
+            "seriesTicker": null,
+            "marketKey": "polymarket:1163699",
+            "quotientMarketId": "1163699",
+            "slug": "clarity-act-signed-into-law-in-2026",
+            "marketUrl": "https://polymarket.com/event/clarity-act-signed-into-law-in-2026",
+            "sourceUrl": null,
+            "broker_channels": [],
+            "robinhood_category": null,
+            "robinhood_url": null
+          },
+          "id": "40c32207-3a14-44b8-8ce1-f1b7d6e39cfb",
+          "probability": 0.163556,
+          "created_at": "2026-07-30T04:52:14.587000000Z",
+          "thesis": "The Senate shelved H.R.3633 ahead of recess with no floor vote, an ethics deadlock, and no secured Democratic support, so enactment by December 31 is probably not happening but remains genuinely possible.",
+          "resolution_pathway": {
+            "criteria": "This market will resolve to \"Yes\" if the Digital Asset Market Clarity Act of 2025 (H.R.3633) is passed by both chambers of the U.S. Congress and signed into law by December 31, 2026, 11:59 PM ET. Otherwise, this market will resolve to \"No\".\n\nThe primary resolution source is Congress.gov’s legislation tracker (https://www.congress.gov/bill/119th-congress/house-bill/3633) and other official information from the government of the United States, however other credible reporting may be used.",
+            "crux": "Whether senators can attach the bill to a must-pass year-end vehicle after missing the pre-August window, despite unresolved ethics and yield disputes and lacking 60 votes.",
+            "deadline": "2027-01-01T05:00:00Z",
+            "source": ""
+          },
+          "relationships": {
+            "assets": [],
+            "markets": [
+              {
+                "relationship": "ON_MARKET",
+                "direction": "outgoing",
+                "via": "direct",
+                "marketKey": "polymarket:1163699",
+                "venue": "polymarket",
+                "nativeMarketId": "1163699",
+                "question": "Clarity Act (H.R.3633) signed into law in 2026?"
+              }
+            ],
+            "signals": [],
+            "truncated": {
+              "assets": false,
+              "markets": false,
+              "signals": false
+            }
+          }
+        },
+        "last_updated": "2026-07-30T04:52:14.587000000Z",
+        "volume_24h": 2024262.5429430003,
+        "quotientUrl": "https://quotient.social/markets/1163699",
+        "polymarketUrl": "https://polymarket.com/event/clarity-act-signed-into-law-in-2026",
+        "key_drivers": [
+          {
+            "factor": "The Senate set the bill aside before recess and Majority Leader Thune declined to schedule floor action, with recess beginning August 8.",
+            "direction": "against",
+            "impact": "high",
+            "citation": "The last door: Can CLARITY ride a year-end bill?"
+          },
+          {
+            "factor": "Seven Democratic senators publicly rejected the July 22 updated draft, citing inadequate ethics, consumer protection, and conflict-of-interest provisions.",
+            "direction": "against",
+            "impact": "high",
+            "citation": "Democrats Oppose Current Clarity Text; Will Keep Working"
+          },
+          {
+            "factor": "Analysts and Galaxy Research treat the pre-August window as the final realistic 2026 gate; missing it resets the bill to the 120th Congress.",
+            "direction": "against",
+            "impact": "high",
+            "citation": "CLARITY Act Odds Slashed to 30% by Galaxy Digital"
+          },
+          {
+            "factor": "Senators Tillis and Gallego finalized a compromise approach on ethics as of July 29, but details have not emerged and White House/Democratic buy-in is unconfirmed.",
+            "direction": "neutral",
+            "impact": "moderate",
+            "citation": "Senators said to strike idea to toughen Trump's concession on Clarity Act's crypto limits"
+          },
+          {
+            "factor": "The bill requires 60 votes to overcome a filibuster; Republicans hold 53 seats and only two Democrats have supported committee action, leaving about seven crossovers un secured.",
+            "direction": "against",
+            "impact": "high",
+            "citation": "CLARITY Act Odds Slashed to 30% by Galaxy Digital"
+          },
+          {
+            "factor": "Even if the Senate eventually passes a version, the House must concur with the Senate substitute or go to conference, and the President must sign—all by December 31, with minimal legislative days remaining after October.",
+            "direction": "against",
+            "impact": "moderate",
+            "citation": "H.R. 3633: Digital Asset Market Clarity Act"
+          }
+        ],
+        "signals": [
+          {
+            "id": "https://www.congress.gov/119/bills/hr3633/BILLS-119hr3633eh.htm",
+            "title": "Bills 119hr3633eh.htm",
+            "comment": "",
+            "direction": null,
+            "url": "https://www.congress.gov/119/bills/hr3633/BILLS-119hr3633eh.htm",
+            "source": "www.congress.gov",
+            "published_at": "2026-09-03T23:29:17.155Z",
+            "correlated_at": "2026-07-30T04:52:16.793Z",
+            "confidence": null,
+            "evidence_quote": null
+          },
+          {
+            "id": "https://modernaction.io/bills/hr3633-119/action",
+            "title": "H.R. 3633: Digital Asset Market Clarity Act of 2025 | Modern Action",
+            "comment": "",
+            "direction": null,
+            "url": "https://modernaction.io/bills/hr3633-119/action",
+            "source": "modernaction.io",
+            "published_at": "2026-07-30T04:52:16.793Z",
+            "correlated_at": "2026-07-30T04:52:16.793Z",
+            "confidence": null,
+            "evidence_quote": null
+          },
+          {
+            "id": "https://www.banking.senate.gov/",
+            "title": "Senate Banking Committee",
+            "comment": "",
+            "direction": null,
+            "url": "https://www.banking.senate.gov/",
+            "source": "www.banking.senate.gov",
+            "published_at": "2026-07-30T01:50:14.205Z",
+            "correlated_at": "2026-07-30T04:52:16.793Z",
+            "confidence": null,
+            "evidence_quote": null
+          },
+          {
+            "id": "https://www.coindesk.com/policy/2026/07/29/senators-said-to-strike-idea-to-toughen-trump-s-concession-on-clarity-act-s-crypto-limits",
+            "title": "Senators said to strike idea to toughen Trump's concession on Clarity Act's crypto limits",
+            "comment": "",
+            "direction": null,
+            "url": "https://www.coindesk.com/policy/2026/07/29/senators-said-to-strike-idea-to-toughen-trump-s-concession-on-clarity-act-s-crypto-limits",
+            "source": "www.coindesk.com",
+            "published_at": "2026-07-29T23:12:04Z",
+            "correlated_at": "2026-07-30T04:52:16.793Z",
+            "confidence": null,
+            "evidence_quote": null
+          },
+          {
+            "id": "https://cvj.ai/briefing/crypto-news/clarity-act-derailed-ethics-deadlock-kills-senates-2026-window/",
+            "title": "CLARITY Act Derailed: Ethics Deadlock Kills Senate’s 2026 Window - CVJ.AI",
+            "comment": "",
+            "direction": null,
+            "url": "https://cvj.ai/briefing/crypto-news/clarity-act-derailed-ethics-deadlock-kills-senates-2026-window/",
+            "source": "cvj.ai",
+            "published_at": "2026-07-29T00:00:00Z",
+            "correlated_at": "2026-07-30T04:52:16.793Z",
+            "confidence": null,
+            "evidence_quote": null
+          },
+          {
+            "id": "https://crypto.news/clarity-act-year-end-vehicle/",
+            "title": "The last door: Can CLARITY ride a year-end bill?",
+            "comment": "",
+            "direction": null,
+            "url": "https://crypto.news/clarity-act-year-end-vehicle/",
+            "source": "crypto.news",
+            "published_at": "2026-07-29T00:00:00Z",
+            "correlated_at": "2026-07-30T04:52:16.793Z",
+            "confidence": null,
+            "evidence_quote": null
+          },
+          {
+            "id": "https://apnews.com/article/todd-blanche-john-cornyn-attorney-general-nomination-b61afbc8fc5d6ab0e7d10cb828cd99cd",
+            "title": "Blanche nomination at risk of delay as Republican demands answers | AP News",
+            "comment": "",
+            "direction": null,
+            "url": "https://apnews.com/article/todd-blanche-john-cornyn-attorney-general-nomination-b61afbc8fc5d6ab0e7d10cb828cd99cd",
+            "source": "apnews.com",
+            "published_at": "2026-07-29T00:00:00Z",
+            "correlated_at": "2026-07-30T04:52:16.793Z",
+            "confidence": null,
+            "evidence_quote": null
+          },
+          {
+            "id": "https://apnews.com/article/russia-sanctions-senate-graham-ukraine-zelenskyy-1d5b6ee3082e409422ace0993becdd54",
+            "title": "Senate moves on Russian sanctions with Zelenskyy in Capitol | AP News",
+            "comment": "",
+            "direction": null,
+            "url": "https://apnews.com/article/russia-sanctions-senate-graham-ukraine-zelenskyy-1d5b6ee3082e409422ace0993becdd54",
+            "source": "apnews.com",
+            "published_at": "2026-07-29T00:00:00Z",
+            "correlated_at": "2026-07-30T04:52:16.793Z",
+            "confidence": null,
+            "evidence_quote": null
+          },
+          {
+            "id": "https://apnews.com/article/congress-nil-sec-big-ten-918bfa7f4fd8a83e83c8b71fe82cb4a3",
+            "title": "Senators still working with SEC, Big Ten on revising college sports bill | AP News",
+            "comment": "",
+            "direction": null,
+            "url": "https://apnews.com/article/congress-nil-sec-big-ten-918bfa7f4fd8a83e83c8b71fe82cb4a3",
+            "source": "apnews.com",
+            "published_at": "2026-07-29T00:00:00Z",
+            "correlated_at": "2026-07-30T04:52:16.793Z",
+            "confidence": null,
+            "evidence_quote": null
+          },
+          {
+            "id": "https://www.paulhastings.com/insights/crypto-policy-tracker/senate-releases-updated-clarity-act-text-sec-commissioner-addresses-crypto-vaults-and-sec-and-cftc-advance-24-hour-trading",
+            "title": "Senate Releases Updated Clarity Act Text, SEC ...",
+            "comment": "",
+            "direction": null,
+            "url": "https://www.paulhastings.com/insights/crypto-policy-tracker/senate-releases-updated-clarity-act-text-sec-commissioner-addresses-crypto-vaults-and-sec-and-cftc-advance-24-hour-trading",
+            "source": "www.paulhastings.com",
+            "published_at": "2026-07-28T04:47:38.073Z",
+            "correlated_at": "2026-07-30T04:52:16.793Z",
+            "confidence": null,
+            "evidence_quote": null
+          }
+        ],
+        "source_reads_updated_at": "2026-09-03T23:29:17.155Z"
+      }
+    ],
+    "not_found": [
+      "polymarket:908713"
+    ]
+  }
+}

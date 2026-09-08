@@ -1,0 +1,10 @@
+{
+  "retrievedAt": "2026-09-05T18:45:25.500845+00:00",
+  "method": "Neo4j read session, committed non-manual forecasts",
+  "markets": {
+    "rows": 313
+  },
+  "forecasts": {
+    "rows": 71
+  }
+}

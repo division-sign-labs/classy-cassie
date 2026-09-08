@@ -1,0 +1,1322 @@
+{
+  "start": "2026-08-31T07:21:03Z",
+  "as_of": "2026-09-05T05:32:46.258285+00:00",
+  "raw_signals": {
+    "updates": 122,
+    "markets": 66,
+    "events": 48,
+    "direction_counts": {
+      "YES": 87,
+      "NO": 35
+    },
+    "category_counts": {
+      "Global Elections": 52,
+      "Science & Tech": 27,
+      "Geopolitics": 16,
+      "Economics": 16,
+      "Business": 4,
+      "Unknown": 3,
+      "Politics": 3,
+      "Entertainment": 1
+    },
+    "daily_counts": {
+      "2026-08-31": 24,
+      "2026-09-01": 34,
+      "2026-09-02": 17,
+      "2026-09-03": 38,
+      "2026-09-04": 8,
+      "2026-09-05": 1
+    }
+  },
+  "raw_forecasts": {
+    "updates": 992,
+    "markets": 447,
+    "publication_artifact_q_verified": 992,
+    "coherence_after_publication_count": 182,
+    "current_q_differs_from_publication_q_count": 70,
+    "q_revision_abs_pp_quantiles": {
+      "0.5": 0.0,
+      "0.9": 0.0,
+      "1.0": 33.16673458482353
+    }
+  },
+  "signal_publication_lag_minutes": {
+    "median": 56.234750000000005,
+    "p90": 425.1626983333335,
+    "max": 706.2542833333333,
+    "negative_count": 0
+  },
+  "forecast_refresh": {
+    "6h": {
+      "right_censoring_eligible": 923,
+      "updated_fraction": 0.05417118093174431
+    },
+    "24h": {
+      "right_censoring_eligible": 734,
+      "updated_fraction": 0.444141689373297
+    }
+  },
+  "v1_observable_gate_funnel": {
+    "raw_signals": 122,
+    "directional_edge": 25,
+    "hours_to_close_at_least_36": 24,
+    "rv24_at_least_1_5pp": 21,
+    "rv24_below_20pp": 18,
+    "vol_acceleration_below_3x": 15,
+    "selected_side_price_12_5_to_87_5c": 15,
+    "publication_volume_at_least_2500usd": 15
+  },
+  "v1_observable_candidates": {
+    "updates": 15,
+    "markets": 10,
+    "events": 9,
+    "daily_counts": {
+      "2026-08-31": 2,
+      "2026-09-01": 6,
+      "2026-09-02": 2,
+      "2026-09-03": 4,
+      "2026-09-05": 1
+    }
+  },
+  "reference_markouts_equal_market_event_clustered": {
+    "signal_all": {
+      "5m": {
+        "ALL": {
+          "observations": 121,
+          "markets": 65,
+          "events": 47,
+          "mean_pp": -0.11551282051282064,
+          "ci95_pp": [
+            -0.3267585703996033,
+            0.09573292937396205
+          ],
+          "median_market_pp": 0.0,
+          "positive_market_fraction": 0.38461538461538464
+        },
+        "YES": {
+          "observations": 87,
+          "markets": 46,
+          "events": 36,
+          "mean_pp": -0.1146739130434784,
+          "ci95_pp": [
+            -0.38773179978122835,
+            0.15838397369427154
+          ],
+          "median_market_pp": 0.0,
+          "positive_market_fraction": 0.34782608695652173
+        },
+        "NO": {
+          "observations": 34,
+          "markets": 20,
+          "events": 15,
+          "mean_pp": -0.13250000000000003,
+          "ci95_pp": [
+            -0.4070512083382627,
+            0.1420512083382626
+          ],
+          "median_market_pp": 0.0,
+          "positive_market_fraction": 0.45
+        }
+      },
+      "1h": {
+        "ALL": {
+          "observations": 122,
+          "markets": 66,
+          "events": 48,
+          "mean_pp": -0.07512626262626279,
+          "ci95_pp": [
+            -0.40949357889052573,
+            0.2592410536380001
+          ],
+          "median_market_pp": 0.0,
+          "positive_market_fraction": 0.4696969696969697
+        },
+        "YES": {
+          "observations": 87,
+          "markets": 46,
+          "events": 36,
+          "mean_pp": 0.052898550724637367,
+          "ci95_pp": [
+            -0.2986136919000869,
+            0.4044107933493617
+          ],
+          "median_market_pp": 0.0,
+          "positive_market_fraction": 0.43478260869565216
+        },
+        "NO": {
+          "observations": 35,
+          "markets": 21,
+          "events": 16,
+          "mean_pp": -0.39166666666666666,
+          "ci95_pp": [
+            -1.0817968553747503,
+            0.2984635220414171
+          ],
+          "median_market_pp": 0.07500000000000007,
+          "positive_market_fraction": 0.5238095238095238
+        }
+      },
+      "6h": {
+        "ALL": {
+          "observations": 116,
+          "markets": 64,
+          "events": 47,
+          "mean_pp": 2.007942708333333,
+          "ci95_pp": [
+            -0.635130994599375,
+            4.651016411266042
+          ],
+          "median_market_pp": 0.2500000000000002,
+          "positive_market_fraction": 0.5
+        },
+        "YES": {
+          "observations": 83,
+          "markets": 45,
+          "events": 35,
+          "mean_pp": 3.2659259259259255,
+          "ci95_pp": [
+            -0.18597496281627457,
+            6.7178268146681255
+          ],
+          "median_market_pp": 0.5000000000000004,
+          "positive_market_fraction": 0.5333333333333333
+        },
+        "NO": {
+          "observations": 33,
+          "markets": 20,
+          "events": 16,
+          "mean_pp": -1.2229166666666667,
+          "ci95_pp": [
+            -4.101887702625328,
+            1.6560543692919947
+          ],
+          "median_market_pp": -0.49999999999999906,
+          "positive_market_fraction": 0.4
+        }
+      },
+      "24h": {
+        "ALL": {
+          "observations": 98,
+          "markets": 58,
+          "events": 45,
+          "mean_pp": 2.117672413793103,
+          "ci95_pp": [
+            -1.8857640403617721,
+            6.121108867947978
+          ],
+          "median_market_pp": 2.2500000000000018,
+          "positive_market_fraction": 0.6551724137931034
+        },
+        "YES": {
+          "observations": 68,
+          "markets": 39,
+          "events": 34,
+          "mean_pp": 2.103205128205128,
+          "ci95_pp": [
+            -3.5330500227939923,
+            7.739460279204248
+          ],
+          "median_market_pp": 2.8333333333333357,
+          "positive_market_fraction": 0.6666666666666666
+        },
+        "NO": {
+          "observations": 30,
+          "markets": 19,
+          "events": 15,
+          "mean_pp": 2.1473684210526316,
+          "ci95_pp": [
+            -2.0128627626778246,
+            6.307599604783087
+          ],
+          "median_market_pp": 1.100000000000001,
+          "positive_market_fraction": 0.631578947368421
+        }
+      }
+    },
+    "signal_edge_10_30_price_band": {
+      "5m": {
+        "ALL": {
+          "observations": 74,
+          "markets": 45,
+          "events": 31,
+          "mean_pp": -0.234814814814815,
+          "ci95_pp": [
+            -0.4563368954140235,
+            -0.013292734215606505
+          ],
+          "median_market_pp": -0.16666666666666682,
+          "positive_market_fraction": 0.3111111111111111
+        },
+        "YES": {
+          "observations": 56,
+          "markets": 34,
+          "events": 25,
+          "mean_pp": -0.255637254901961,
+          "ci95_pp": [
+            -0.504085615538604,
+            -0.007188894265317991
+          ],
+          "median_market_pp": -0.2500000000000002,
+          "positive_market_fraction": 0.2647058823529412
+        },
+        "NO": {
+          "observations": 18,
+          "markets": 12,
+          "events": 10,
+          "mean_pp": -0.19791666666666682,
+          "ci95_pp": [
+            -0.6043159185576934,
+            0.20848258522435972
+          ],
+          "median_market_pp": 0.0,
+          "positive_market_fraction": 0.4166666666666667
+        }
+      },
+      "1h": {
+        "ALL": {
+          "observations": 75,
+          "markets": 46,
+          "events": 32,
+          "mean_pp": -0.355253623188406,
+          "ci95_pp": [
+            -0.9653959591381662,
+            0.2548887127613542
+          ],
+          "median_market_pp": 0.0,
+          "positive_market_fraction": 0.43478260869565216
+        },
+        "YES": {
+          "observations": 56,
+          "markets": 34,
+          "events": 25,
+          "mean_pp": -0.1835784313725495,
+          "ci95_pp": [
+            -0.7050398560234394,
+            0.3378829932783405
+          ],
+          "median_market_pp": -0.1250000000000001,
+          "positive_market_fraction": 0.4117647058823529
+        },
+        "NO": {
+          "observations": 19,
+          "markets": 13,
+          "events": 11,
+          "mean_pp": -0.7769230769230767,
+          "ci95_pp": [
+            -2.459256982131714,
+            0.9054108282855605
+          ],
+          "median_market_pp": 0.07500000000000007,
+          "positive_market_fraction": 0.5384615384615384
+        }
+      },
+      "6h": {
+        "ALL": {
+          "observations": 70,
+          "markets": 44,
+          "events": 32,
+          "mean_pp": 1.167045454545454,
+          "ci95_pp": [
+            -1.5201366796001499,
+            3.854227588691058
+          ],
+          "median_market_pp": -0.1250000000000001,
+          "positive_market_fraction": 0.4772727272727273
+        },
+        "YES": {
+          "observations": 53,
+          "markets": 33,
+          "events": 25,
+          "mean_pp": 2.4957070707070703,
+          "ci95_pp": [
+            -0.34331178017730535,
+            5.3347259215914455
+          ],
+          "median_market_pp": 0.5000000000000004,
+          "positive_market_fraction": 0.5454545454545454
+        },
+        "NO": {
+          "observations": 17,
+          "markets": 12,
+          "events": 11,
+          "mean_pp": -3.1881944444444437,
+          "ci95_pp": [
+            -8.053957455319692,
+            1.677568566430804
+          ],
+          "median_market_pp": -1.7500000000000016,
+          "positive_market_fraction": 0.25
+        }
+      },
+      "24h": {
+        "ALL": {
+          "observations": 63,
+          "markets": 39,
+          "events": 30,
+          "mean_pp": 6.093803418803419,
+          "ci95_pp": [
+            0.9352518405590668,
+            11.252354997047771
+          ],
+          "median_market_pp": 2.0000000000000018,
+          "positive_market_fraction": 0.6410256410256411
+        },
+        "YES": {
+          "observations": 46,
+          "markets": 28,
+          "events": 24,
+          "mean_pp": 7.6136904761904765,
+          "ci95_pp": [
+            1.24945367357933,
+            13.977927278801623
+          ],
+          "median_market_pp": 2.75,
+          "positive_market_fraction": 0.7142857142857143
+        },
+        "NO": {
+          "observations": 17,
+          "markets": 11,
+          "events": 10,
+          "mean_pp": 2.225,
+          "ci95_pp": [
+            -4.533504453102616,
+            8.983504453102617
+          ],
+          "median_market_pp": -0.9999999999999981,
+          "positive_market_fraction": 0.45454545454545453
+        }
+      }
+    },
+    "signal_original_direction_gate": {
+      "5m": {
+        "ALL": {
+          "observations": 24,
+          "markets": 17,
+          "events": 13,
+          "mean_pp": -0.19852941176470618,
+          "ci95_pp": [
+            -0.5040793579810117,
+            0.10702053445159926
+          ],
+          "median_market_pp": -0.5000000000000004,
+          "positive_market_fraction": 0.35294117647058826
+        },
+        "YES": {
+          "observations": 6,
+          "markets": 5,
+          "events": 4,
+          "mean_pp": -0.20000000000000026,
+          "ci95_pp": [
+            -0.6704000000000004,
+            0.2704
+          ],
+          "median_market_pp": -0.5000000000000004,
+          "positive_market_fraction": 0.2
+        },
+        "NO": {
+          "observations": 18,
+          "markets": 12,
+          "events": 10,
+          "mean_pp": -0.19791666666666682,
+          "ci95_pp": [
+            -0.6043159185576934,
+            0.20848258522435972
+          ],
+          "median_market_pp": 0.0,
+          "positive_market_fraction": 0.4166666666666667
+        }
+      },
+      "1h": {
+        "ALL": {
+          "observations": 25,
+          "markets": 18,
+          "events": 14,
+          "mean_pp": 0.963888888888889,
+          "ci95_pp": [
+            -2.062974594897979,
+            3.990752372675757
+          ],
+          "median_market_pp": 0.03750000000000003,
+          "positive_market_fraction": 0.5
+        },
+        "YES": {
+          "observations": 6,
+          "markets": 5,
+          "events": 4,
+          "mean_pp": 5.49,
+          "ci95_pp": [
+            -2.1828089734073286,
+            13.16280897340733
+          ],
+          "median_market_pp": -0.5000000000000004,
+          "positive_market_fraction": 0.4
+        },
+        "NO": {
+          "observations": 19,
+          "markets": 13,
+          "events": 11,
+          "mean_pp": -0.7769230769230767,
+          "ci95_pp": [
+            -2.459256982131714,
+            0.9054108282855605
+          ],
+          "median_market_pp": 0.07500000000000007,
+          "positive_market_fraction": 0.5384615384615384
+        }
+      },
+      "6h": {
+        "ALL": {
+          "observations": 21,
+          "markets": 15,
+          "events": 13,
+          "mean_pp": -3.183888888888889,
+          "ci95_pp": [
+            -7.297456132028829,
+            0.9296783542510507
+          ],
+          "median_market_pp": -1.5000000000000013,
+          "positive_market_fraction": 0.26666666666666666
+        },
+        "YES": {
+          "observations": 4,
+          "markets": 3,
+          "events": 3,
+          "mean_pp": -3.1666666666666714,
+          "ci95_pp": [
+            -11.094645251680912,
+            4.76131191834757
+          ],
+          "median_market_pp": -1.0000000000000009,
+          "positive_market_fraction": 0.3333333333333333
+        },
+        "NO": {
+          "observations": 17,
+          "markets": 12,
+          "events": 11,
+          "mean_pp": -3.1881944444444437,
+          "ci95_pp": [
+            -8.053957455319692,
+            1.677568566430804
+          ],
+          "median_market_pp": -1.7500000000000016,
+          "positive_market_fraction": 0.25
+        }
+      },
+      "24h": {
+        "ALL": {
+          "observations": 22,
+          "markets": 15,
+          "events": 13,
+          "mean_pp": 7.461666666666665,
+          "ci95_pp": [
+            -1.5450201995961033,
+            16.468353532929434
+          ],
+          "median_market_pp": 1.5000000000000013,
+          "positive_market_fraction": 0.5333333333333333
+        },
+        "YES": {
+          "observations": 5,
+          "markets": 4,
+          "events": 4,
+          "mean_pp": 21.862499999999997,
+          "ci95_pp": [
+            -0.6553103638727151,
+            44.38031036387271
+          ],
+          "median_market_pp": 21.749999999999993,
+          "positive_market_fraction": 0.75
+        },
+        "NO": {
+          "observations": 17,
+          "markets": 11,
+          "events": 10,
+          "mean_pp": 2.225,
+          "ci95_pp": [
+            -4.533504453102616,
+            8.983504453102617
+          ],
+          "median_market_pp": -0.9999999999999981,
+          "positive_market_fraction": 0.45454545454545453
+        }
+      }
+    },
+    "signal_original_observable_gates": {
+      "5m": {
+        "ALL": {
+          "observations": 15,
+          "markets": 10,
+          "events": 9,
+          "mean_pp": 0.41666666666666713,
+          "ci95_pp": [
+            -0.9467225624238387,
+            1.780055895757173
+          ],
+          "median_market_pp": -0.2500000000000002,
+          "positive_market_fraction": 0.3
+        },
+        "YES": {
+          "observations": 3,
+          "markets": 3,
+          "events": 3,
+          "mean_pp": 1.8333333333333348,
+          "ci95_pp": [
+            -2.740000000000002,
+            6.406666666666672
+          ],
+          "median_market_pp": -0.5000000000000004,
+          "positive_market_fraction": 0.3333333333333333
+        },
+        "NO": {
+          "observations": 12,
+          "markets": 7,
+          "events": 6,
+          "mean_pp": -0.19047619047619066,
+          "ci95_pp": [
+            -0.43160907223781764,
+            0.05065669128543629
+          ],
+          "median_market_pp": 0.0,
+          "positive_market_fraction": 0.2857142857142857
+        }
+      },
+      "1h": {
+        "ALL": {
+          "observations": 15,
+          "markets": 10,
+          "events": 9,
+          "mean_pp": 2.0391666666666675,
+          "ci95_pp": [
+            -4.455473882921125,
+            8.53380721625446
+          ],
+          "median_market_pp": -0.2500000000000002,
+          "positive_market_fraction": 0.4
+        },
+        "YES": {
+          "observations": 3,
+          "markets": 3,
+          "events": 3,
+          "mean_pp": 10.816666666666668,
+          "ci95_pp": [
+            -8.038283181523807,
+            29.671616514857142
+          ],
+          "median_market_pp": 2.9999999999999916,
+          "positive_market_fraction": 0.6666666666666666
+        },
+        "NO": {
+          "observations": 12,
+          "markets": 7,
+          "events": 6,
+          "mean_pp": -1.722619047619047,
+          "ci95_pp": [
+            -4.627144252651131,
+            1.1819061574130363
+          ],
+          "median_market_pp": -0.5000000000000004,
+          "positive_market_fraction": 0.2857142857142857
+        }
+      },
+      "6h": {
+        "ALL": {
+          "observations": 11,
+          "markets": 7,
+          "events": 6,
+          "mean_pp": -5.507142857142859,
+          "ci95_pp": [
+            -12.289805303901257,
+            1.2755195896155405
+          ],
+          "median_market_pp": -1.5000000000000013,
+          "positive_market_fraction": 0.2857142857142857
+        },
+        "YES": {
+          "observations": 1,
+          "markets": 1,
+          "events": 1,
+          "mean_pp": 2.499999999999991,
+          "ci95_pp": null,
+          "median_market_pp": 2.499999999999991,
+          "positive_market_fraction": 1.0
+        },
+        "NO": {
+          "observations": 10,
+          "markets": 6,
+          "events": 5,
+          "mean_pp": -6.841666666666666,
+          "ci95_pp": [
+            -14.366230636233192,
+            0.6828973028998604
+          ],
+          "median_market_pp": -4.25,
+          "positive_market_fraction": 0.16666666666666666
+        }
+      },
+      "24h": {
+        "ALL": {
+          "observations": 12,
+          "markets": 7,
+          "events": 6,
+          "mean_pp": 4.22142857142857,
+          "ci95_pp": [
+            -8.297865721781408,
+            16.74072286463855
+          ],
+          "median_market_pp": -0.9999999999999981,
+          "positive_market_fraction": 0.42857142857142855
+        },
+        "YES": {
+          "observations": 2,
+          "markets": 2,
+          "events": 2,
+          "mean_pp": 21.749999999999993,
+          "ci95_pp": [
+            -10.100000000000005,
+            53.599999999999994
+          ],
+          "median_market_pp": 21.749999999999993,
+          "positive_market_fraction": 1.0
+        },
+        "NO": {
+          "observations": 10,
+          "markets": 5,
+          "events": 4,
+          "mean_pp": -2.7899999999999996,
+          "ci95_pp": [
+            -6.927861586987493,
+            1.3478615869874937
+          ],
+          "median_market_pp": -1.050000000000001,
+          "positive_market_fraction": 0.2
+        }
+      }
+    },
+    "forecast_verified_all": {
+      "5m": {
+        "ALL": {
+          "observations": 846,
+          "markets": 417,
+          "events": 234,
+          "mean_pp": 0.201216611126683,
+          "ci95_pp": [
+            -0.17570746433542672,
+            0.5781406865887927
+          ],
+          "median_market_pp": 0.0,
+          "positive_market_fraction": 0.22541966426858512
+        },
+        "YES": {
+          "observations": 449,
+          "markets": 244,
+          "events": 174,
+          "mean_pp": 0.08741803278688517,
+          "ci95_pp": [
+            -0.15342423986912884,
+            0.3282603054428992
+          ],
+          "median_market_pp": 0.0,
+          "positive_market_fraction": 0.1721311475409836
+        },
+        "NO": {
+          "observations": 397,
+          "markets": 215,
+          "events": 121,
+          "mean_pp": 0.2754263565891472,
+          "ci95_pp": [
+            -0.3516842295948855,
+            0.90253694277318
+          ],
+          "median_market_pp": 0.0,
+          "positive_market_fraction": 0.2744186046511628
+        }
+      },
+      "1h": {
+        "ALL": {
+          "observations": 787,
+          "markets": 396,
+          "events": 225,
+          "mean_pp": 0.8688072554549825,
+          "ci95_pp": [
+            0.22690430941067052,
+            1.5107102014992946
+          ],
+          "median_market_pp": 0.0,
+          "positive_market_fraction": 0.38636363636363635
+        },
+        "YES": {
+          "observations": 416,
+          "markets": 233,
+          "events": 170,
+          "mean_pp": 0.14721030042918454,
+          "ci95_pp": [
+            -0.70606915579315,
+            1.000489756651519
+          ],
+          "median_market_pp": 0.0,
+          "positive_market_fraction": 0.3562231759656652
+        },
+        "NO": {
+          "observations": 371,
+          "markets": 201,
+          "events": 112,
+          "mean_pp": 1.3761401326699831,
+          "ci95_pp": [
+            0.3934379579807591,
+            2.358842307359207
+          ],
+          "median_market_pp": 0.0,
+          "positive_market_fraction": 0.43781094527363185
+        }
+      },
+      "6h": {
+        "ALL": {
+          "observations": 741,
+          "markets": 364,
+          "events": 214,
+          "mean_pp": 1.7228745659102802,
+          "ci95_pp": [
+            0.39829800290316353,
+            3.047451128917397
+          ],
+          "median_market_pp": 0.22499999999999876,
+          "positive_market_fraction": 0.5274725274725275
+        },
+        "YES": {
+          "observations": 398,
+          "markets": 218,
+          "events": 159,
+          "mean_pp": 0.9926414373088686,
+          "ci95_pp": [
+            -0.7924218171854993,
+            2.7777046918032364
+          ],
+          "median_market_pp": 0.2250000000000002,
+          "positive_market_fraction": 0.5229357798165137
+        },
+        "NO": {
+          "observations": 343,
+          "markets": 180,
+          "events": 104,
+          "mean_pp": 2.03355787037037,
+          "ci95_pp": [
+            0.24908811191204383,
+            3.8180276288286965
+          ],
+          "median_market_pp": 0.2083333333333332,
+          "positive_market_fraction": 0.5277777777777778
+        }
+      },
+      "24h": {
+        "ALL": {
+          "observations": 516,
+          "markets": 244,
+          "events": 167,
+          "mean_pp": -0.08323428961748652,
+          "ci95_pp": [
+            -1.9226308266006027,
+            1.7561622473656298
+          ],
+          "median_market_pp": 0.5000000000000004,
+          "positive_market_fraction": 0.5409836065573771
+        },
+        "YES": {
+          "observations": 304,
+          "markets": 161,
+          "events": 124,
+          "mean_pp": 0.0468944099378879,
+          "ci95_pp": [
+            -2.283573801592596,
+            2.377362621468372
+          ],
+          "median_market_pp": 0.16666666666666682,
+          "positive_market_fraction": 0.515527950310559
+        },
+        "NO": {
+          "observations": 212,
+          "markets": 106,
+          "events": 70,
+          "mean_pp": -1.0579009433962268,
+          "ci95_pp": [
+            -3.2860081782230015,
+            1.1702062914305482
+          ],
+          "median_market_pp": 0.9166666666666659,
+          "positive_market_fraction": 0.5566037735849056
+        }
+      }
+    },
+    "forecast_verified_edge_ge10": {
+      "5m": {
+        "ALL": {
+          "observations": 327,
+          "markets": 210,
+          "events": 142,
+          "mean_pp": 0.6336507936507937,
+          "ci95_pp": [
+            0.01803509118226132,
+            1.249266496119326
+          ],
+          "median_market_pp": 0.0,
+          "positive_market_fraction": 0.21428571428571427
+        },
+        "YES": {
+          "observations": 197,
+          "markets": 114,
+          "events": 87,
+          "mean_pp": -0.049853801169590636,
+          "ci95_pp": [
+            -0.3531035192215636,
+            0.2533959168823823
+          ],
+          "median_market_pp": 0.0,
+          "positive_market_fraction": 0.14035087719298245
+        },
+        "NO": {
+          "observations": 130,
+          "markets": 98,
+          "events": 68,
+          "mean_pp": 1.4166666666666665,
+          "ci95_pp": [
+            0.1875570535207538,
+            2.645776279812579
+          ],
+          "median_market_pp": 0.0,
+          "positive_market_fraction": 0.29591836734693877
+        }
+      },
+      "1h": {
+        "ALL": {
+          "observations": 313,
+          "markets": 203,
+          "events": 138,
+          "mean_pp": 2.1886288998357966,
+          "ci95_pp": [
+            0.8991570766634052,
+            3.478100723008188
+          ],
+          "median_market_pp": 0.0,
+          "positive_market_fraction": 0.43349753694581283
+        },
+        "YES": {
+          "observations": 188,
+          "markets": 111,
+          "events": 85,
+          "mean_pp": 0.8865615615615613,
+          "ci95_pp": [
+            -0.42105649882381047,
+            2.194179621946933
+          ],
+          "median_market_pp": 0.0,
+          "positive_market_fraction": 0.3783783783783784
+        },
+        "NO": {
+          "observations": 125,
+          "markets": 94,
+          "events": 66,
+          "mean_pp": 3.95904255319149,
+          "ci95_pp": [
+            1.4294504198497204,
+            6.48863468653326
+          ],
+          "median_market_pp": 0.07500000000000007,
+          "positive_market_fraction": 0.5
+        }
+      },
+      "6h": {
+        "ALL": {
+          "observations": 288,
+          "markets": 184,
+          "events": 127,
+          "mean_pp": 3.040217391304348,
+          "ci95_pp": [
+            1.053403752014703,
+            5.027031030593993
+          ],
+          "median_market_pp": 0.5000000000000004,
+          "positive_market_fraction": 0.5760869565217391
+        },
+        "YES": {
+          "observations": 182,
+          "markets": 106,
+          "events": 80,
+          "mean_pp": 2.4504716981132075,
+          "ci95_pp": [
+            -0.011794985540829472,
+            4.9127383817672445
+          ],
+          "median_market_pp": 0.3125000000000003,
+          "positive_market_fraction": 0.5471698113207547
+        },
+        "NO": {
+          "observations": 106,
+          "markets": 80,
+          "events": 59,
+          "mean_pp": 4.078125,
+          "ci95_pp": [
+            0.2956575526530072,
+            7.860592447346993
+          ],
+          "median_market_pp": 1.1249999999999996,
+          "positive_market_fraction": 0.6125
+        }
+      },
+      "24h": {
+        "ALL": {
+          "observations": 214,
+          "markets": 127,
+          "events": 99,
+          "mean_pp": 2.343832020997375,
+          "ci95_pp": [
+            -0.030989538124690963,
+            4.71865358011944
+          ],
+          "median_market_pp": 1.5000000000000013,
+          "positive_market_fraction": 0.5984251968503937
+        },
+        "YES": {
+          "observations": 153,
+          "markets": 86,
+          "events": 69,
+          "mean_pp": 2.388081395348836,
+          "ci95_pp": [
+            -0.8579516089821224,
+            5.634114399679794
+          ],
+          "median_market_pp": 1.1250000000000009,
+          "positive_market_fraction": 0.5813953488372093
+        },
+        "NO": {
+          "observations": 61,
+          "markets": 42,
+          "events": 38,
+          "mean_pp": 2.4672619047619038,
+          "ci95_pp": [
+            -3.1627985600929143,
+            8.097322369616721
+          ],
+          "median_market_pp": 2.3250000000000006,
+          "positive_market_fraction": 0.6428571428571429
+        }
+      }
+    },
+    "forecast_verified_edge_10_30": {
+      "5m": {
+        "ALL": {
+          "observations": 308,
+          "markets": 196,
+          "events": 139,
+          "mean_pp": 0.19676870748299322,
+          "ci95_pp": [
+            -0.23416765270711884,
+            0.6277050676731053
+          ],
+          "median_market_pp": 0.0,
+          "positive_market_fraction": 0.20918367346938777
+        },
+        "YES": {
+          "observations": 190,
+          "markets": 109,
+          "events": 85,
+          "mean_pp": -0.12553516819571867,
+          "ci95_pp": [
+            -0.4016711846776191,
+            0.15060084828618173
+          ],
+          "median_market_pp": 0.0,
+          "positive_market_fraction": 0.13761467889908258
+        },
+        "NO": {
+          "observations": 118,
+          "markets": 89,
+          "events": 66,
+          "mean_pp": 0.5880149812734083,
+          "ci95_pp": [
+            -0.2916128497435182,
+            1.4676428122903349
+          ],
+          "median_market_pp": 0.0,
+          "positive_market_fraction": 0.29213483146067415
+        }
+      },
+      "1h": {
+        "ALL": {
+          "observations": 295,
+          "markets": 188,
+          "events": 135,
+          "mean_pp": 1.088918439716312,
+          "ci95_pp": [
+            -0.009102844717123304,
+            2.1869397241497475
+          ],
+          "median_market_pp": 0.0,
+          "positive_market_fraction": 0.42021276595744683
+        },
+        "YES": {
+          "observations": 182,
+          "markets": 105,
+          "events": 83,
+          "mean_pp": 0.38007936507936485,
+          "ci95_pp": [
+            -0.9313138906652241,
+            1.6914726208239537
+          ],
+          "median_market_pp": 0.0,
+          "positive_market_fraction": 0.3619047619047619
+        },
+        "NO": {
+          "observations": 113,
+          "markets": 85,
+          "events": 64,
+          "mean_pp": 2.2479411764705883,
+          "ci95_pp": [
+            0.2591747452267956,
+            4.236707607714381
+          ],
+          "median_market_pp": 0.0,
+          "positive_market_fraction": 0.49411764705882355
+        }
+      },
+      "6h": {
+        "ALL": {
+          "observations": 274,
+          "markets": 172,
+          "events": 124,
+          "mean_pp": 1.6626453488372095,
+          "ci95_pp": [
+            -0.324065781133255,
+            3.649356478807674
+          ],
+          "median_market_pp": 0.47499999999999765,
+          "positive_market_fraction": 0.5523255813953488
+        },
+        "YES": {
+          "observations": 176,
+          "markets": 100,
+          "events": 78,
+          "mean_pp": 2.0525,
+          "ci95_pp": [
+            -0.5350353996509005,
+            4.640035399650901
+          ],
+          "median_market_pp": 0.2500000000000002,
+          "positive_market_fraction": 0.54
+        },
+        "NO": {
+          "observations": 98,
+          "markets": 74,
+          "events": 57,
+          "mean_pp": 1.450337837837838,
+          "ci95_pp": [
+            -1.36033679241983,
+            4.261012468095506
+          ],
+          "median_market_pp": 0.5000000000000004,
+          "positive_market_fraction": 0.5675675675675675
+        }
+      },
+      "24h": {
+        "ALL": {
+          "observations": 206,
+          "markets": 120,
+          "events": 98,
+          "mean_pp": 0.9601388888888884,
+          "ci95_pp": [
+            -1.695653171453389,
+            3.6159309492311658
+          ],
+          "median_market_pp": 1.0000000000000009,
+          "positive_market_fraction": 0.575
+        },
+        "YES": {
+          "observations": 149,
+          "markets": 82,
+          "events": 69,
+          "mean_pp": 1.5472560975609748,
+          "ci95_pp": [
+            -1.7231441500009592,
+            4.817656345122909
+          ],
+          "median_market_pp": 0.9374999999999981,
+          "positive_market_fraction": 0.573170731707317
+        },
+        "NO": {
+          "observations": 57,
+          "markets": 39,
+          "events": 36,
+          "mean_pp": -0.00833333333333361,
+          "ci95_pp": [
+            -5.1621602519350205,
+            5.145493585268353
+          ],
+          "median_market_pp": 1.5000000000000013,
+          "positive_market_fraction": 0.5897435897435898
+        }
+      }
+    },
+    "forecast_eventually_signaled_descriptive_only": {
+      "5m": {
+        "ALL": {
+          "observations": 121,
+          "markets": 66,
+          "events": 48,
+          "mean_pp": -0.2055555555555557,
+          "ci95_pp": [
+            -0.4862182760098752,
+            0.07510716489876379
+          ],
+          "median_market_pp": 0.0,
+          "positive_market_fraction": 0.15151515151515152
+        },
+        "YES": {
+          "observations": 86,
+          "markets": 46,
+          "events": 36,
+          "mean_pp": -0.40670289855072495,
+          "ci95_pp": [
+            -0.7537063163403015,
+            -0.05969948076114845
+          ],
+          "median_market_pp": 0.0,
+          "positive_market_fraction": 0.08695652173913043
+        },
+        "NO": {
+          "observations": 35,
+          "markets": 21,
+          "events": 16,
+          "mean_pp": 0.27261904761904754,
+          "ci95_pp": [
+            -0.022672552698514814,
+            0.5679106479366098
+          ],
+          "median_market_pp": 0.0,
+          "positive_market_fraction": 0.2857142857142857
+        }
+      },
+      "1h": {
+        "ALL": {
+          "observations": 121,
+          "markets": 66,
+          "events": 48,
+          "mean_pp": -0.6636363636363638,
+          "ci95_pp": [
+            -1.280652595145165,
+            -0.04662013212756244
+          ],
+          "median_market_pp": 0.0,
+          "positive_market_fraction": 0.22727272727272727
+        },
+        "YES": {
+          "observations": 86,
+          "markets": 46,
+          "events": 36,
+          "mean_pp": -0.8163043478260871,
+          "ci95_pp": [
+            -1.553490937676922,
+            -0.07911775797525233
+          ],
+          "median_market_pp": 0.0,
+          "positive_market_fraction": 0.1956521739130435
+        },
+        "NO": {
+          "observations": 35,
+          "markets": 21,
+          "events": 16,
+          "mean_pp": -0.26190476190476214,
+          "ci95_pp": [
+            -1.240115077008897,
+            0.7163055531993727
+          ],
+          "median_market_pp": 0.0,
+          "positive_market_fraction": 0.3333333333333333
+        }
+      },
+      "6h": {
+        "ALL": {
+          "observations": 120,
+          "markets": 65,
+          "events": 47,
+          "mean_pp": -0.3525641025641027,
+          "ci95_pp": [
+            -1.4032648963043362,
+            0.6981366911761309
+          ],
+          "median_market_pp": 0.0,
+          "positive_market_fraction": 0.47692307692307695
+        },
+        "YES": {
+          "observations": 85,
+          "markets": 45,
+          "events": 35,
+          "mean_pp": 0.3755555555555557,
+          "ci95_pp": [
+            -0.8674245022077225,
+            1.6185356133188338
+          ],
+          "median_market_pp": 0.5000000000000004,
+          "positive_market_fraction": 0.5333333333333333
+        },
+        "NO": {
+          "observations": 35,
+          "markets": 21,
+          "events": 16,
+          "mean_pp": -2.090476190476191,
+          "ci95_pp": [
+            -3.6200042911332497,
+            -0.5609480898191326
+          ],
+          "median_market_pp": -1.3877787807814457e-15,
+          "positive_market_fraction": 0.3333333333333333
+        }
+      },
+      "24h": {
+        "ALL": {
+          "observations": 101,
+          "markets": 58,
+          "events": 45,
+          "mean_pp": -2.6359195402298847,
+          "ci95_pp": [
+            -6.173302608328441,
+            0.9014635278686711
+          ],
+          "median_market_pp": 1.0000000000000009,
+          "positive_market_fraction": 0.5689655172413793
+        },
+        "YES": {
+          "observations": 71,
+          "markets": 40,
+          "events": 34,
+          "mean_pp": -2.8189583333333337,
+          "ci95_pp": [
+            -7.7357951197055135,
+            2.097878453038846
+          ],
+          "median_market_pp": 1.749999999999996,
+          "positive_market_fraction": 0.625
+        },
+        "NO": {
+          "observations": 30,
+          "markets": 19,
+          "events": 15,
+          "mean_pp": -2.5328947368421058,
+          "ci95_pp": [
+            -5.917752600945777,
+            0.8519631272615658
+          ],
+          "median_market_pp": -0.5000000000000004,
+          "positive_market_fraction": 0.42105263157894735
+        }
+      }
+    }
+  },
+  "limitations": [
+    "No historical executable BBO, quote queues, own fills or maker P&L. Public prices-history is a reference series.",
+    "Signal Q and entry price use immutable rounded publication fields. Forecast Q uses atomic published artifact, before later coherence repairs.",
+    "Forecast primary rows require verified artifact Q, timing-valid same-source public entry and future marks, and horizon before market close.",
+    "Historical repaired-Q version stream is not reconstructed; initial pre-repair Q is not interchangeable with later canonical served Q.",
+    "CIs use event-clustered normal approximation on equal-market means, not multiple-testing adjusted; this short window has limited independent events.",
+    "Full OOS universe includes later selected survivors in retained graph; market taxonomy/end dates are current graph metadata.",
+    "Eventually-signaled forecast subset is retrospective selection used only to separate lag from market mix; it is not a deployable selection rule.",
+    "Original observable funnel omits historical unavailable BBO/depth/stability/queue gates; it is not actual entry count."
+  ]
+}

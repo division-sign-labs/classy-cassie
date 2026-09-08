@@ -1,0 +1,273 @@
+{
+  "code_checkouts": {
+    "quotient-analytics-pipelines": "1ba9d18d6dbd054d642410b5f7c0dd318d929b58",
+    "quotient-api": "9b845dccecebdcf6072c2b30159514b3d9371a05"
+  },
+  "notes": [
+    "Repository HEAD identifies checkout, not proof of deployed commit.",
+    "Market listing files are capped at 100 rows and may be paginated; they are contract samples, not exhaustive lists.",
+    "Quotient asset capture preceded the user-added silver request; silver source rules and outlook rows captured separately.",
+    "Saved timestamps reflect filesystem writes; API payload timestamps identify observations."
+  ],
+  "artifacts": [
+    {
+      "file": "COMMODITYSETTLE.pdf",
+      "source": "https://assets.kalshi.com/contract_terms/COMMODITYSETTLE.pdf",
+      "sha256": "f245ba162622ddbf03d6cea5dac868347a1351670e13e7f48d6021e0abd4c21f",
+      "bytes": 43393,
+      "saved_at": "2026-09-05T06:56:00.674773+00:00"
+    },
+    {
+      "file": "KXBTC-markets.json",
+      "source": "https://api.elections.kalshi.com/trade-api/v2/markets?series_ticker=KXBTC&status=open&limit=100",
+      "sha256": "a5c08fee36a3a15df5fe9f561cc63a4760aa110857d7451edbc803fcf4ef857d",
+      "bytes": 232111,
+      "saved_at": "2026-09-05T06:52:29.993202+00:00"
+    },
+    {
+      "file": "KXBTC-series.json",
+      "source": "https://api.elections.kalshi.com/trade-api/v2/series/KXBTC",
+      "sha256": "683d5be62ade89bb2fb89750464a26c60ef38415653dbf23653cc506dcacf608",
+      "bytes": 1349,
+      "saved_at": "2026-09-05T06:52:29.661799+00:00"
+    },
+    {
+      "file": "KXBTCD-markets.json",
+      "source": "https://api.elections.kalshi.com/trade-api/v2/markets?series_ticker=KXBTCD&status=open&limit=100",
+      "sha256": "d50ff70b49c94d0a41058a4d680001f999f52a55e59e2568fcb5c15224ef4e3c",
+      "bytes": 227449,
+      "saved_at": "2026-09-05T06:52:29.821731+00:00"
+    },
+    {
+      "file": "KXBTCD-series.json",
+      "source": "https://api.elections.kalshi.com/trade-api/v2/series/KXBTCD",
+      "sha256": "7aeb63e9f2c060e41e0d4bf1f80890c9e7b7751cc0d727fec57bf40ba8f4ab67",
+      "bytes": 1364,
+      "saved_at": "2026-09-05T06:52:29.620095+00:00"
+    },
+    {
+      "file": "KXBTCMAXMON-markets.json",
+      "source": "https://api.elections.kalshi.com/trade-api/v2/markets?series_ticker=KXBTCMAXMON&status=open&limit=100",
+      "sha256": "f5a32099fa031f96314e3a30399c3c347b55ee63431d652f50168bef608b4bec",
+      "bytes": 19704,
+      "saved_at": "2026-09-05T06:52:29.854095+00:00"
+    },
+    {
+      "file": "KXBTCMAXMON-series.json",
+      "source": "https://api.elections.kalshi.com/trade-api/v2/series/KXBTCMAXMON",
+      "sha256": "72e165455ded837b5a39f41cc014bd80ff17e2be1a675173e5c17866ed52e743",
+      "bytes": 916,
+      "saved_at": "2026-09-05T06:52:29.666719+00:00"
+    },
+    {
+      "file": "KXCOPPERD-markets.json",
+      "source": "https://api.elections.kalshi.com/trade-api/v2/markets?series_ticker=KXCOPPERD&status=open&limit=100",
+      "sha256": "71527d568a88938414db81043be43275d38ed24705df02804cef3ca2cea4b5a3",
+      "bytes": 36,
+      "saved_at": "2026-09-05T06:52:29.436389+00:00"
+    },
+    {
+      "file": "KXCOPPERD-series.json",
+      "source": "https://api.elections.kalshi.com/trade-api/v2/series/KXCOPPERD",
+      "sha256": "6a4807d2d00e9d9ddd99c0229cc9023db98ee29f5ff2d245fb109b7e736d6539",
+      "bytes": 1529,
+      "saved_at": "2026-09-05T06:52:29.260462+00:00"
+    },
+    {
+      "file": "KXCOPPERMON-markets.json",
+      "source": "https://api.elections.kalshi.com/trade-api/v2/markets?series_ticker=KXCOPPERMON&status=open&limit=100",
+      "sha256": "e82db95a2436b453483eb4d00626d435d960dd4ff9fc9825b23ddcc42c22f337",
+      "bytes": 102052,
+      "saved_at": "2026-09-05T06:52:29.895687+00:00"
+    },
+    {
+      "file": "KXCOPPERMON-series.json",
+      "source": "https://api.elections.kalshi.com/trade-api/v2/series/KXCOPPERMON",
+      "sha256": "c88b35e35a7779754b393eda6a9e18356ff2acae4868ea67c2acbcc01a532254",
+      "bytes": 1554,
+      "saved_at": "2026-09-05T06:52:29.649272+00:00"
+    },
+    {
+      "file": "KXCOPPERW-markets.json",
+      "source": "https://api.elections.kalshi.com/trade-api/v2/markets?series_ticker=KXCOPPERW&status=open&limit=100",
+      "sha256": "71527d568a88938414db81043be43275d38ed24705df02804cef3ca2cea4b5a3",
+      "bytes": 36,
+      "saved_at": "2026-09-05T06:52:29.471858+00:00"
+    },
+    {
+      "file": "KXCOPPERW-series.json",
+      "source": "https://api.elections.kalshi.com/trade-api/v2/series/KXCOPPERW",
+      "sha256": "bbb3ac6b641c2256f0fcc1b78038d255d12eecb90ccf24673bb63539c16c5645",
+      "bytes": 1541,
+      "saved_at": "2026-09-05T06:52:29.291846+00:00"
+    },
+    {
+      "file": "KXGOLDD-markets.json",
+      "source": "https://api.elections.kalshi.com/trade-api/v2/markets?series_ticker=KXGOLDD&status=open&limit=100",
+      "sha256": "71527d568a88938414db81043be43275d38ed24705df02804cef3ca2cea4b5a3",
+      "bytes": 36,
+      "saved_at": "2026-09-05T06:52:29.032882+00:00"
+    },
+    {
+      "file": "KXGOLDD-series.json",
+      "source": "https://api.elections.kalshi.com/trade-api/v2/series/KXGOLDD",
+      "sha256": "4912fb3c8a341828313a23caebd69b6a6c45efb473bca5655a619eb3cca56daa",
+      "bytes": 1329,
+      "saved_at": "2026-09-05T06:52:28.848206+00:00"
+    },
+    {
+      "file": "KXGOLDMON-markets.json",
+      "source": "https://api.elections.kalshi.com/trade-api/v2/markets?series_ticker=KXGOLDMON&status=open&limit=100",
+      "sha256": "0787362da372d1547f4c734b2bebc4040ebd7b9644645b61e9c7f681fe66f40a",
+      "bytes": 102486,
+      "saved_at": "2026-09-05T06:52:29.480376+00:00"
+    },
+    {
+      "file": "KXGOLDMON-series.json",
+      "source": "https://api.elections.kalshi.com/trade-api/v2/series/KXGOLDMON",
+      "sha256": "61a0aef368cb4c351e465e1108e984ae60df603ec857b2498031a97fb65051f4",
+      "bytes": 1355,
+      "saved_at": "2026-09-05T06:52:29.236736+00:00"
+    },
+    {
+      "file": "KXGOLDW-markets.json",
+      "source": "https://api.elections.kalshi.com/trade-api/v2/markets?series_ticker=KXGOLDW&status=open&limit=100",
+      "sha256": "71527d568a88938414db81043be43275d38ed24705df02804cef3ca2cea4b5a3",
+      "bytes": 36,
+      "saved_at": "2026-09-05T06:52:29.416152+00:00"
+    },
+    {
+      "file": "KXGOLDW-series.json",
+      "source": "https://api.elections.kalshi.com/trade-api/v2/series/KXGOLDW",
+      "sha256": "b15c8369ba5da38607be46912472bc6ad6076e1f2b5514b114332ca6d71955ad",
+      "bytes": 1351,
+      "saved_at": "2026-09-05T06:52:29.230238+00:00"
+    },
+    {
+      "file": "KXSILVERD-markets.json",
+      "source": "https://api.elections.kalshi.com/trade-api/v2/markets?series_ticker=KXSILVERD&status=open&limit=100",
+      "sha256": "71527d568a88938414db81043be43275d38ed24705df02804cef3ca2cea4b5a3",
+      "bytes": 36,
+      "saved_at": "2026-09-05T06:59:16.813901+00:00"
+    },
+    {
+      "file": "KXSILVERD-series.json",
+      "source": "https://api.elections.kalshi.com/trade-api/v2/series/KXSILVERD",
+      "sha256": "0c7e7c0be1880bdbb475b2eec92bd21e767ce3f0564bc95e949ef7ffded386d0",
+      "bytes": 1343,
+      "saved_at": "2026-09-05T06:59:16.635897+00:00"
+    },
+    {
+      "file": "KXSILVERMON-markets.json",
+      "source": "https://api.elections.kalshi.com/trade-api/v2/markets?series_ticker=KXSILVERMON&status=open&limit=100",
+      "sha256": "4d5ec1718551257bbcf79fd5764b6ffc93810ae3314b87761ecf452c80e08aa1",
+      "bytes": 102307,
+      "saved_at": "2026-09-05T06:59:17.623591+00:00"
+    },
+    {
+      "file": "KXSILVERMON-series.json",
+      "source": "https://api.elections.kalshi.com/trade-api/v2/series/KXSILVERMON",
+      "sha256": "59b1d7327e2e3dca6a7fc324cd164d4b9ef9acb33b88dba1959abc7c77d56d6b",
+      "bytes": 1369,
+      "saved_at": "2026-09-05T06:59:17.382971+00:00"
+    },
+    {
+      "file": "KXSILVERW-markets.json",
+      "source": "https://api.elections.kalshi.com/trade-api/v2/markets?series_ticker=KXSILVERW&status=open&limit=100",
+      "sha256": "71527d568a88938414db81043be43275d38ed24705df02804cef3ca2cea4b5a3",
+      "bytes": 36,
+      "saved_at": "2026-09-05T06:59:17.186766+00:00"
+    },
+    {
+      "file": "KXSILVERW-series.json",
+      "source": "https://api.elections.kalshi.com/trade-api/v2/series/KXSILVERW",
+      "sha256": "9568c1fa342f3f5f4ec008e2d85bb3bdef4e04779f0461d7a8e91eba72b37d05",
+      "bytes": 1364,
+      "saved_at": "2026-09-05T06:59:17.002634+00:00"
+    },
+    {
+      "file": "KXWTI-markets.json",
+      "source": "https://api.elections.kalshi.com/trade-api/v2/markets?series_ticker=KXWTI&status=open&limit=100",
+      "sha256": "43b40b42722981bb810262dfd0cedfddeb5ae65d21689084a69da169ed435540",
+      "bytes": 241926,
+      "saved_at": "2026-09-05T06:52:29.119583+00:00"
+    },
+    {
+      "file": "KXWTI-series.json",
+      "source": "https://api.elections.kalshi.com/trade-api/v2/series/KXWTI",
+      "sha256": "911a05dc1e0b8c403cf382aebe99247f707092d9950c615f374252e5124bbfc5",
+      "bytes": 974,
+      "saved_at": "2026-09-05T06:52:28.853092+00:00"
+    },
+    {
+      "file": "KXWTIMAX-markets.json",
+      "source": "https://api.elections.kalshi.com/trade-api/v2/markets?series_ticker=KXWTIMAX&status=open&limit=100",
+      "sha256": "09927674c51d29ac58979db7f2e192724d6ff299bc15c89eb6fb67dd549fc909",
+      "bytes": 59549,
+      "saved_at": "2026-09-05T06:52:30.211000+00:00"
+    },
+    {
+      "file": "KXWTIMAX-series.json",
+      "source": "https://api.elections.kalshi.com/trade-api/v2/series/KXWTIMAX",
+      "sha256": "ec3d8fc7bd5715adbd18512ccacedcccf112440f26b061188f185808aaea20e4",
+      "bytes": 940,
+      "saved_at": "2026-09-05T06:52:30.001647+00:00"
+    },
+    {
+      "file": "KXWTIMONTHLY-markets.json",
+      "source": "https://api.elections.kalshi.com/trade-api/v2/markets?series_ticker=KXWTIMONTHLY&status=open&limit=100",
+      "sha256": "71527d568a88938414db81043be43275d38ed24705df02804cef3ca2cea4b5a3",
+      "bytes": 36,
+      "saved_at": "2026-09-05T06:52:29.040461+00:00"
+    },
+    {
+      "file": "KXWTIMONTHLY-series.json",
+      "source": "https://api.elections.kalshi.com/trade-api/v2/series/KXWTIMONTHLY",
+      "sha256": "dfe4c4d07736a1e820c970cd86fea1928e7f920bdf353f159880bbbcfe1cef12",
+      "bytes": 888,
+      "saved_at": "2026-09-05T06:52:28.843126+00:00"
+    },
+    {
+      "file": "KXWTIW-markets.json",
+      "source": "https://api.elections.kalshi.com/trade-api/v2/markets?series_ticker=KXWTIW&status=open&limit=100",
+      "sha256": "aec9c99165517ae7b599a70df4ba3899ca811052e92ddddcd2dd23957049f1f1",
+      "bytes": 61923,
+      "saved_at": "2026-09-05T06:52:29.066125+00:00"
+    },
+    {
+      "file": "KXWTIW-series.json",
+      "source": "https://api.elections.kalshi.com/trade-api/v2/series/KXWTIW",
+      "sha256": "89b8373a20ad8aeeec595d3d18e62670c99425a5fb0a4eec395f44175c2a3ad8",
+      "bytes": 981,
+      "saved_at": "2026-09-05T06:52:28.849067+00:00"
+    },
+    {
+      "file": "outlook-summary.json",
+      "source": null,
+      "sha256": "04e73fce9f6cc08c43df999f4ec7abb17ec055b9bb196c366c3927c6ef4d8f0c",
+      "bytes": 27780,
+      "saved_at": "2026-09-05T07:06:27.547341+00:00"
+    },
+    {
+      "file": "pyth-copper.html",
+      "source": "https://app.pyth.com/explore/Commodities.Index.CU%2FUSD",
+      "sha256": "920ad0ebca851e81f71f000569de359588d04286dbe626421a12dd450912411e",
+      "bytes": 132827,
+      "saved_at": "2026-09-05T06:56:00.663037+00:00"
+    },
+    {
+      "file": "quotient-assets-live.json",
+      "source": "/api/v1/assets/search?reference=commodity:wti&reference=commodity:gold&reference=commodity:copper&reference=crypto:btc",
+      "sha256": "319a6f9c0844d3f3fca79642781a2f1e82bfab82409c5da95f5e743275404c64",
+      "bytes": 2474759,
+      "saved_at": "2026-09-05T06:55:16.411510+00:00"
+    },
+    {
+      "file": "quotient-price-outlooks-live.json",
+      "source": "/api/v1/price-outlooks",
+      "sha256": "6542e1918397798ca49bc20f6bbb6ea7ce946e6d26bab77e0a1dc520e4f6de27",
+      "bytes": 879570,
+      "saved_at": "2026-09-05T06:54:07.532221+00:00"
+    }
+  ]
+}

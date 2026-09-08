@@ -1,0 +1,36 @@
+{
+  "series": {
+    "additional_prohibitions": [
+      "Persons who are employed by any of the Source Agencies are not permitted to trade on the Contract.",
+      "Persons who hold any material, non-public information on the Underlying are not permitted to trade on the Contract."
+    ],
+    "category": "Commodities",
+    "contract_terms_url": "https://assets.kalshi.com/contract_terms/COMMODITIES.pdf",
+    "contract_url": "https://assets.kalshi.com/regulatory/product-certifications/COMMODITIES.pdf",
+    "exchange_index": 0,
+    "fee_multiplier": 1,
+    "fee_type": "quadratic",
+    "frequency": "weekly",
+    "last_updated_ts": "2026-09-01T17:50:55.485951Z",
+    "product_metadata": {
+      "important_info": {
+        "id": "COMMODITIES-bulk-2026-04-14",
+        "markdown": "**Important information:** Effective starting the conclusion of Friday, July 31st event, weekly Silver markets resolution will transition to a continuous index feed (Metal.Index.SILVER/USD, ID 3154).",
+        "message": "",
+        "title": ""
+      },
+      "scope": "Silver"
+    },
+    "settlement_sources": [
+      {
+        "name": "Pyth - Silver",
+        "url": "https://app.pyth.com/explore/Metal.Index.SILVER%2FUSD?returnUrl=%2Fexplore%3Fstate%3Dstable"
+      }
+    ],
+    "tags": [
+      "Metals"
+    ],
+    "ticker": "KXSILVERW",
+    "title": "Silver Weekly Price"
+  }
+}

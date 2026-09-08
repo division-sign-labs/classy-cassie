@@ -40,7 +40,6 @@
     ],
     "idle_poll_seconds": 1800,
     "active_poll_seconds": 900,
-    "daily_api_cost_cap_usd": 1.0,
     "require_published_signal_for_new_entry": true,
     "require_is_active": true,
     "require_live_priced": true,
@@ -329,14 +328,14 @@
       21600,
       86400
     ],
-    "record_every_gate_decision": true,
-    "record_q_version_and_units": true,
-    "record_book_and_quote_inputs": true,
+    "record_every_gate_decision": false,
+    "record_q_version_and_units": false,
+    "record_book_and_quote_inputs": false,
     "record_order_and_fill_lifecycle": true,
-    "record_inventory_and_resolution_scenarios": true,
-    "record_forecast_change_and_exit_reason": true,
-    "record_realized_rewards_and_fees": true,
-    "record_api_cost": true,
+    "record_inventory_and_resolution_scenarios": false,
+    "record_forecast_change_and_exit_reason": false,
+    "record_realized_rewards_and_fees": false,
+    "record_api_cost": false,
     "redact_credentials_signatures_and_private_keys": true
   }
 }

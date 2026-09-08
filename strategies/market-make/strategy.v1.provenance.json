@@ -3,7 +3,7 @@
   "source_path": "research/polymarket_mm_strategy/2026-08-31/strategy.v1.json",
   "source_schema_version": "q-directed-polymarket-mm/1",
   "copied_at": "2026-08-31",
-  "sha256": "699b59faaecd43037555cdb114cc577445ba71ab0bb8dd48034e118ea526c857",
+  "sha256": "8e7809667d9eb28c0996f75c17d50d735714aac8fa09b59d372ce2933bbe8056",
   "cassie_resolution": {
     "bankroll": {
       "mode": "live",
@@ -40,6 +40,24 @@
       },
       "rationale": "Last-30-day Q-above/YES markouts were +0.37pp at 1h, +0.11pp at 6h, and -0.43pp at 24h: smaller YES inventory (0.5 size multiplier) and the shorter YES renewal edge carry the directional asymmetry; excluding every 10-20pp YES opportunity is not justified. The drawdown-risk hard gate had no basis in the source analysis; flagged forecasts are ranked below clean ones and the flag is logged on every entry decision as a covariate for later testing.",
       "port_back": "Apply the same edit to research/polymarket_mm_strategy in quotient-analytics-pipelines and re-vendor to restore a byte-for-byte copy."
+    },
+    {
+      "date": "2026-09-04",
+      "fields": {
+        "quotient_feed.daily_api_cost_cap_usd": {
+          "from": 1,
+          "to": "removed"
+        },
+        "telemetry.record_every_gate_decision": false,
+        "telemetry.record_q_version_and_units": false,
+        "telemetry.record_book_and_quote_inputs": false,
+        "telemetry.record_inventory_and_resolution_scenarios": false,
+        "telemetry.record_forecast_change_and_exit_reason": false,
+        "telemetry.record_realized_rewards_and_fees": false,
+        "telemetry.record_api_cost": false
+      },
+      "rationale": "Quotient calls run on the configured cadence without a strategy-level spend ceiling. The local runtime stores trading-critical state only; research telemetry belongs in a separate analytics system.",
+      "port_back": "Remove the same field from research/polymarket_mm_strategy in quotient-analytics-pipelines and re-vendor to restore a byte-for-byte copy."
     }
   ]
 }

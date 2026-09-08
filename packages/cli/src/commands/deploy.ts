@@ -6,11 +6,12 @@
 import { createHash } from "node:crypto";
 import { join } from "node:path";
 import pc from "picocolors";
-import { KeyRoles, type BotConfig } from "@quotient-forecasting/cassie-core";
+import { MarketMakeConfigSchema } from "@quotient-forecasting/strategy-market-make";
+import { QuotientSwingConfigSchema } from "@quotient-forecasting/strategy-quotient-swing";
+import { KeyRoles, QUOTIENT_POLYMARKET_FEE_DISCLOSURE, type BotConfig } from "@quotient-forecasting/cassie-core";
 import { buildRuntimeCreds, confirm, getKeystoreSecret } from "../context.js";
 import { atomicWritePrivateFile, dirs, loadBotConfig, saveBotConfig } from "../paths.js";
 import { resolveQuotientToken } from "../quotient-token.js";
-import { discoverAresBuilderCode, resolveAresApiKey, verifyAresApiKey } from "../ares-config.js";
 import { resolveSurplusApiKey, verifySurplusApiKey } from "../surplus-config.js";
 import {
   DEFAULT_REGION,
@@ -21,11 +22,15 @@ import {
   installRuntimeCommand,
   renderCloudInit,
   renderUnit,
+  renderWorkspaceOverride,
 } from "../cloud-init.js";
 import { DigitalOcean, ensureDigitalOceanReady, publicIpv4, type Droplet } from "../digitalocean.js";
 import { cliVersion } from "../version.js";
+import { resolvePolymarketGaslessAuth } from "../polymarket-gasless.js";
+import { activateWorkspaceRuntime, buildWorkspaceRuntime, stageWorkspaceRuntime } from "../workspace-runtime.js";
 import {
   controlCall,
+  ControlApiError,
   ensureKeypair,
   forgetHostKey,
   pinHostKey,
@@ -38,6 +43,7 @@ export interface DeployOpts {
   region?: string;
   size?: string;
   yes?: boolean;
+  fromWorkspace?: boolean;
 }
 
 type Deployment = NonNullable<BotConfig["deployment"]>;
@@ -64,6 +70,72 @@ export function deploymentIdFor(deployment: Deployment): string {
 export interface RuntimeStartResult {
   started: Record<string, unknown>;
   marketMakeStatus?: Record<string, unknown>;
+  swingStatus?: Record<string, unknown>;
+  executionStatus?: Record<string, unknown>;
+}
+
+export function isAdaptivePredictionDeployment(cfg: BotConfig): boolean {
+  return isPredictionDeployment(cfg) && cfg.execution?.mode !== "legacy";
+}
+
+function isPredictionDeployment(cfg: BotConfig): boolean {
+  return (cfg.venue === "polymarket" && ["signals", "flip-flat"].includes(cfg.strategy.id)) || (cfg.venue === "kalshi" && cfg.strategy.id === "kalshi-commodities");
+}
+
+export function runtimeAutostartBeforePreflights(cfg: BotConfig): "0" | "1" {
+  return isPredictionDeployment(cfg) || ["market-make", "quotient-swing"].includes(cfg.strategy.id) ? "0" : "1";
+}
+
+interface ReconciliationWaitDeps { sleep: (milliseconds: number) => Promise<void> }
+const reconciliationWait: ReconciliationWaitDeps = { sleep: milliseconds => new Promise(resolve => setTimeout(resolve, milliseconds)) };
+
+async function waitForPredictionReceipts(
+  cfg: BotConfig,
+  read: () => unknown,
+  deps: ReconciliationWaitDeps,
+  requireNoDeferredWork = false,
+): Promise<Record<string, unknown>> {
+  for (let attempt = 0; attempt < 10; attempt++) {
+    const execution = predictionExecutionStatus(read());
+    const unresolved = (execution.parents as Record<string, unknown>[]).some(parent =>
+      ["active", "canceling", "blocked"].includes(String(parent.status)),
+    );
+    const deferred = requireNoDeferredWork &&
+      (Number(execution.queuedExitCount ?? 0) > 0 || Number(execution.unsettledFillCount ?? 0) > 0);
+    if (!unresolved && !deferred) return execution;
+    if (attempt === 9) {
+      throw new Error(
+        `adaptive execution remains paused with unresolved orders, queued exits or settlements${execution.haltReason ? `: ${String(execution.haltReason)}` : ""}. ` +
+        `Review before retrying after reconciliation.\ncassie status ${cfg.id}\ncassie logs ${cfg.id}`,
+      );
+    }
+    await deps.sleep(5_000);
+  }
+  throw new Error("prediction reconciliation did not complete");
+}
+
+/** A saved legacy setting cannot abandon receipts owned by the old adaptive process. */
+export async function preparePredictionModeChange(
+  cfg: BotConfig,
+  deps: ReconciliationWaitDeps & { control: typeof controlCall } = { ...reconciliationWait, control: controlCall },
+): Promise<void> {
+  if (!isPredictionDeployment(cfg) || cfg.execution?.mode !== "legacy" || !cfg.deployment) return;
+  const target: Target = { host: cfg.deployment.host, user: cfg.deployment.user };
+  let previous: unknown;
+  try {
+    previous = deps.control(target, cfg.id, "GET", "/execution/status");
+  } catch (error) {
+    // Older legacy runtimes expose no execution route. Accept only the exact
+    // route-not-found response emitted by their 404 handler; shutdown and an
+    // authoritative empty /orders check are still mandatory afterward.
+    if (error instanceof ControlApiError && (error.body as { error?: unknown } | undefined)?.error === "unknown route GET /execution/status") return;
+    throw error;
+  }
+  if (previous && typeof previous === "object" && !Array.isArray(previous) &&
+    (previous as Record<string, unknown>).enabled === false) return;
+  predictionExecutionStatus(previous);
+  deps.control(target, cfg.id, "POST", "/pause");
+  await waitForPredictionReceipts(cfg, () => deps.control(target, cfg.id, "GET", "/execution/status"), deps, true);
 }
 
 /**
@@ -72,10 +144,43 @@ export interface RuntimeStartResult {
  * its controller restores durable state and starts HALTED. The operator later
  * reviews an exact preview and applies that hash through the dedicated CLI.
  */
-export function startRuntimeAfterPreflights(
+export async function startRuntimeAfterPreflights(
   cfg: BotConfig,
   call: (method: "GET" | "POST", path: string, body?: string) => unknown,
-): RuntimeStartResult {
+  deps: ReconciliationWaitDeps = reconciliationWait,
+): Promise<RuntimeStartResult> {
+  if (cfg.strategy.id === "kalshi-commodities") {
+    call("POST", "/pause");
+    return { started: asRecord(call("POST", "/init"), "/init") };
+  }
+  if (cfg.strategy.id === "quotient-swing") {
+    // Startup reconciles the account and enables entries unless a durable halt remains.
+    const started = asRecord(call("POST", "/init"), "/init");
+    const status = asRecord(call("GET", "/swing/status"), "/swing/status");
+    if (typeof status.halted !== "boolean") throw new Error("swing runtime returned an invalid execution status; inspect status and logs before retrying");
+    return { started, swingStatus: status };
+  }
+  if (isAdaptivePredictionDeployment(cfg)) {
+    // Keep entries paused while startup reconciles the restored parent ledger.
+    call("POST", "/pause");
+    const started = asRecord(call("POST", "/init"), "/init");
+    let execution = await waitForPredictionReceipts(cfg, () => call("GET", "/execution/status"), deps);
+    // Resume rechecks orders and inventory, and cannot clear an unknown POST.
+    try {
+      call("POST", "/resume");
+      execution = predictionExecutionStatus(call("GET", "/execution/status"));
+      if (execution.blocked !== false) {
+        throw new Error(`adaptive execution remains blocked: ${String(execution.haltReason ?? "reconciliation required")}`);
+      }
+    } catch (error) {
+      try { call("POST", "/pause"); }
+      catch (pauseError) {
+        throw new AggregateError([error, pauseError], "adaptive deployment failed and the runtime did not confirm it was paused; inspect its execution status before retrying");
+      }
+      throw error;
+    }
+    return { started, executionStatus: execution };
+  }
   if (cfg.strategy.id !== "market-make") {
     call("POST", "/resume");
     return { started: asRecord(call("POST", "/init"), "/init") };
@@ -89,6 +194,18 @@ export function startRuntimeAfterPreflights(
     );
   }
   return { started, marketMakeStatus: status };
+}
+
+function predictionExecutionStatus(value: unknown): Record<string, unknown> {
+  const status = asRecord(value, "/execution/status");
+  if (typeof status.blocked !== "boolean" || !Array.isArray(status.parents) ||
+    [status.queuedExitCount, status.unsettledFillCount].some(count => count !== undefined &&
+      (typeof count !== "number" || !Number.isInteger(count) || count < 0)) ||
+    status.parents.some(parent => !parent || typeof parent !== "object" || Array.isArray(parent) ||
+      !["active", "canceling", "blocked", "completed", "canceled"].includes(String(parent.status)))) {
+    throw new Error("adaptive runtime returned an invalid execution checkpoint; deployment remains paused");
+  }
+  return status;
 }
 
 function asRecord(value: unknown, route: string): Record<string, unknown> {
@@ -159,9 +276,9 @@ async function waitForSsh(target: Target): Promise<true> {
   return waitFor("waiting for ssh", 5_000, 60, async () => (sshExec(target, "true").ok ? true : null));
 }
 
-async function waitForProvisioning(target: Target): Promise<true> {
+async function waitForProvisioning(target: Target, fromWorkspace = false): Promise<true> {
   return waitFor("running first-boot setup", 10_000, 90, async () => {
-    const result = sshExec(target, `test -f ${READY_MARKER} && command -v cassie-runtime >/dev/null`);
+    const result = sshExec(target, `test -f ${READY_MARKER} && command -v ${fromWorkspace ? "node" : "cassie-runtime"} >/dev/null`);
     return result.ok ? true : null;
   });
 }
@@ -178,11 +295,15 @@ export function quiesce(
   deps: QuiesceDeps = { exec: sshExec, control: controlCall },
 ): void {
   if (!cfg.deployment) return;
+  const prediction = isPredictionDeployment(cfg);
+  const swing = cfg.strategy.id === "quotient-swing";
+  strict ||= prediction || swing;
+  const kind = swing ? "swing" : prediction ? "prediction" : "market-make";
   const target: Target = { host: cfg.deployment.host, user: cfg.deployment.user };
   if (!deps.exec(target, "true").ok) {
     if (strict) {
       throw new Error(
-        "refusing to replace the market-make droplet: the existing host is unreachable, so its durable state cannot be preserved",
+        `refusing to replace the ${kind} droplet: the existing host is unreachable, so its durable state cannot be preserved`,
       );
     }
     console.log(pc.yellow("the existing droplet is unreachable; continuing without a clean stop"));
@@ -193,7 +314,17 @@ export function quiesce(
     if (shutdown.stopped !== true || shutdown.restingOrdersCanceled !== true) {
       throw new Error("runtime did not confirm a stopped process with resting orders canceled");
     }
-    if (strict) {
+    if (swing) {
+      // Only the protected executor can prove a safe swing shutdown: it
+      // reconciles cancellation-racing fills, resolves submissions, verifies
+      // each owned SL's quantity/side/trigger geometry, and disarms deadman.
+      // A generic cancel-all or a reduceOnly flag is not equivalent evidence.
+      const cancellation = asRecord(shutdown.cancellation, "/shutdown cancellation");
+      if (cancellation.method !== "engine" || cancellation.requested !== true ||
+        cancellation.completed !== true || cancellation.protectiveOrdersRetained !== true) {
+        throw new Error("runtime did not confirm native-stop-aware engine shutdown");
+      }
+    } else if (strict) {
       // Also defend upgrades from an older runtime whose /shutdown response did
       // not yet include authoritative venue verification.
       const remaining = deps.control(target, cfg.id, "GET", "/orders");
@@ -204,9 +335,22 @@ export function quiesce(
         throw new Error(`authoritative /orders check found ${remaining.length} resting order(s)`);
       }
     }
-    console.log(pc.green("running bot stopped, resting orders canceled"));
+    console.log(pc.green(swing ? "Swing runtime stopped; native stops retained." : "running bot stopped, resting orders canceled"));
   } catch (error) {
     if (strict) {
+      if (swing) {
+        throw new Error(
+          `refusing to replace the swing runtime: protected shutdown was not verified (${(error as Error).message.slice(0, 220)}). ` +
+          "Keep the existing runtime and restore reconciliation before redeploying",
+        );
+      }
+      if (prediction) {
+        // Inactivity alone says nothing about an order accepted before a crash.
+        throw new Error(
+          `refusing to replace the prediction runtime: shutdown cancellation was not verified (${(error as Error).message.slice(0, 220)}). ` +
+          "Keep the existing droplet and restore its control API so cancellation and the authoritative order check can complete",
+        );
+      }
       // A previous interrupted redeploy may already have completed the
       // shutdown and left the service inactive. In that case the control API
       // is expected to be unavailable, and there is nothing left to cancel.
@@ -225,12 +369,12 @@ export function quiesce(
   const stopped = deps.exec(target, `systemctl stop cassie@${cfg.id}`);
   if (strict && !stopped.ok) {
     throw new Error(
-      `refusing to replace the market-make droplet: could not stop its runtime cleanly (${(stopped.stderr || stopped.stdout).trim().slice(0, 160)})`,
+      `refusing to replace the ${kind} droplet: could not stop its runtime cleanly (${(stopped.stderr || stopped.stdout).trim().slice(0, 160)})`,
     );
   }
 }
 
-interface PreservedMarketMakeState {
+export interface PreservedRuntimeState {
   /** Local mode-0600 recovery artifact retained even after a successful move. */
   path: string;
   /** gzip-compressed SQLite main/WAL archive encoded for stdin-safe transport. */
@@ -238,67 +382,85 @@ interface PreservedMarketMakeState {
 }
 
 /**
- * Capture the closed SQLite database before deleting a market-maker droplet.
+ * Capture the closed SQLite database before replacing a durable runtime.
  * WAL/SHM are included defensively even though a clean close normally removes
  * them, so a recoverable inventory event cannot be stranded in a sidecar.
  */
-function preserveMarketMakeState(cfg: BotConfig): PreservedMarketMakeState | null {
+export function preserveRuntimeState(
+  cfg: BotConfig,
+  deps: { exec: typeof sshExec; write: typeof atomicWritePrivateFile } = { exec: sshExec, write: atomicWritePrivateFile },
+): PreservedRuntimeState | null {
   if (!cfg.deployment) return null;
   const target: Target = { host: cfg.deployment.host, user: cfg.deployment.user };
   const remotePath = `/var/lib/cassie/${cfg.id}.sqlite`;
-  const missing = "__CASSIE_NO_MARKET_MAKE_STATE__";
-  const captured = sshExec(
+  const missing = "__CASSIE_NO_RUNTIME_STATE__";
+  const sidecars = [`${cfg.id}.sqlite-wal`, `${cfg.id}.sqlite-shm`];
+  if (cfg.strategy.id === "quotient-swing") {
+    sidecars.push(`${cfg.id}.sqlite.swing.sqlite`, `${cfg.id}.sqlite.swing.sqlite-wal`, `${cfg.id}.sqlite.swing.sqlite-shm`);
+  }
+  const captured = deps.exec(
     target,
-    `set -o pipefail && if test -f '${remotePath}'; then files=('${cfg.id}.sqlite'); for sidecar in '${cfg.id}.sqlite-wal' '${cfg.id}.sqlite-shm'; do test -e "/var/lib/cassie/$sidecar" && files+=("$sidecar"); done; tar -C /var/lib/cassie -czf - "\${files[@]}" | base64 -w0; else printf '${missing}'; fi`,
-    // A long-running market maker accumulates a large event log; the archive
+    `set -o pipefail && if test -f '${remotePath}'; then files=('${cfg.id}.sqlite'); for sidecar in ${sidecars.map(name => `'${name}'`).join(" ")}; do test -e "/var/lib/cassie/$sidecar" && files+=("$sidecar"); done; tar -C /var/lib/cassie -czf - "\${files[@]}" | base64 -w0; else printf '${missing}'; fi`,
+    // A long-running bot accumulates a large event log; the archive
     // must not be cut off by the default output cap.
     undefined,
     { maxBufferBytes: 1024 * 1024 * 1024 },
   );
   if (!captured.ok) {
     throw new Error(
-      `refusing to replace the market-make droplet: could not snapshot ${remotePath} (${(captured.stderr || captured.stdout).trim().slice(0, 160)})`,
+      `refusing to replace the droplet: could not snapshot ${remotePath} (${(captured.stderr || captured.stdout).trim().slice(0, 160)})`,
     );
   }
   const payload = captured.stdout.trim();
   if (payload === missing) {
-    console.log(pc.dim("existing droplet has no market-make SQLite state to preserve"));
+    if (isPredictionDeployment(cfg) || cfg.strategy.id === "quotient-swing") {
+      const kind = cfg.strategy.id === "quotient-swing" ? "swing" : "prediction";
+      throw new Error(`refusing to replace the ${kind} droplet: ${remotePath} is missing; its execution checkpoint cannot be preserved`);
+    }
+    console.log(pc.dim("existing droplet has no SQLite state to preserve"));
     return null;
   }
   if (!payload) {
-    throw new Error(`refusing to replace the market-make droplet: ${remotePath} produced an empty snapshot`);
+    throw new Error(`refusing to replace the droplet: ${remotePath} produced an empty snapshot`);
   }
   const path = join(
     dirs.state(),
     "deployment-snapshots",
     `${cfg.id}-${deploymentIdFor(cfg.deployment)}.sqlite.tar.gz.b64`,
   );
-  atomicWritePrivateFile(path, `${payload}\n`);
-  console.log(pc.green(`market-make state preserved at ${path}`));
+  deps.write(path, `${payload}\n`);
+  console.log("Runtime state preserved.");
+  console.log(path);
   return { path, payload };
 }
 
 /** Restore a preserved DB before systemd is allowed to start the new runtime. */
-function restoreMarketMakeState(target: Target, botId: string, snapshot: PreservedMarketMakeState): void {
+export function restoreRuntimeState(
+  target: Target,
+  botId: string,
+  snapshot: PreservedRuntimeState,
+  deps: { exec: typeof sshExecOrThrow } = { exec: sshExecOrThrow },
+): void {
   const remotePath = `/var/lib/cassie/${botId}.sqlite`;
   try {
-    sshExecOrThrow(
+    deps.exec(
       target,
       `umask 077 && base64 --decode | tar -xzf - -C /var/lib/cassie && test -f '${remotePath}' && chown cassie:cassie /var/lib/cassie/${botId}.sqlite* && chmod 0600 /var/lib/cassie/${botId}.sqlite*`,
       snapshot.payload,
     );
   } catch (error) {
     throw new Error(
-      `could not restore market-make state on the new droplet; the recoverable snapshot remains at ${snapshot.path}: ${(error as Error).message}`,
+      `could not restore runtime state on the new droplet; the recoverable snapshot remains at ${snapshot.path}: ${(error as Error).message}`,
     );
   }
-  console.log(pc.green("market-make state restored on the new droplet (local recovery snapshot retained)"));
+  console.log("Runtime state restored.");
+  console.log("Local recovery snapshot retained.");
 }
 
 /** Build an in-memory reachability record for a same-name orphaned droplet. */
 function configAtDroplet(cfg: BotConfig, droplet: Droplet): BotConfig {
   const host = publicIpv4(droplet);
-  if (!host) throw new Error(`refusing to replace market-make droplet ${droplet.id}: it has no public IPv4`);
+  if (!host) throw new Error(`refusing to replace droplet ${droplet.id}: it has no public IPv4`);
   return {
     ...cfg,
     deployment: {
@@ -314,16 +476,15 @@ function configAtDroplet(cfg: BotConfig, droplet: Droplet): BotConfig {
 }
 
 /**
- * A market-maker always snapshots a closed database before redeploying,
- * including a same-droplet runtime replacement. Non-MM deployments retain the
- * existing best-effort behavior.
+ * Market makers, swing and prediction bots preserve their closed database, including
+ * execution-mode changes and same-droplet replacements. Keep the exported name.
  */
 export function marketMakeStateSource(
   cfg: BotConfig,
   reuse: boolean,
   namedExisting: Droplet | null,
 ): BotConfig | null {
-  if (cfg.strategy.id !== "market-make") return null;
+  if (!["market-make", "quotient-swing"].includes(cfg.strategy.id) && !isPredictionDeployment(cfg)) return null;
   if (reuse) return cfg.deployment ? cfg : null;
   if (cfg.deployment) return cfg;
   return namedExisting ? configAtDroplet(cfg, namedExisting) : null;
@@ -345,15 +506,19 @@ function writeFile(target: Target, path: string, content: string, mode: string, 
 
 export async function runDeploy(botId: string, opts: DeployOpts = {}): Promise<void> {
   const cfg = loadBotConfig(botId);
+  if (cfg.strategy.id === "quotient-swing") QuotientSwingConfigSchema.parse(cfg.strategy.config);
   if (cfg.venue === "lighter") {
-    throw new Error("lighter is not a supported venue — use `cassie run`");
+    throw new Error("Lighter deployment is unsupported.");
   }
   if (!cfg.account) throw new Error("bot has no venue account — finish `cassie init` first");
+
+  // Local compilation must succeed before any remote account or droplet mutation.
+  const workspaceArtifact = opts.fromWorkspace ? buildWorkspaceRuntime() : undefined;
 
   // DigitalOcean setup runs first so the account questions land before the
   // passphrase prompt — nobody should unlock a keystore only to hit a login wall.
   const { client } = await ensureDigitalOceanReady();
-  const version = cliVersion();
+  const version = workspaceArtifact?.version ?? cliVersion();
 
   const region =
     opts.region ?? cfg.deployment?.region ?? (cfg.venue === "kalshi" ? KALSHI_DEFAULT_REGION : DEFAULT_REGION);
@@ -371,17 +536,19 @@ export async function runDeploy(botId: string, opts: DeployOpts = {}): Promise<v
   }
 
   const creds = await buildRuntimeCreds(cfg);
-  const resolvedQuotient = await resolveQuotientToken(botId);
-  if (!resolvedQuotient) {
+  const polymarketGaslessAuth = await resolvePolymarketGaslessAuth(cfg);
+  const twoSidedMaker = cfg.strategy.id === "market-make" && Boolean(cfg.strategy.config.two_sided) && !MarketMakeConfigSchema.parse(cfg.strategy.config).two_sided?.adaptive;
+  const resolvedQuotient = twoSidedMaker ? undefined : await resolveQuotientToken(botId);
+  if (!twoSidedMaker && !resolvedQuotient) {
     throw new Error(
       "no Quotient signals key found — set QUOTIENT_API_TOKEN/QUOTIENT_API_KEY in the environment or nearest .local.env, " +
         "store quotient-token in this bot's keystore, or log in with the quotient CLI. Deployment stopped so the droplet " +
         "cannot keep running on an older key by accident.",
     );
   }
-  const quotientToken = resolvedQuotient.token;
+  const quotientToken = resolvedQuotient?.token ?? null;
   // Name the winning source. Never print any part of the key itself.
-  console.log(pc.dim(`signals credential: ${resolvedQuotient.origin}`));
+  if (resolvedQuotient) console.log(pc.dim(`signals credential: ${resolvedQuotient.origin}`));
   // The agent strategy cannot run without its LLM credential; verify locally
   // before any droplet work so a bad key fails in seconds, not mid-deploy.
   let surplusApiKey: string | null = null;
@@ -389,7 +556,7 @@ export async function runDeploy(botId: string, opts: DeployOpts = {}): Promise<v
     const resolvedSurplus = await resolveSurplusApiKey(botId);
     if (!resolvedSurplus) {
       throw new Error(
-        "this bot runs the agent strategy but no SURPLUS_API_KEY was found in the environment, nearest .local.env, or bot keystore. " +
+        `the ${cfg.strategy.id} strategy needs SURPLUS_API_KEY in the environment, nearest .local.env, or bot keystore. ` +
           "Deployment stopped so the droplet cannot come up with a strategy it cannot run.",
       );
     }
@@ -399,28 +566,6 @@ export async function runDeploy(botId: string, opts: DeployOpts = {}): Promise<v
     surplusApiKey = resolvedSurplus.value;
   }
   const telegramToken = process.env.TELEGRAM_BOT_TOKEN ?? (await getKeystoreSecret(botId, KeyRoles.telegramToken));
-  const discoveredBuilder = discoverAresBuilderCode();
-  if (
-    cfg.reporting &&
-    discoveredBuilder &&
-    discoveredBuilder.value.toLowerCase() !== cfg.reporting.builderCode.toLowerCase()
-  ) {
-    throw new Error(
-      `reporting.builderCode differs from ${discoveredBuilder.origin}; run \`cassie reporting ${botId}\` to choose explicitly`,
-    );
-  }
-  const resolvedAres = cfg.reporting ? await resolveAresApiKey(botId) : null;
-  if (cfg.reporting?.post && !resolvedAres) {
-    throw new Error(
-      "Ares posting is enabled for this bot but no ARES_API_KEY was found in the nearest .local.env, environment, or bot keystore",
-    );
-  }
-  let aresUsername: string | undefined;
-  if (resolvedAres) {
-    console.log(pc.dim(`Ares authoring key: ${resolvedAres.origin}`));
-    aresUsername = await verifyAresApiKey(resolvedAres.value, cfg.reporting?.baseUrl);
-    console.log(pc.green(`Ares key verified locally for @${aresUsername}`));
-  }
 
   const name = dropletName(botId);
   const existing = cfg.deployment ? await client.droplet(cfg.deployment.dropletId).catch(() => null) : null;
@@ -428,12 +573,19 @@ export async function runDeploy(botId: string, opts: DeployOpts = {}): Promise<v
   const namedExisting = reuse ? null : await client.dropletByName(name);
 
   console.log("");
+  if (workspaceArtifact) {
+    console.log("Workspace build");
+    console.log(workspaceArtifact.id);
+  }
   if (reuse) {
-    console.log(pc.bold(`redeploying ${botId} to ${name} in ${chosen.name}`));
-    console.log(pc.dim(`${existing!.size_slug}  ${publicIpv4(existing!)}`));
+    console.log(`Redeploy: ${botId}`);
+    console.log(`Region: ${chosen.name}`);
+    console.log(`Size: ${existing!.size_slug}`);
+    console.log(publicIpv4(existing!));
   } else {
-    console.log(pc.bold(`deploying ${botId} to a new droplet in ${chosen.name}`));
-    console.log(pc.dim(`${name}  ${size}  ${DROPLET_IMAGE}`));
+    console.log(`New droplet: ${name}`);
+    console.log(`Region: ${chosen.name}`);
+    console.log(`Size: ${size}`);
     const replacement = existing ?? namedExisting;
     if (replacement) console.log(pc.yellow(`the current droplet in ${replacement.region.slug} will be replaced`));
   }
@@ -443,8 +595,21 @@ export async function runDeploy(botId: string, opts: DeployOpts = {}): Promise<v
   const sshKeyId = await client.upsertSshKey("cassie", publicKey);
 
   const replacementStateSource = marketMakeStateSource(cfg, reuse, namedExisting);
+  if ((isPredictionDeployment(cfg) || cfg.strategy.id === "quotient-swing") && replacementStateSource?.deployment && namedExisting &&
+    replacementStateSource.deployment.dropletId !== namedExisting.id) {
+    const kind = cfg.strategy.id === "quotient-swing" ? "swing" : "adaptive";
+    throw new Error(`refusing ${kind} replacement: the saved deployment and same-name droplet differ; reconcile both hosts before replacing either execution checkpoint`);
+  }
+  let stagedWorkspace: ReturnType<typeof stageWorkspaceRuntime> | undefined;
+  if (workspaceArtifact && reuse) {
+    const stagingHost = publicIpv4(existing!);
+    if (!stagingHost) throw new Error("the existing droplet has no public IPv4 address");
+    // Upload and smoke-test while the previous executable is still running.
+    stagedWorkspace = stageWorkspaceRuntime({ host: stagingHost, user: "root" }, botId, workspaceArtifact);
+  }
+  if (replacementStateSource) await preparePredictionModeChange(replacementStateSource);
   quiesce(replacementStateSource ?? cfg, replacementStateSource !== null);
-  const preservedMarketMakeState = replacementStateSource ? preserveMarketMakeState(replacementStateSource) : null;
+  const preservedState = replacementStateSource ? preserveRuntimeState(replacementStateSource) : null;
 
   let droplet: Droplet;
   if (reuse) {
@@ -466,7 +631,7 @@ export async function runDeploy(botId: string, opts: DeployOpts = {}): Promise<v
       size,
       image: DROPLET_IMAGE,
       sshKeyIds: [sshKeyId],
-      userData: renderCloudInit({ runtimeVersion: version }),
+      userData: renderCloudInit({ runtimeVersion: version, ...(workspaceArtifact ? { tarball: true } : {}) }),
       tags: ["cassie", `cassie-bot-${botId}`],
     });
     droplet = await waitForActive(client, created.id);
@@ -485,13 +650,13 @@ export async function runDeploy(botId: string, opts: DeployOpts = {}): Promise<v
       return true;
     });
     await waitForSsh(target);
-    await waitForProvisioning(target);
+    await waitForProvisioning(target, Boolean(workspaceArtifact));
   } else {
     await waitForSsh(target);
     // A redeploy from a newer CLI has to move the droplet's runtime with it, or
     // the box keeps running whatever the first deploy installed.
-    const installed = sshExec(target, "cassie-runtime --version 2>/dev/null || true").stdout.trim();
-    if (installed !== version) {
+    const installed = workspaceArtifact ? undefined : sshExec(target, "cassie-runtime --version 2>/dev/null || true").stdout.trim();
+    if (!workspaceArtifact && installed !== version) {
       process.stdout.write(pc.dim(`updating the runtime to ${version}… `));
       sshExecOrThrow(target, installRuntimeCommand(version));
       writeFile(target, UNIT_PATH, renderUnit(version), "0644", "root:root");
@@ -499,12 +664,26 @@ export async function runDeploy(botId: string, opts: DeployOpts = {}): Promise<v
       console.log(pc.green("ok"));
     }
   }
-  console.log(pc.green(`droplet ${name} ready at ${host} (${droplet.region.slug})`));
+  console.log(`Droplet ready: ${name}`);
+  console.log(host);
 
-  if (preservedMarketMakeState && !reuse) {
-    restoreMarketMakeState(target, botId, preservedMarketMakeState);
-  } else if (preservedMarketMakeState) {
-    console.log(pc.green("market-make state remains in place on the stopped droplet (local recovery snapshot retained)"));
+  if (preservedState && !reuse) {
+    restoreRuntimeState(target, botId, preservedState);
+  } else if (preservedState) {
+    console.log("Runtime state retained on the droplet.");
+    console.log("Local recovery snapshot retained.");
+  }
+
+  const overrideDir = `/etc/systemd/system/cassie@${botId}.service.d`;
+  const overridePath = `${overrideDir}/workspace-runtime.conf`;
+  if (workspaceArtifact) {
+    stagedWorkspace ??= stageWorkspaceRuntime(target, botId, workspaceArtifact);
+    activateWorkspaceRuntime(target, botId, stagedWorkspace);
+    sshExecOrThrow(target, `install -d -m 0755 '${overrideDir}'`);
+    writeFile(target, overridePath, renderWorkspaceOverride(botId), "0644", "root:root");
+  } else {
+    // Returning to npm removes only this bot's executable override, retaining releases.
+    sshExecOrThrow(target, `rm -f '${overridePath}'`);
   }
 
   // Record the deployment before verifying. A failure below then leaves a
@@ -531,15 +710,14 @@ export async function runDeploy(botId: string, opts: DeployOpts = {}): Promise<v
     // a quoted value but leaves \n as a literal backslash-n, which lands in the
     // middle of the JSON and fails to parse. One line has no newlines to escape.
     ["CASSIE_BOT_CONFIG", JSON.stringify(deployedCfg)],
-    ["CASSIE_BOT_CREDS", JSON.stringify(creds)],
+    ["CASSIE_BOT_CREDS", creds ? JSON.stringify(creds) : null],
+    ["CASSIE_POLYMARKET_GASLESS_AUTH", polymarketGaslessAuth ? JSON.stringify(polymarketGaslessAuth) : null],
     ["CASSIE_DEPLOYMENT_ID", deploymentId],
-    // A market-maker's controller starts only after live checks. Reconciliation
-    // remains review-only until the operator applies the exact preview hash.
-    ["CASSIE_AUTOSTART", deployedCfg.strategy.id === "market-make" ? "0" : "1"],
+    // Durable controllers wait for live checks and restored-state reconciliation.
+    ["CASSIE_AUTOSTART", workspaceArtifact ? "0" : runtimeAutostartBeforePreflights(deployedCfg)],
     ["CASSIE_REQUIRED_REGION", droplet.region.slug],
     ["QUOTIENT_API_TOKEN", quotientToken],
     ["TELEGRAM_BOT_TOKEN", telegramToken],
-    ["ARES_API_KEY", resolvedAres?.value ?? null],
     ["SURPLUS_API_KEY", surplusApiKey],
   ];
   const lines: string[] = [];
@@ -571,11 +749,15 @@ export async function runDeploy(botId: string, opts: DeployOpts = {}): Promise<v
     region?: string;
     requiredRegion?: string;
     version?: string;
+    buildId?: string;
   };
   if (runtime.runtime !== "droplet" || runtime.region !== droplet.region.slug || runtime.requiredRegion !== droplet.region.slug) {
     throw new Error(`refusing to resume: expected a droplet in ${droplet.region.slug}, got ${JSON.stringify(runtime)}`);
   }
-  console.log(pc.green(`runtime verified: droplet in ${runtime.region} (${chosen.name})`));
+  if (workspaceArtifact && runtime.buildId !== workspaceArtifact.id) {
+    throw new Error(`refusing to resume: expected workspace build ${workspaceArtifact.id}, got ${String(runtime.buildId ?? "no build identity")}; the runtime remains idle`);
+  }
+  console.log(`Runtime region verified: ${runtime.region}`);
 
   if (deployedCfg.venue === "polymarket") {
     const geoblock = controlCall(target, botId, "GET", "/geoblock/check") as {
@@ -587,7 +769,7 @@ export async function runDeploy(botId: string, opts: DeployOpts = {}): Promise<v
       const where = [geoblock.country, geoblock.region].filter(Boolean).join("/") || "unknown";
       throw new Error(
         `refusing to resume: Polymarket does not accept orders from ${chosen.name} (${where}). ` +
-          `The bot is installed and idle. Redeploy elsewhere with: cassie deploy ${botId} --region <slug>`,
+          `Trading remains idle.\ncassie deploy ${botId} --region <slug>`,
       );
     }
     console.log(pc.green(`Polymarket order placement permitted from ${geoblock.country ?? chosen.name}`));
@@ -598,14 +780,16 @@ export async function runDeploy(botId: string, opts: DeployOpts = {}): Promise<v
     if (access.blocked) {
       throw new Error(
         `refusing to resume: Kalshi rejected API access from ${chosen.name}${access.detail ? ` (${access.detail})` : ""}. ` +
-          `The bot is installed and idle. Redeploy to a US region with: cassie deploy ${botId} --region ${KALSHI_DEFAULT_REGION}`,
+          `Trading remains idle.\ncassie deploy ${botId} --region ${KALSHI_DEFAULT_REGION}`,
       );
     }
     console.log(pc.green(`Kalshi API access verified from ${chosen.name}`));
   }
 
-  const signals = controlCall(target, botId, "GET", "/signals/check") as { count?: number };
-  console.log(pc.green(`signals credential verified by the droplet (${signals.count ?? 0} published rows)`));
+  const signals = controlCall(target, botId, "GET", "/signals/check") as { count?: number; required?: boolean };
+  console.log(signals.required === false
+    ? "Quotient credential not required."
+    : `Quotient verified: ${signals.count ?? 0} published rows.`);
 
   if (deployedCfg.strategy.id === "agent") {
     const agent = controlCall(target, botId, "GET", "/agent/check") as {
@@ -619,27 +803,16 @@ export async function runDeploy(botId: string, opts: DeployOpts = {}): Promise<v
     console.log(pc.green(`agent strategy verified by the droplet (model ${agent.model ?? "unknown"})`));
   }
 
-  if (deployedCfg.reporting?.post) {
-    const check = controlCall(target, botId, "GET", "/reporting/check") as {
-      enabled?: boolean;
-      username?: string;
-      builderCodeConfigured?: boolean;
-    };
-    if (!check.enabled || !check.builderCodeConfigured || !check.username || (aresUsername && check.username !== aresUsername)) {
-      throw new Error("refusing to resume: the droplet's Ares reporting check did not match local configuration");
-    }
-    console.log(pc.green(`Ares reporting verified by the droplet for @${check.username}`));
-  }
-
-  const startup = startRuntimeAfterPreflights(
+  const startup = await startRuntimeAfterPreflights(
     deployedCfg,
     (method, path, body) => controlCall(target, botId, method, path, body),
   );
   if (deployedCfg.strategy.id === "market-make") {
-    console.log(pc.green("market-make controller loops started in HALTED mode; reconciliation still requires review"));
-    // The first boot was intentionally held until preflights and halted init.
-    // Persist autostart for later host/process restarts; durable activation
-    // state still decides whether those loops may add inventory.
+    console.log("Market-make running; entries halted.");
+  }
+  if (workspaceArtifact || runtimeAutostartBeforePreflights(deployedCfg) === "0") {
+    // First boot waits for preflights and reconciliation. Later process restarts
+    // can start their loops; durable pause/activation state still governs trading.
     const restartLines = lines.map((line) =>
       line.startsWith("CASSIE_AUTOSTART=") ? `CASSIE_AUTOSTART=${JSON.stringify("1")}` : line,
     );
@@ -650,7 +823,8 @@ export async function runDeploy(botId: string, opts: DeployOpts = {}): Promise<v
       "0600",
       "cassie:cassie",
     );
-  } else {
+  }
+  if (!["market-make", "quotient-swing"].includes(deployedCfg.strategy.id)) {
     const tickIntervalMin =
       typeof startup.started.tickIntervalMin === "number"
         ? startup.started.tickIntervalMin
@@ -661,23 +835,42 @@ export async function runDeploy(botId: string, opts: DeployOpts = {}): Promise<v
         (deployedCfg.strategy.config as Record<string, unknown>).signalPollIntervalMin ?? 5,
       ).toFixed(4),
     );
-    console.log(
-      pc.green(`loop started: positions every ${positionCheckSeconds}s; signals every ${signalCheckMinutes}m`),
-    );
+    console.log(`Position checks: ${positionCheckSeconds}s`);
+    console.log(`Signal refresh: ${signalCheckMinutes}m`);
   }
+  if (deployedCfg.venue === "polymarket" && isPredictionDeployment(deployedCfg)) console.log(QUOTIENT_POLYMARKET_FEE_DISCLOSURE);
 
   console.log("");
-  if (deployedCfg.strategy.id === "market-make") {
-    console.log(pc.bold(`${botId} is installed on ${name} in ${chosen.name} and remains HALTED.`));
-    console.log(`  cassie market-make reconcile ${botId}`);
-    console.log(`  cassie market-make reconcile ${botId} --apply`);
-    console.log(`  cassie market-make dry-run ${botId}`);
-    console.log(`  cassie market-make status ${botId}`);
-    console.log(`  cassie market-make resume ${botId}`);
-  } else {
-    console.log(pc.bold(`${botId} is live on ${name} in ${chosen.name}.`));
-    console.log(`  cassie status ${botId}`);
+  if (deployedCfg.strategy.id === "kalshi-commodities") {
+    console.log(`${botId} installed; trading paused.`);
+    console.log(`cassie commodities dry-run ${botId}`);
+    console.log(`cassie commodities resume ${botId}`);
+    return;
   }
-  console.log(`  cassie logs ${botId}`);
-  console.log(`  cassie destroy ${botId}`);
+  if (deployedCfg.strategy.id === "quotient-swing") {
+    if (startup.swingStatus?.halted) {
+      const execution = startup.swingStatus.execution as Record<string, unknown> | undefined;
+      console.log(`${botId} running; entries halted.`);
+      console.log(`Reason: ${String(startup.swingStatus.startupError ?? execution?.haltReason ?? "account or execution checks require attention")}`);
+      console.log("Position protection remains active.");
+    } else {
+      console.log(`${botId} live on ${name}.`);
+    }
+    console.log(`cassie swing status ${botId}`);
+    console.log(`cassie logs ${botId}`);
+    return;
+  }
+  if (deployedCfg.strategy.id === "market-make") {
+    console.log(`${botId} installed; trading halted.`);
+    console.log(`cassie market-make reconcile ${botId}`);
+    console.log(`cassie market-make reconcile ${botId} --apply`);
+    console.log(`cassie market-make dry-run ${botId}`);
+    console.log(`cassie market-make status ${botId}`);
+    console.log(`cassie market-make resume ${botId}`);
+  } else {
+    console.log(`${botId} live on ${name}.`);
+    console.log(`cassie status ${botId}`);
+  }
+  console.log(`cassie logs ${botId}`);
+  console.log(`cassie destroy ${botId}`);
 }

@@ -1,7 +1,7 @@
 // packages/core/test/agent-strategy.test.ts
 // The monitoring-agent strategy against fakes: deterministic quarter-Kelly
 // numbers, the anti-hallucination gate, the min-edge probability clamp,
-// budget/slot caps, the paid-wake cadence gate, the Quotient spend meter, and
+// bankroll/slot caps, the paid-wake cadence gate, Quotient call accounting, and
 // preview's no-persistence guarantee.
 
 import { describe, expect, it } from "vitest";
@@ -242,19 +242,18 @@ describe("AgentStrategy cadence and spend", () => {
     expect(actions).toEqual([{ kind: "redeem", marketRef: "KX-R", reason: "market resolved" }]);
   });
 
-  it("the spend meter stops enrichment at the per-wake cap", async () => {
+  it("runs all required Quotient enrichment on every paid wake", async () => {
     const world = fakeWorld();
     const strategy = new AgentStrategy(world.deps);
     const memory = mapMemory();
     await strategy.tick(ctxOf(memory, {
-      config: { prompt: "p", budgetUsd: 200, maxQuotientSpendUsdPerWake: 0.02 },
+      config: { prompt: "p", budgetUsd: 200 },
     }));
-    // $0.02 cap: mispriced ($0.02) fits; search ($0.01) and lookups do not.
     expect(world.counters.mispriced).toBe(1);
-    expect(world.counters.search).toBe(0);
-    expect(world.counters.lookup).toBe(0);
+    expect(world.counters.search).toBe(1);
+    expect(world.counters.lookup).toBe(1);
     const report = memory.store.get("agent:lastRun") as { quotientSpendUsd: number };
-    expect(report.quotientSpendUsd).toBe(0.02);
+    expect(report.quotientSpendUsd).toBe(0.035);
   });
 });
 

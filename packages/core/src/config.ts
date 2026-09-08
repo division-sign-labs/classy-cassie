@@ -3,6 +3,7 @@
 // File I/O lives in the CLI and the runtime; this module holds no side effects.
 
 import { z } from "zod";
+import { CommodityConfigSchema } from "./strategies/kalshi-commodities.js";
 
 /** Live signals older than three hours are stale unless a bot overrides this. */
 export const DEFAULT_SIGNAL_MAX_AGE_SEC = 3 * 60 * 60;
@@ -76,37 +77,13 @@ export const AlertsConfigSchema = z.object({
 });
 export type AlertsConfig = z.output<typeof AlertsConfigSchema>;
 
-/**
- * Trade reporting: attribute an order to a destination, and report the trade
- * there with a comment. Two independent switches — `builderCode` governs
- * attribution on the order itself, `post` governs whether anything is
- * published about it.
- *
- * `provider` selects the destination's API and its credential:
- *   ares → api.ares.pro, key from ARES_API_KEY (`ares-api-key` in the keystore)
- *
- * `builderCode` is required whenever this block exists, so a bot cannot be
- * configured to report trades it never attributed — the pairing is the
- * commercial term, and the schema is where it's enforced.
- *
- * Distinct from the Polymarket *Builder API key* (GASLESS_AUTH_ROLE), which
- * authenticates gasless relayer ops and has nothing to do with attribution.
- */
-export const ReportingConfigSchema = z.object({
-  /** Destination. One today; the discriminator is here so adding one is additive. */
-  provider: z.literal("ares").default("ares"),
-  /** Attribution code stamped on every order this bot places (0x + 64 hex). */
-  builderCode: z
-    .string()
-    .regex(/^0x[0-9a-fA-F]{64}$/, "reporting.builderCode: expected 0x followed by 64 hex chars"),
-  /** Report each attributed order to the provider. Attribution continues either way. */
-  post: z.boolean().default(true),
-  /** Which order events are reported. */
-  postOn: z.array(z.enum(["entry", "exit"])).default(["entry", "exit"]),
-  /** Provider API base. Defaults per provider when unset. */
-  baseUrl: z.string().default("https://api.ares.pro"),
+/** Directional execution settings; effective only for Polymarket signals bots. */
+export const PredictionExecutionConfigSchema = z.object({
+  mode: z.enum(["adaptive", "legacy"]).default("adaptive"),
+  entryDeadlineSec: z.number().positive().max(3600).default(120),
+  exitPassiveSec: z.number().nonnegative().max(3600).default(60),
 });
-export type ReportingConfig = z.output<typeof ReportingConfigSchema>;
+export type PredictionExecutionConfig = z.output<typeof PredictionExecutionConfigSchema>;
 
 /** Per-venue base URLs so testnets are reachable by config change only (§3). */
 export const VenueUrlsSchema = z.object({
@@ -257,12 +234,21 @@ export const BotConfigSchema = z
         id: z.string().default("flip-flat"),
         config: z.record(z.string(), z.unknown()).default({}),
       })
+      .transform((strategy, ctx): { id: string; config: Record<string, unknown> } => {
+        if (strategy.id !== "kalshi-commodities") return strategy;
+        const parsed = CommodityConfigSchema.safeParse(strategy.config);
+        if (!parsed.success) {
+          for (const issue of parsed.error.issues) ctx.addIssue({ ...issue, path: ["config", ...issue.path] });
+          return z.NEVER;
+        }
+        return { id: strategy.id, config: parsed.data };
+      })
       .prefault({}),
     risk: RiskConfigSchema.prefault({}),
     signals: SignalsConfigSchema.prefault({}),
     alerts: AlertsConfigSchema.prefault({}),
-    /** Opt-in per bot. Polymarket only — other venues carry no builder code. */
-    reporting: ReportingConfigSchema.optional(),
+    /** Directional Polymarket execution overrides; signals bots default to adaptive. */
+    execution: PredictionExecutionConfigSchema.optional(),
     venueUrls: VenueUrlsSchema.prefault({}),
     /** Engine/position reconciliation cadence. Signal fetching has its own cadence. */
     tickIntervalMin: z.number().positive().default(1),
@@ -271,6 +257,12 @@ export const BotConfigSchema = z
     createdAt: z.string().optional(),
   })
   .superRefine((config, ctx) => {
+    if (config.strategy.id === "kalshi-commodities" && (config.venue !== "kalshi" || config.execution?.mode === "legacy")) {
+      ctx.addIssue({ code: "custom", path: ["strategy", "id"], message: "kalshi-commodities requires Kalshi and managed execution" });
+    }
+    if (config.strategy.id === "quotient-swing" && config.venue !== "hyperliquid") {
+      ctx.addIssue({ code: "custom", path: ["strategy", "id"], message: "quotient-swing requires Hyperliquid" });
+    }
     if (config.strategy.id === "market-make" && config.venue !== "polymarket") {
       ctx.addIssue({
         code: "custom",

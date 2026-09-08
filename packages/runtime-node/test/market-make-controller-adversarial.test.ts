@@ -50,9 +50,6 @@ function testConfig(): MarketMakeConfig {
       minimum_free_collateral_usd: 0,
       operational_reserve_usd: 0,
     },
-    quotient_feed: {
-      daily_api_cost_cap_usd: 1,
-    },
     eligibility: {
       entry_stability_seconds: 0,
       min_live_depth_usd_within_2c: 0,
@@ -920,7 +917,7 @@ describe("MarketMakeController adversarial lifecycle safety", () => {
     expect(controller.status().settlementQuiescent).toBe(false);
   });
 
-  it("scales a clean no-order deposit automatically and persists reproducible sizing identity", async () => {
+  it("scales a clean no-order deposit without persisting decision telemetry", async () => {
     const control = fakeVenue(stateStore);
     const controller = build(control);
     await controller.start();
@@ -938,25 +935,7 @@ describe("MarketMakeController adversarial lifecycle safety", () => {
     });
     expect(status.effectiveConfigHash).not.toBe(status.configHash);
 
-    const persisted = (stateStore.exportSnapshot().mm_decisions as Array<{
-      config_hash: string;
-      decision_json: string;
-    }>).map((row) => ({ ...row, decision: JSON.parse(row.decision_json) as {
-      sizing?: Record<string, unknown>;
-    } }));
-    const scaled = persisted.findLast((row) => row.decision.sizing?.effectiveBankrollUsd === 1_000);
-    expect(scaled).toBeDefined();
-    expect(scaled?.config_hash).toBe(controller.configHash);
-    expect(scaled?.decision.sizing).toMatchObject({
-      policyConfigHash: controller.configHash,
-      effectiveConfigHash: status.effectiveConfigHash,
-      bankrollMode: "live",
-      bankrollObserved: true,
-      strategyCapitalUsd: 1_000,
-      effectiveBankrollUsd: 1_000,
-      bankrollReferenceUsd: 500,
-      bankrollScale: 2,
-    });
+    expect(stateStore.exportSnapshot().mm_decisions).toEqual([]);
   });
 
   it("does not raise limits when a BUY position appears before its collateral debit settles", async () => {
@@ -1286,9 +1265,6 @@ describe("MarketMakeController adversarial lifecycle safety", () => {
       capital: {
         minimum_free_collateral_usd: 0,
         operational_reserve_usd: 0,
-      },
-      quotient_feed: {
-        daily_api_cost_cap_usd: 1,
       },
       eligibility: {
         entry_stability_seconds: 0,

@@ -85,13 +85,13 @@ async function reconcile(
   }
   if (mismatched.length > 0) {
     throw new Error(
-      `Splits already has ${mismatched.length} account${mismatched.length === 1 ? "" : "s"} named "${pending.accountName}" with a different signer set. ` +
-        "Resolve or rename it in the Splits dashboard before resuming; Cassie will not mutate or duplicate it.",
+      `Splits has ${mismatched.length} account${mismatched.length === 1 ? "" : "s"} named "${pending.accountName}" with a different signer set. ` +
+        "Resolve or rename it in the Splits dashboard; no account was changed or duplicated.",
     );
   }
   if (verified.length > 1) {
     throw new Error(
-      `Splits has ${verified.length} matching accounts named "${pending.accountName}". Choose the intended account in the dashboard before resuming; Cassie will not guess.`,
+      `Splits has ${verified.length} matching accounts named "${pending.accountName}". Resolve the duplicate names in the dashboard before resuming.`,
     );
   }
   return verified[0] ? toTreasury(org, verified[0], pending) : null;
@@ -159,7 +159,7 @@ async function choosePlan(input: SplitsInitInput, cli: SplitsCli, org: SplitsOrg
   const members = await cli.listMembers();
   if (members.length === 0) throw new Error("the authenticated Splits organization has no members");
   const userId = await input.ui.select(
-    "Which Splits member are you?",
+    "Splits member",
     members.map((member) => ({
       value: member.userId,
       title: member.displayName ?? member.email ?? member.userId,
@@ -173,7 +173,7 @@ async function choosePlan(input: SplitsInitInput, cli: SplitsCli, org: SplitsOrg
     throw new Error(`Splits member ${member.email ?? userId} has no active passkey; add one in the Splits dashboard first`);
   }
   const passkeyId = await input.ui.select(
-    "Which passkey should be able to approve this account?",
+    "Account approval passkey",
     passkeys.map((signer) => ({
       value: signer.id,
       title: signer.name ?? `Passkey ${signer.id.slice(0, 8)}`,
@@ -189,11 +189,11 @@ async function choosePlan(input: SplitsInitInput, cli: SplitsCli, org: SplitsOrg
   let eoa: PendingSplitsAccount["eoa"];
   if (input.venue === "polymarket") {
     input.ui.print(
-      "Polymarket safety gate: the bot EOA will not be a Splits signer because its raw trading key is currently deployed to the runtime.",
+      "Polymarket's deployed trading key cannot be a Splits signer.",
     );
   } else if (
     await input.ui.confirm(
-      "Also make Cassie's local master EOA an equal 1-of-2 signer on this subaccount? Either it or your passkey could move these funds alone. (advanced; Cassie does not sign Splits proposals yet)",
+      "Add the local master wallet as a 1-of-2 signer? Either it or your passkey could move funds alone; Cassie cannot sign Splits proposals yet.",
       false,
     )
   ) {
@@ -252,10 +252,11 @@ async function verifyPendingPlan(
     }
   }
 
-  input.ui.print(`Checkpointed account: ${pending.accountName}`);
-  for (const id of pending.passkeyIds) input.ui.print(`Checkpointed passkey: ${id} (${labels.get(id)})`);
-  input.ui.print(`Checkpointed Cassie EOA: ${pending.eoa ? `${pending.eoa.id} (${pending.eoa.address})` : "none"}`);
-  input.ui.print(`Checkpointed threshold: ${pending.threshold}`);
+  input.ui.print(`Saved account: ${pending.accountName}`);
+  for (const id of pending.passkeyIds) input.ui.print(`Saved passkey: ${id} (${labels.get(id)})`);
+  input.ui.print(`Saved wallet signer: ${pending.eoa?.id ?? "none"}`);
+  if (pending.eoa) input.ui.print(pending.eoa.address);
+  input.ui.print(`Saved threshold: ${pending.threshold}`);
   if (!(await input.ui.confirm("Resume exactly this Splits account plan?", true))) {
     throw new Error("operator declined the checkpointed Splits account plan");
   }
@@ -283,14 +284,14 @@ export async function createSplitsTreasury(input: SplitsInitInput): Promise<Spli
     if (recovered) return recovered;
     if (input.pending.phase === "create-attempted") {
       input.ui.print(
-        `A previous create request for "${input.pending.accountName}" may have committed, but no exact account is currently visible.`,
+        `Creation of "${input.pending.accountName}" is unresolved; no matching account is visible.`,
       );
-      input.ui.print("Check the Splits dashboard before authorizing a retry; delayed visibility could otherwise create a duplicate.");
+      input.ui.print("Check the dashboard before retrying; delayed visibility could cause a duplicate.");
       if (!(await input.ui.confirm("I checked the dashboard; retry this exact create request?", false))) {
         throw new Error("Splits create remains unresolved; no retry was sent");
       }
     } else {
-      input.ui.print(`No committed "${input.pending.accountName}" account was found; resuming before its first create request.`);
+      input.ui.print(`Resuming creation of "${input.pending.accountName}".`);
     }
     return createAndVerify(
       cli,
@@ -307,9 +308,10 @@ export async function createSplitsTreasury(input: SplitsInitInput): Promise<Spli
   const pending = await choosePlan(input, cli, org);
   input.ui.print(`Account: ${pending.accountName}`);
   input.ui.print(`Passkey signer: ${pending.passkeyIds.join(", ")}`);
-  input.ui.print(`Cassie EOA signer: ${pending.eoa ? pending.eoa.address : "none"}`);
+  input.ui.print(`Wallet signer: ${pending.eoa ? "local master wallet" : "none"}`);
+  if (pending.eoa) input.ui.print(pending.eoa.address);
   if (pending.eoa) {
-    input.ui.print("Authority: either the selected passkey or this EOA can move this subaccount's funds alone; neither gains access to sibling accounts.");
+    input.ui.print("Either signer can move this subaccount's funds alone; neither can access sibling accounts.");
   }
   input.ui.print(`Threshold: ${pending.threshold}`);
   if (!(await input.ui.confirm("Create exactly this account?", true))) {
@@ -319,7 +321,8 @@ export async function createSplitsTreasury(input: SplitsInitInput): Promise<Spli
   input.checkpointPending(pending);
   const existing = await reconcile(cli, org, pending);
   if (existing) {
-    input.ui.print(`An exact active account named "${pending.accountName}" already exists at ${existing.accountAddress}.`);
+    input.ui.print(`Matching account found: ${pending.accountName}`);
+    input.ui.print(existing.accountAddress);
     if (await input.ui.confirm("Link that exact existing account instead of creating a duplicate?", true)) return existing;
     throw new Error("Cassie will not create a duplicate same-name Splits account");
   }

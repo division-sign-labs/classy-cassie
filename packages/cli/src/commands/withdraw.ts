@@ -64,7 +64,7 @@ export function createWithdrawHandler(
     // Before the EVM --to validation: a Kalshi withdrawal has no on-chain
     // destination at all, so the right error names the venue, not the flag.
     if (cfg.venue === "kalshi") {
-      throw new Error("Kalshi withdrawals run on kalshi.com (Account → Withdraw, bank transfer); the API does not support them.");
+      throw new Error("Kalshi withdrawals require Account → Withdraw on the website.\nhttps://kalshi.com");
     }
     if (!opts.to || !/^0x[0-9a-fA-F]{40}$/.test(opts.to)) {
       throw new Error("--to <address> required (0x… EVM address)");
@@ -85,17 +85,19 @@ export function createWithdrawHandler(
     if (!adapter.withdraw) {
       throw new Error(
         cfg.venue === "lighter"
-          ? "lighter withdrawals are not wired in the MVP — use the Lighter app with your L1 wallet"
+          ? "Use the Lighter app with your L1 wallet to withdraw."
           : `withdraw is not supported on the ${cfg.venue} venue`,
       );
     }
 
     const destChain = cfg.venue === "hyperliquid" ? "Arbitrum" : cfg.venue === "polymarket" ? "Polygon (pUSD)" : cfg.venue;
-    deps.log(pc.bold("withdrawal:"));
-    deps.log(`  bot:     ${botId} (${cfg.venue})`);
-    deps.log(`  amount:  ${amount === "all" ? "entire balance" : amount}`);
-    deps.log(`  to:      ${opts.to} on ${destChain}`);
-    if (!opts.yes && !(await deps.confirm("send it?", false))) return;
+    deps.log("Withdrawal");
+    deps.log(`Bot: ${botId}`);
+    deps.log(`Venue: ${cfg.venue}`);
+    deps.log(`Amount: ${amount === "all" ? "entire balance" : amount}`);
+    deps.log(`Destination: ${destChain}`);
+    deps.log(opts.to);
+    if (!opts.yes && !(await deps.confirm("Send withdrawal?", false))) return;
 
     // Re-read authoritative status immediately before execution in both
     // interactive and --yes flows. An earlier prompt, adapter setup, or remote
@@ -230,8 +232,9 @@ export function assertFlatHaltedMarketMakeStatus(
 
 function withdrawalRefusal(botId: string, reason: string): Error {
   return new Error(
-    `refusing market-make withdrawal for "${botId}": ${reason}. ` +
-      `Run \`cassie market-make halt ${botId}\`, then reconcile and check status until the current runtime is HALTED, completely flat, and past its late-fill settlement window`,
+    `refusing market-make withdrawal for "${botId}": ${reason}.\n` +
+      `cassie market-make halt ${botId}\n` +
+      "Reconcile until HALTED, completely flat, and past the late-fill settlement window.",
   );
 }
 

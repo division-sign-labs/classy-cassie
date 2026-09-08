@@ -1,0 +1,16 @@
+{
+  "source": "/Users/jordanolmstead/dev/quotient-analytics-pipelines/research/market_maker_utility/2026-08-31/alltime_prices_pm/forecast_marks.parquet",
+  "saved_forecast_rows": 9093,
+  "matched_graph_rows": 9093,
+  "publication_artifact_count": 4468,
+  "saved_q_differs_from_publication_artifact_count": 175,
+  "saved_q_vs_publication_max_abs_pp": 30.10400000000001,
+  "before_first_coherence_available_count": 207,
+  "saved_q_differs_from_before_first_coherence_count": 147,
+  "saved_q_differs_from_current_q_count": 13,
+  "caveats": [
+    "A saved Q differing from initial publication establishes revision exposure, not the exact repaired Q first served at every timestamp.",
+    "Latest coherenceAt is overwritten on later repair, so it cannot date the revision used by the Aug31 saved snapshot.",
+    "Atomic publication payload recovers initial committed Q; no full historical coherent-Q revision stream is available here."
+  ]
+}

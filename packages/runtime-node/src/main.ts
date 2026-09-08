@@ -4,10 +4,10 @@
 // EnvironmentFile=/etc/cassie/<botId>.env and stops it with SIGTERM, which
 // cancels resting orders before exit.
 
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { parseBotConfig, consoleLogger, type RuntimeCreds } from "@quotient-forecasting/cassie-core";
+import { parseBotConfig, parsePolymarketGaslessAuth, consoleLogger, type RuntimeCreds } from "@quotient-forecasting/cassie-core";
 import { BotService } from "./service.js";
 import { serveControl } from "./control.js";
 import { requireRegion } from "./region.js";
@@ -23,6 +23,14 @@ function version(): string {
 }
 
 const VERSION = version();
+
+function installedBuildId(): string | undefined {
+  const path = join(dirname(fileURLToPath(import.meta.url)), "../workspace-build.json");
+  if (!existsSync(path)) return undefined;
+  const value = JSON.parse(readFileSync(path, "utf8")) as { id?: unknown };
+  if (typeof value.id !== "string" || !/^[a-f0-9]{64}$/.test(value.id)) throw new Error("invalid installed workspace build identity");
+  return value.id;
+}
 
 function required(name: string): string {
   const value = process.env[name];
@@ -53,15 +61,17 @@ async function main(): Promise<void> {
     config,
     account: config.account,
     creds,
+    polymarketGaslessAuth: process.env.CASSIE_POLYMARKET_GASLESS_AUTH
+      ? parsePolymarketGaslessAuth(process.env.CASSIE_POLYMARKET_GASLESS_AUTH) : undefined,
     statePath: process.env.CASSIE_STATE_PATH ?? `/var/lib/cassie/${botId}.sqlite`,
     runtime: "droplet",
     requiredRegion,
     region,
     deploymentId: process.env.CASSIE_DEPLOYMENT_ID,
     version: VERSION,
+    buildId: installedBuildId(),
     quotientToken: required("QUOTIENT_API_TOKEN"),
     telegramToken: process.env.TELEGRAM_BOT_TOKEN,
-    reportingApiKey: process.env.ARES_API_KEY,
     // Required only when the bot runs the agent strategy; buildStrategy throws
     // a targeted error there, so a plain signals bot keeps booting without it.
     surplusApiKey: config.strategy.id === "agent" ? required("SURPLUS_API_KEY") : process.env.SURPLUS_API_KEY,
@@ -70,8 +80,8 @@ async function main(): Promise<void> {
 
   const server = serveControl(service, process.env.CASSIE_CONTROL_SOCKET ?? `/run/cassie/${botId}.sock`);
 
-  // The deploy calls POST /init once it has verified region, geoblock, signals,
-  // and reporting. A restart after that should come back trading on its own.
+  // Deployment holds startup until region, venue and signal checks pass.
+  // Durable pause/activation state still governs later process restarts.
   if (process.env.CASSIE_AUTOSTART !== "0") {
     await service.start().catch((error) => log.error(`autostart failed: ${(error as Error).message}`));
   }
@@ -81,12 +91,20 @@ async function main(): Promise<void> {
     if (terminating) return;
     terminating = true;
     log.info(`${signal} received`);
-    await service.shutdown(true).catch((error) => log.error(`shutdown failed: ${(error as Error).message}`));
+    try { await service.shutdown(true); }
+    catch (error) {
+      log.error(`shutdown failed: ${(error as Error).message}`);
+      if (config.strategy.id === "quotient-swing") {
+        terminating = false;
+        log.warn("Supervision is still running; unresolved orders must be reconciled before shutdown.");
+        return;
+      }
+    }
     server.close(() => process.exit(0));
     setTimeout(() => process.exit(1), 30_000).unref();
   };
-  process.once("SIGTERM", () => void terminate("SIGTERM"));
-  process.once("SIGINT", () => void terminate("SIGINT"));
+  process.on("SIGTERM", () => void terminate("SIGTERM"));
+  process.on("SIGINT", () => void terminate("SIGINT"));
 }
 
 main().catch((error) => {

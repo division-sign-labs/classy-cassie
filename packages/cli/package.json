@@ -1,6 +1,6 @@
 {
   "name": "@quotient-forecasting/cassie",
-  "version": "0.4.11",
+  "version": "0.4.12",
   "type": "module",
   "license": "Apache-2.0",
   "description": "Self-hosted, non-custodial trading bots for prediction markets and perps venues",
@@ -56,6 +56,7 @@
     "@quotient-forecasting/cassie-skill": "workspace:*",
     "@quotient-forecasting/strategy-agent": "workspace:*",
     "@quotient-forecasting/strategy-market-make": "workspace:*",
+    "@quotient-forecasting/strategy-quotient-swing": "workspace:*",
     "commander": "15.0.0",
     "picocolors": "1.1.1",
     "prompts": "2.4.2"

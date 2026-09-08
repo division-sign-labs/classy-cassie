@@ -1,0 +1,33 @@
+{
+  "series": {
+    "additional_prohibitions": [
+      "Persons who are employed by any of the Source Agencies are not permitted to trade on the Contract.",
+      "Persons who hold any material, non-public information on the Underlying are not permitted to trade on the Contract."
+    ],
+    "category": "Financials",
+    "contract_terms_url": "https://assets.kalshi.com/contract_terms/GPUAVGA.pdf",
+    "contract_url": "https://assets.kalshi.com/regulatory/product-certifications/GPUAVGA.pdf",
+    "exchange_index": 0,
+    "fee_multiplier": 1,
+    "fee_type": "quadratic_with_maker_fees",
+    "frequency": "one_off",
+    "last_updated_ts": "2026-09-03T18:35:49.924977Z",
+    "product_metadata": {
+      "scope": "Compute"
+    },
+    "settlement_sources": [
+      {
+        "name": "Ornn",
+        "url": "https://dashboard.ornnai.com/compute"
+      }
+    ],
+    "tags": [
+      "Industries",
+      "AI",
+      "Compute",
+      "Tech"
+    ],
+    "ticker": "KXH200MS",
+    "title": "H200 Monthly"
+  }
+}
