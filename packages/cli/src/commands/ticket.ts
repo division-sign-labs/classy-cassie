@@ -54,9 +54,9 @@ export function loadMappings(explicitPath?: string): Mappings {
   return DEFAULT_MAPPINGS;
 }
 
-/** The six-question flow (§13). Question wording is quoted verbatim by the skill. */
+/** Thesis intake (§13); field meanings match the operator skill. */
 export async function elicitTicket(defaults: Partial<ThesisTicket> = {}): Promise<ThesisTicket> {
-  console.log(pc.bold("Thesis intake — six questions; the sizing module does the arithmetic.\n"));
+  console.log("Thesis");
   const venue = (await ask("1a. Venue (hyperliquid / polymarket / kalshi)", { default: defaults.venue ?? "hyperliquid" }))
     .trim()
     .toLowerCase() as ThesisTicket["venue"];
@@ -75,10 +75,9 @@ export async function elicitTicket(defaults: Partial<ThesisTicket> = {}): Promis
   const invalidationPx = invRaw.toLowerCase() === "none" || invRaw === "" ? undefined : Number(invRaw);
   const riskBudgetPct = Number(await ask("6. Risk budget, % of equity (soft cap 2)", { default: "1" }));
   const notes = (await ask("Notes (optional)", { default: "" })).trim() || undefined;
-  // Public when the bot publishes to a feed — asked separately from `notes`
-  // so private scratch and the copy-trader-facing rationale never blur.
+  // Keep the operator's trade rationale separate from optional ticket notes.
   const reasoningSummary =
-    (await ask("Reasoning summary (optional; the caption if this bot posts to a feed)", { default: "" })).trim() ||
+    (await ask("Reasoning summary (optional; included in the order alert)", { default: "" })).trim() ||
     undefined;
 
   return {
@@ -115,7 +114,7 @@ export async function snapshotFor(adapter: VenueAdapter, cfg: BotConfig, ticket:
 }
 
 export function printFilledTicket(t: FilledTicket): void {
-  console.log(pc.bold(`\n─── trade: ${t.ticket.side} ${t.ticket.instrument} on ${t.ticket.venue} ───`));
+  console.log(pc.bold(`\nTrade: ${t.ticket.side} ${t.ticket.instrument} on ${t.ticket.venue}`));
   for (const line of t.lines) {
     const mark = line.warning ? pc.yellow("⚠ ") : "  ";
     console.log(`${mark}${pc.bold(line.field.padEnd(24))} ${line.value}`);
@@ -165,9 +164,9 @@ export async function approvalLoop(
     }
     // approve
     if (filled.violations.length > 0) {
-      console.log(pc.red("\nThis trade violates guardrails:"));
+      console.log(pc.red("\nGuardrail violations:"));
       for (const v of filled.violations) console.log(pc.red(`  ✗ ${v}`));
-      const second = await confirm(pc.red("Second confirm: place anyway, overriding the guardrails above?"), false);
+      const second = await confirm("Place this trade and override these guardrails?", false);
       if (!second) continue;
     }
     return filled;
@@ -177,7 +176,9 @@ export async function approvalLoop(
 /** Save a thesis for later placement with `cassie trade <botId> --from-thesis <file>`. */
 export function saveThesis(ticket: ThesisTicket, out: string, mappings?: string): void {
   writeFileSync(out, JSON.stringify({ ...ticket, mappings }, null, 2) + "\n");
-  console.log(pc.green(`wrote ${out} — place it later with: cassie trade <botId> --from-thesis ${out}`));
+  console.log("Thesis saved.");
+  console.log(out);
+  console.log(`cassie trade BOT_ID --from-thesis '${out.replaceAll("'", "'\\''")}'`);
 }
 
 /**
@@ -195,7 +196,7 @@ export async function predictionSizeFor(
   let prob: number;
   if (signalProb !== undefined && signalProb > 0 && signalProb < 1) {
     prob = signalProb;
-    console.log(pc.dim(`model probability from the live Quotient signal: ${prob.toFixed(4)}`));
+    console.log(`Quotient probability: ${prob.toFixed(4)}`);
   } else {
     const probRaw = await ask("Model probability for the signaled side (0-1)", { default: "0.6" });
     prob = Number(probRaw);

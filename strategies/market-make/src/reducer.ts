@@ -365,7 +365,11 @@ function applyEvent(state: MarketMakeState, event: NormalizedMarketMakeEvent, co
     case "shock": {
       const market = marketState(state, event.marketKey);
       market.shockPausedUntil = Math.max(market.shockPausedUntil, event.ts + config.market_shock.entry_freeze_seconds * 1_000);
-      if (event.adverse) market.requireQAfterShockAsOf = market.signal?.qAsOf ?? event.ts;
+      if (event.adverse && config.market_shock.require_new_q_version_after_adverse_shock) {
+        market.requireQAfterShockAsOf = market.signal?.qAsOf ?? event.ts;
+      } else if (!config.market_shock.require_new_q_version_after_adverse_shock) {
+        market.requireQAfterShockAsOf = undefined;
+      }
       const windowStart = event.ts - config.market_shock.correlated_shock_window_seconds * 1_000;
       state.recentShocks = state.recentShocks.filter((shock) => shock.ts >= windowStart && shock.marketKey !== event.marketKey);
       state.recentShocks.push({ marketKey: event.marketKey, ts: event.ts });
@@ -644,7 +648,9 @@ function entryActions(state: MarketMakeState, now: number, eventType: Normalized
       now,
       globalEntryPausedUntil: state.globalEntryPausedUntil,
       marketShockPausedUntil: market.shockPausedUntil,
-      requireQAfterShockAsOf: market.requireQAfterShockAsOf,
+      requireQAfterShockAsOf: config.market_shock.require_new_q_version_after_adverse_shock
+        ? market.requireQAfterShockAsOf
+        : undefined,
       lossLatched: state.lossLatched,
       halted: state.halted,
       capReasons: pendingEntry ? [] : capReasons,

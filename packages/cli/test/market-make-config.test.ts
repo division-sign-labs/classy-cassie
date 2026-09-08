@@ -54,6 +54,18 @@ describe("market-make configuration", () => {
       maxOrderDepth2cPct: "0.9",
       maxMarketDepth1cPct: "5",
       maxMarketDepth2cPct: "1.8",
+      maxForecastAgeHours: "24",
+      staleForecastExitHours: "36",
+      minVolumeUsd: "0",
+      sourceMinDepth2cUsd: "50",
+      entryStabilitySeconds: "0",
+      maxMoveAwayFromQPp: "100",
+      allowDeadVolatility: true,
+      allowExtremeVolatility: true,
+      allowCurrentQAfterShock: true,
+      correlatedShocksForGlobalPause: "1000",
+      marketDataStaleSeconds: "180",
+      venueQuoteMaxAgeSeconds: "180",
     });
 
     expect(resolved.capital.initial_bankroll_usd).toBe(600);
@@ -80,6 +92,19 @@ describe("market-make configuration", () => {
     expect(resolved.cassie_overrides.liquidity.max_order_fraction_of_exit_bid_depth_2c).toBeCloseTo(0.009);
     expect(resolved.cassie_overrides.liquidity.max_market_fraction_of_exit_bid_depth_1c).toBe(0.05);
     expect(resolved.cassie_overrides.liquidity.max_market_fraction_of_exit_bid_depth_2c).toBeCloseTo(0.018);
+    expect(resolved.quotient_feed.new_entry_max_forecast_age_seconds).toBe(24 * 3600);
+    expect(resolved.quotient_feed.no_add_forecast_age_seconds).toBe(24 * 3600);
+    expect(resolved.quotient_feed.stale_forecast_exit_seconds).toBe(36 * 3600);
+    expect(resolved.eligibility.min_volume_24h_usd).toBe(0);
+    expect(resolved.eligibility.min_live_depth_usd_within_2c).toBe(50);
+    expect(resolved.eligibility.entry_stability_seconds).toBe(0);
+    expect(resolved.eligibility.max_move_away_from_q_during_entry_stability_pp).toBe(100);
+    expect(resolved.volatility.regimes.dead).toMatchObject({ new_entry_enabled: true, size_multiplier: 0.5 });
+    expect(resolved.volatility.regimes.extreme).toMatchObject({ new_entry_enabled: true, size_multiplier: 0.25 });
+    expect(resolved.market_shock.require_new_q_version_after_adverse_shock).toBe(false);
+    expect(resolved.market_shock.correlated_shocks_for_global_pause).toBe(1000);
+    expect(resolved.market_data.market_data_stale_seconds).toBe(180);
+    expect(resolved.market_data.venue_quote_max_age_seconds).toBe(180);
   });
 
   it("scales a $10k portfolio coherently while retaining absolute depth sanity floors", () => {
@@ -173,12 +198,21 @@ describe("market-make configuration", () => {
     expect(() => resolveMarketMakeConfig(MARKET_MAKE_PRESET, { maxMarkets: "2.5" })).toThrow(
       /whole number/,
     );
+    expect(() => resolveMarketMakeConfig(MARKET_MAKE_PRESET, { minVolumeUsd: "-1" })).toThrow(
+      /nonnegative number/,
+    );
     expect(() => resolveMarketMakeConfig(MARKET_MAKE_PRESET, { minDepth1cUsd: "3000" })).toThrow(
       /1c minimum depth cannot exceed 2c minimum depth/,
     );
     expect(() => resolveMarketMakeConfig(MARKET_MAKE_PRESET, { maxBookSpreadPp: "31" })).toThrow(
       /operational spread exceeds hard sanity spread/,
     );
+    expect(() =>
+      resolveMarketMakeConfig(MARKET_MAKE_PRESET, {
+        maxForecastAgeHours: "24",
+        staleForecastExitHours: "12",
+      }),
+    ).toThrow(/forecast ages cannot exceed/);
     expect(() =>
       resolveMarketMakeConfig(MARKET_MAKE_PRESET, {
         maxHoldHours: "36",

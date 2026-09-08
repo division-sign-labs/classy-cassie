@@ -4,20 +4,19 @@
 
 import type { RuntimeCreds, VenueAdapter, VenueId } from "../types.js";
 import type { VenueUrls } from "../config.js";
+import type { PolymarketGaslessAuth } from "../polymarket/gasless-auth.js";
 import { FixtureVenue, type BooksFixture } from "./fixture.js";
 
 export interface AdapterOpts {
   urls: VenueUrls;
   /** Runtime-eligible creds; read-only flows (setup/wizard) may omit them. */
   creds?: RuntimeCreds;
+  /** Operator-authorized gasless service credential, separate from trading keys. */
+  polymarketGaslessAuth?: PolymarketGaslessAuth;
   /** Fixture venue only: books fixture JSON (string or parsed). */
   fixtureBooks?: string | BooksFixture;
-  /**
-   * Bot-wide builder attribution code (Polymarket, from `ares.builderCode`).
-   * Applied to every order the adapter places, keeping attribution out of
-   * reach of strategy code.
-   */
-  builderCode?: string;
+  /** Selected HIP-3 DEX for explicitly scoped strategy accounts. */
+  perpDex?: string;
 }
 
 export type AdapterFactory = (opts: AdapterOpts) => VenueAdapter;

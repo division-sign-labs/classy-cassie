@@ -54,6 +54,8 @@ export class PollingSignalSource implements SignalSource {
     );
   }
 
+  refreshedAt(): number | undefined { return this.#cached?.refreshedAt; }
+
   /**
    * Refresh held-market Q forecasts on the slower signal cadence while the
    * engine continues to re-price positions every tick.

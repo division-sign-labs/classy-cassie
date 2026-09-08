@@ -79,6 +79,62 @@ Ctrl-C cancels resting orders before the process exits.
 | `cassie alerts test <bot>` | Send a Telegram ping. |
 | `cassie venue status` | Adapters and when each was last verified. |
 
+## Execution
+
+From a source checkout, `pnpm cassie <command>` rebuilds changed code and runs the
+workspace CLI. Install dependencies once with `pnpm install`; code edits need no
+global installation or version bump. A stopped local bot can be started again with
+`pnpm cassie run <local-bot>`, using its existing configuration and database.
+
+Update a deployed bot directly from this checkout:
+
+```sh
+pnpm cassie deploy ares-trader --from-workspace
+```
+
+The checkout is resolved from the current directory, then from the CLI's own
+location. A `cassie` alias pointing to `node /path/to/classy-cassie/scripts/cassie.mjs`
+works from any directory. An npm-installed CLI needs to run from the checkout.
+
+The update uploads built code and reuses dependencies installed on the droplet.
+The first workspace deployment, or a changed lockfile, package manifest or target
+Node ABI, installs a fresh dependency cache. It builds native dependencies on the
+droplet, stages and checks the new release, then stops the old runtime and preserves
+its database before switching code. Status shows the deployed build hash. Previous
+code remains available; the database stays current through updates.
+
+Use `--from-workspace` for subsequent source updates. A deploy without that flag
+selects the published npm runtime. Local runs require a separate bot configuration
+without a droplet assignment, so the same bot cannot start on both machines.
+
+Polymarket signals bots use adaptive post-only limits by default. Entries have a
+120-second deadline; unfilled remainders are canceled while partial fills are kept.
+Normal exits spend up to 60 seconds posting passively, then use one bounded fill-and-kill
+attempt. Urgent exits use bounded immediate execution.
+
+Status shows confirmed-fill maker share, fees and gross price improvement against
+arrival quotes. Post-only orders guarantee maker execution if filled; urgent fill-and-kill
+exits can pay [Polymarket taker fees](https://docs.polymarket.com/trading/fees).
+
+```sh
+cassie strategy bot-1 --execution adaptive
+cassie strategy bot-1 --entry-deadline-seconds 120 --exit-passive-seconds 60
+cassie strategy bot-1 --execution legacy
+```
+
+These settings apply only to Polymarket `signals` and `flip-flat` bots. Other venues and
+strategies keep their existing execution. The strategy command displays the effective
+mode and durations. Restart or redeploy after changing settings; `legacy` restores
+crossing limits. Before retrying an unfinished trade, inspect status, logs and orders.
+
+Manual and thesis-driven orders require `legacy` execution on these bots. Finish or
+cancel adaptive orders and reconcile their fills, then save `--execution legacy` and
+restart or redeploy before placing a manual order.
+
+Redeployment preserves the execution database in both modes. A switch to `legacy`
+pauses the old adaptive runtime and waits for its orders and settlements to reconcile.
+An unreachable host or unresolved submission stops deployment with the old state intact.
+
 ## Market make
 
 `market-make` is Polymarket-only and deterministic. It is not a symmetric, always-on
@@ -196,8 +252,8 @@ bot-1 is live on cassie-bot-1 in Bangalore 1.
 ```
 
 Non-market-make bots start trading only after the droplet proves its region to
-DigitalOcean's metadata service, the venue accepts orders from there, and the signal and
-reporting credentials check out. Market-make completes those checks and starts `HALTED`,
+DigitalOcean's metadata service, the venue accepts orders from there, and the signal
+credential checks out. Market-make completes those checks and starts `HALTED`,
 as described above. A failure at any step stops the deploy with the reason and leaves the
 bot idle.
 
@@ -233,16 +289,18 @@ the passphrase is not part of the command. `cassie passphrase change <bot>` prom
 new value twice, re-encrypts the complete local keystore in one atomic replacement, and
 updates an existing native-store entry. It does not change or restart a deployed bot.
 `CASSIE_PASSPHRASE` in the nearest `.local.env` or exported environment is the explicit
-automation override; update or remove it after a passphrase change. There is no
-`ARES_PASSPHRASE`; Ares reporting uses separate `ARES_API_KEY` and `ARES_BUILDER_CODE`
-values. Cassie does not add exports to shell startup files.
+automation override; update or remove it after a passphrase change. Cassie does not add
+exports to shell startup files.
 
 A deployed bot needs trade-scoped credentials, so `cassie deploy` copies only that runtime
 set to the droplet over SSH and writes it to `/etc/cassie/<bot>.env`, readable only by the
 service user. Polymarket is the explicit exception to the usual master-key rule: its pinned
 client requires the raw venue signer plus L2 CLOB credentials at runtime. That is why
 `cassie` refuses to let a Polymarket signer also hold Splits treasury authority. Hyperliquid
-master/L1 keys and Polymarket Builder/Relayer credentials stay on your machine.
+master/L1 keys stay on your machine.
+Directional Polymarket bots also receive the saved default Builder/Relayer service
+credential for automatic redemption of resolved winners and losers. It travels over
+SSH stdin into the private runtime environment, separately from trading credentials.
 
 Nothing secret goes into droplet user-data, into a command line, or into a log.
 

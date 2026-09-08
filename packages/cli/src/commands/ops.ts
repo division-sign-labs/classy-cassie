@@ -65,7 +65,8 @@ function portfolioSummary(values: PortfolioOutputBreakdown): string {
 export async function showPortfolio(botId?: string): Promise<void> {
   const ids = botId ? [botId] : listBotIds();
   if (ids.length === 0) {
-    console.log("no bots yet. Run cassie init.");
+    console.log("No bots configured.");
+    console.log("cassie init");
     return;
   }
   const portfolios: BotPortfolio[] = [];
@@ -85,11 +86,21 @@ export async function showPortfolio(botId?: string): Promise<void> {
     }
   }
   for (const p of portfolios) {
-    console.log(pc.bold(`\n${p.botId} (${p.venue})  ${portfolioSummary(portfolioOutputBreakdown(p))}`));
+    if (p.perpScope) {
+      console.log(pc.bold(`\n${p.botId} (${p.venue})`));
+      console.log(`Hyperliquid funding balance ${money(p.perpScope.fundingBalance)}`);
+      console.log(`Funding available ${money(p.perpScope.fundingAvailable)}`);
+      console.log(`${p.perpScope.dex} trading NAV ${money(p.equity)}`);
+      console.log(`Exposure ${money(sumFinite(p.positions.map(position => position.value)))}`);
+      console.log(`uPnL ${money(p.unrealizedPnl)}`);
+      console.log(`Account mode ${p.perpScope.accountMode}`);
+    } else {
+      console.log(pc.bold(`\n${p.botId} (${p.venue})  ${portfolioSummary(portfolioOutputBreakdown(p))}`));
+    }
     if (p.positions.length > 0) {
       console.log(
         renderTable(
-          ["market", "side", "size", "avg", "mark", "value", "uPnL"],
+          ["market", "side", "size", "avg", "mark", p.perpScope ? "notional" : "value", "uPnL"],
           p.positions.map((x) => [
             x.label ?? shortRef(x.marketRef),
             x.side,
@@ -114,7 +125,9 @@ export async function showPortfolio(botId?: string): Promise<void> {
     if (p.positions.length === 0 && p.openOrders.length === 0) console.log(pc.dim("  flat, no orders"));
   }
   if (portfolios.length > 1) {
-    console.log(pc.bold(`\nTOTAL  ${portfolioSummary(aggregatePortfolioOutput(portfolios))}`));
+    console.log(pc.bold(portfolios.some(p => p.perpScope)
+      ? `\nTOTAL  trading equity ${money(sumFinite(portfolios.map(p => p.equity)))}  uPnL ${money(sumFinite(portfolios.map(p => p.unrealizedPnl)))}`
+      : `\nTOTAL  ${portfolioSummary(aggregatePortfolioOutput(portfolios))}`));
   }
 }
 
@@ -156,10 +169,13 @@ export function assertGenericOrderMutationAllowed(
   cfg: ReturnType<typeof loadBotConfig>,
   opts: { cancel?: string; cancelAll?: boolean },
 ): void {
+  if (cfg.strategy.id === "quotient-swing" && (opts.cancel !== undefined || opts.cancelAll === true)) {
+    throw new Error(`Generic cancellation is disabled for swing bots. Halt entries without removing native stops:\ncassie swing halt ${cfg.id}`);
+  }
   if (cfg.strategy.id === "market-make" && (opts.cancel !== undefined || opts.cancelAll === true)) {
     throw new Error(
-      `generic order cancellation is disabled for market-make bot "${cfg.id}" because it bypasses durable reservations; ` +
-        `use \`cassie market-make halt ${cfg.id}\` or \`cassie market-make reconcile ${cfg.id}\``,
+      `Generic order cancellation bypasses market-make reservations. Use its controller:\n` +
+        `cassie market-make halt ${cfg.id}\ncassie market-make reconcile ${cfg.id}`,
     );
   }
 }
@@ -182,7 +198,7 @@ export async function alertsTest(botId: string): Promise<void> {
   const chatId = cfg.alerts.telegram?.chatId;
   const token = process.env.TELEGRAM_BOT_TOKEN ?? (await getKeystoreSecret(botId, KeyRoles.telegramToken));
   if (!chatId || !token) {
-    console.error(pc.red("telegram is not configured — rerun cassie init, or set the token and chat id"));
+    console.error(pc.red("Telegram needs a token and chat ID. Configure alerts in setup:\ncassie init"));
     process.exit(1);
   }
   await new TelegramAlerter(token, chatId).send({ kind: "test", botId, message: "test ping from `cassie alerts test`" });
@@ -201,5 +217,5 @@ export function venueStatus(): void {
     }
   }
   console.log(renderTable(["venue", "verifiedAgainst", "notes"], rows));
-  console.log(pc.dim("\nVenue APIs drift: re-verify before relying on a stale date."));
+  console.log(pc.dim("\nRe-verify adapters with stale verification dates."));
 }

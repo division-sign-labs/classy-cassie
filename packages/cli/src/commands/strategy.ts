@@ -1,9 +1,8 @@
 // packages/cli/src/commands/strategy.ts
-// The one strategy is `signals`: follow Quotient signals, hold until the
-// market prices in the forecast. The wizard offers the recommended settings in
-// one keystroke; this command is the manual flow for tuning them.
+// Configure the signals strategy; other strategies use their own command groups.
 
 import pc from "picocolors";
+import { PredictionExecutionConfigSchema, type PredictionExecutionConfig } from "@quotient-forecasting/cassie-core";
 import { ask, confirm } from "../context.js";
 import { loadBotConfig, saveBotConfig } from "../paths.js";
 
@@ -174,6 +173,9 @@ export async function elicitStrategyConfig(
 }
 
 export interface StrategyOptions {
+  execution?: string;
+  entryDeadlineSeconds?: string;
+  exitPassiveSeconds?: string;
   top?: string;
   allocationMode?: string;
   kellyFraction?: string;
@@ -224,21 +226,54 @@ export const SCENARIO_EXIT_DEFAULTS = {
 /** `cassie strategy <botId>`: view and tune the bot's strategy and signal guardrails. */
 export async function runStrategy(botId: string, opts: StrategyOptions = {}): Promise<void> {
   const cfg = loadBotConfig(botId);
+  const executionOptions = ["execution", "entryDeadlineSeconds", "exitPassiveSeconds"] as const;
+  const hasExecutionOptions = executionOptions.some((name) => opts[name] !== undefined);
+  if (hasExecutionOptions && (cfg.venue !== "polymarket" || !["signals", "flip-flat"].includes(cfg.strategy.id))) {
+    throw new Error("execution settings are supported only for Polymarket signals bots");
+  }
   if (cfg.strategy.id === "agent") {
     throw new Error(
-      `bot "${botId}" runs the agent strategy — tune it with \`cassie agent prompt|persona|status ${botId}\`, or re-run \`cassie init\` to change strategies`,
+      `${botId} uses the agent strategy.\ncassie agent prompt ${botId}\ncassie agent persona ${botId}\ncassie agent status ${botId}`,
     );
   }
   if (cfg.strategy.id === "market-make") {
     throw new Error(
-      `bot "${botId}" runs the market-make strategy — tune it with \`cassie market-make configure ${botId}\``,
+      `${botId} uses the market-make strategy.\ncassie market-make configure ${botId}`,
     );
+  }
+  if (cfg.strategy.id === "quotient-swing") {
+    throw new Error(`${botId} uses quotient-swing.\ncassie swing configure ${botId}\ncassie swing status ${botId}`);
+  }
+  if (cfg.strategy.id === "kalshi-commodities") {
+    throw new Error(`${botId} uses kalshi-commodities.\ncassie commodities configure ${botId}\ncassie commodities status ${botId}`);
   }
   if (cfg.strategy.id !== "signals" && cfg.strategy.id !== "flip-flat") {
     throw new Error(`bot "${botId}" runs the unsupported "${cfg.strategy.id}" strategy`);
   }
   const directUpdate = Object.values(opts).some((value) => value !== undefined);
   if (directUpdate) {
+    let execution = cfg.execution;
+    if (hasExecutionOptions) {
+      execution = PredictionExecutionConfigSchema.parse({
+        ...cfg.execution,
+        ...(opts.execution === undefined ? {} : { mode: opts.execution.trim().toLowerCase() }),
+        ...(opts.entryDeadlineSeconds === undefined
+          ? {}
+          : { entryDeadlineSec: positiveNumber("entry deadline", opts.entryDeadlineSeconds) }),
+        ...(opts.exitPassiveSeconds === undefined
+          ? {}
+          : { exitPassiveSec: nonnegativeNumber("exit passive duration", opts.exitPassiveSeconds) }),
+      });
+      const onlyExecutionOptions = Object.entries(opts).every(
+        ([name, value]) => value === undefined || (executionOptions as readonly string[]).includes(name),
+      );
+      if (onlyExecutionOptions) {
+        saveBotConfig({ ...cfg, execution });
+        console.log(pc.green(`saved strategy settings for ${botId}`));
+        printStrategy(cfg.strategy.config, cfg.signals.maxAgeSec, cfg.risk, cfg.tickIntervalMin, cfg.venue, execution);
+        return;
+      }
+    }
     const strategyConfig = normalizeStrategyConfig(cfg.strategy.config as Record<string, unknown>);
     let tickIntervalMin = cfg.tickIntervalMin;
     if (opts.top !== undefined) strategyConfig.topN = positionLimit(opts.top);
@@ -321,15 +356,17 @@ export async function runStrategy(botId: string, opts: StrategyOptions = {}): Pr
       signals: { ...cfg.signals, maxAgeSec },
       risk,
       tickIntervalMin,
+      ...(hasExecutionOptions ? { execution } : {}),
     });
     console.log(pc.green(`saved strategy settings for ${botId}`));
-    printStrategy(strategyConfig, maxAgeSec, risk, tickIntervalMin, cfg.venue);
+    printStrategy(strategyConfig, maxAgeSec, risk, tickIntervalMin, cfg.venue, execution);
     return;
   }
   console.log(pc.bold(`strategy: signals`));
-  printStrategy(cfg.strategy.config as Record<string, unknown>, cfg.signals.maxAgeSec, cfg.risk, cfg.tickIntervalMin, cfg.venue);
+  printStrategy(cfg.strategy.config as Record<string, unknown>, cfg.signals.maxAgeSec, cfg.risk, cfg.tickIntervalMin, cfg.venue, cfg.execution);
   const recommendedSummary = recommendedStrategySummary(cfg.venue);
-  if (await confirm(`Reset to recommended (${recommendedSummary})?`, false)) {
+  console.log(`Recommended: ${recommendedSummary}`);
+  if (await confirm("Reset to recommended settings?", false)) {
     saveStrategy(botId, await elicitRecommendedStrategyConfig(cfg.strategy.config as Record<string, unknown>, cfg.venue));
     return;
   }
@@ -486,6 +523,7 @@ function printStrategy(
   risk: { maxOrderNotional: number; slippagePct: number },
   tickIntervalMin: number,
   venue?: string,
+  execution?: PredictionExecutionConfig,
 ): void {
   const normalized = normalizeStrategyConfig(config);
   const allocationMode = configuredAllocationMode(normalized, venue);
@@ -545,6 +583,14 @@ function printStrategy(
   }
   console.log(`  entry handoff hold:   ${scenario.pendingEntryReservationSec}s reservation while a fill is not yet visible`);
   console.log(`  slippage:             ${risk.slippagePct}% from best executable price`);
+  const executionConfig = PredictionExecutionConfigSchema.parse(execution ?? {});
+  const executionMode = venue === "polymarket" ? executionConfig.mode : "legacy";
+  console.log(`  execution:            ${executionMode} (${executionMode === "adaptive" ? "managed post-only limits" : "crossing limits"})`);
+  if (venue === "polymarket") {
+    const inactive = executionMode === "legacy" ? " (inactive in legacy mode)" : "";
+    console.log(`  entry deadline:       ${compactNumber(executionConfig.entryDeadlineSec)} sec${inactive}`);
+    console.log(`  exit passive phase:   ${compactNumber(executionConfig.exitPassiveSec)} sec${inactive}`);
+  }
   console.log(`  hard per-order cap:   $${risk.maxOrderNotional.toFixed(2)} (risk module)`);
   console.log(`  signal max age:       ${(maxAgeSec / 3600).toFixed(2)}h`);
   console.log(`  signal checks:        every ${compactNumber(Number(current.signalPollIntervalMin))} min`);
@@ -567,5 +613,5 @@ function saveStrategy(botId: string, config: Record<string, unknown>): void {
     tickIntervalMin,
   });
   console.log(pc.green(`saved strategy settings for ${botId}`));
-  printStrategy(normalized, cfg.signals.maxAgeSec, cfg.risk, tickIntervalMin, cfg.venue);
+  printStrategy(normalized, cfg.signals.maxAgeSec, cfg.risk, tickIntervalMin, cfg.venue, cfg.execution);
 }

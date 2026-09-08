@@ -1,13 +1,14 @@
 // packages/core/src/types.ts
 // Shared domain types for cassie. Everything here is runtime-agnostic and
 // free of side effects.
+import type { PerpAccountSnapshot, PerpCashFlowResult, PerpExecutionState, PerpInstrument, PerpLeverageRequest, PerpMarketSnapshot, PerpOrderLookup, PerpStopRequest } from "./perps.js";
 
 export type VenueId = "polymarket" | "kalshi" | "hyperliquid" | "lighter" | "fixture";
 
 /**
  * Venues whose instruments are binary YES/NO outcome markets. Use this where
  * the semantics are prediction-vs-perp; keep `=== "polymarket"` only for
- * genuinely Polymarket-specific gates (Ares reporting, bridge funding, geoblock).
+ * Polymarket-specific gates (bridge funding, geoblock).
  */
 export function isPredictionVenue(venue: VenueId): boolean {
   return venue === "polymarket" || venue === "kalshi";
@@ -27,6 +28,14 @@ export interface Balance {
   total: number;
   /** Freely spendable. */
   available: number;
+}
+
+/** Read-only account context; funding collateral is not strategy NAV. */
+export interface PerpPortfolioScope {
+  dex: string;
+  accountMode: string;
+  fundingBalance: number;
+  fundingAvailable: number;
 }
 
 export interface Position {
@@ -49,12 +58,22 @@ export interface Position {
   redeemable?: boolean;
   /** Human-readable market/instrument name when the venue provides one. */
   label?: string;
+  leverage?: number;
+  marginMode?: "cross" | "isolated";
+  marginUsed?: number;
+  liquidationPrice?: number;
 }
 
 /** Public identifiers returned after a venue redemption settles. */
 export interface RedemptionReceipt {
   transactionHash?: string;
   transactionId?: string;
+}
+
+/** Durable submission boundary; receipt identifiers contain no signing material. */
+export interface RedemptionHooks {
+  beforeSubmit(): Promise<void>;
+  submitted(receipt: RedemptionReceipt): Promise<void>;
 }
 
 export interface BookLevel {
@@ -109,7 +128,7 @@ export interface OrderIntent {
   /** Optional venue expiry in Unix seconds. Local TTL remains authoritative. */
   expiration?: number;
   /** Non-authoritative lifecycle label. Risk derives exposure from balances. */
-  purpose?: "entry" | "normal-exit" | "urgent-exit";
+  purpose?: "entry" | "normal-exit" | "urgent-exit" | "target";
   clientId: string;
   /** Perps only: reduce-only flag for exits. */
   reduceOnly?: boolean;
@@ -135,14 +154,11 @@ export interface OrderAck {
   /**
    * Venue token actually traded, as resolved from (marketRef, outcome).
    * marketRef stays the YES-token ref (§7), so a NO order trades a token the
-   * caller never named — anything that references the trade downstream (an
-   * Ares position card) needs this, not marketRef.
+   * caller never named. Settlement reconciliation uses this exact token.
    */
   tokenId?: string;
   /** Wallet that holds the resulting position (Polymarket Deposit Wallet). */
   funder?: string;
-  /** Builder code the order carried, if any. */
-  builderCode?: string;
   /** Local, non-secret digest of the SDK-created signed order. */
   preparedHash?: string;
 }
@@ -161,9 +177,16 @@ export interface Order {
   tif?: Tif;
   status: OrderStatus;
   createdAt?: number;
+  reduceOnly?: boolean;
+  isTrigger?: boolean;
+  isPositionTpsl?: boolean;
+  triggerPrice?: number;
+  triggerKind?: "sl" | "tp";
 }
 
 export interface Fill {
+  /** Settlement-aware readers may return pending/failed records; only CONFIRMED changes inventory. */
+  settlementStatus?: "MATCHED" | "MINED" | "CONFIRMED" | "RETRYING" | "FAILED";
   id: string;
   orderId?: string;
   marketRef: string;
@@ -318,6 +341,9 @@ export interface Signal {
   /** Venue resolution/close time in epoch ms, when the feed carries one. */
   endsAt?: number;
   ttlSec: number;
+  /** Settlement-aware strategies bind working orders to these exact published terms. */
+  settlementBasis?: string;
+  rulesHash?: string;
 }
 
 /** Latest Quotient forecast for a market, independent of signal publication. */
@@ -348,6 +374,16 @@ export type Action =
       minNotional?: number;
       /** Optional price bound; defaults to a crossing limit within the slippage band. */
       limitPrice?: number;
+      tif?: "GTC" | "IOC";
+      postOnly?: boolean;
+      stopPx?: number;
+      /** Protected perp entries: take-profit price the executor rests as a reduce-only limit. */
+      targetPx?: number;
+      leverage?: number;
+      /** Required for protected perp entries. Stable across submission retries. */
+      clientId?: string;
+      anchorAt?: number;
+      themes?: string[];
       reason?: string;
       /**
        * Decision provenance persisted with the resulting order: the signal or
@@ -359,10 +395,19 @@ export type Action =
   | {
       kind: "exit";
       marketRef: string;
+      /** Fraction of the currently held position, in (0, 1]. */
+      fraction?: number;
+      limitPrice?: number;
+      tif?: "GTC" | "IOC";
+      postOnly?: boolean;
+      urgent?: boolean;
       reason?: string;
       /** Decision provenance persisted with the resulting order. */
       provenance?: Record<string, unknown>;
     }
+  | { kind: "protect"; marketRef: string; stopPx: number; reason: string }
+  /** Move a protected perp cycle's take-profit; it must stay on the favorable side of entry. */
+  | { kind: "target"; marketRef: string; targetPx: number; reason: string }
   | {
       kind: "redeem";
       marketRef: string;
@@ -392,6 +437,8 @@ export type Action =
     };
 
 export interface StrategyContext {
+  /** Durable directional executions, present only for adaptive Polymarket signals. */
+  execution?: import("./engine/prediction-execution.js").PredictionExecutionSnapshot;
   botId: string;
   venueId: VenueId;
   /** The strategy's own config block (validated by the strategy). */
@@ -402,6 +449,8 @@ export interface StrategyContext {
   openOrders: Order[];
   /** Account equity in USD (collateral + position value). */
   equity: number;
+  perpAccount?: PerpAccountSnapshot;
+  perpExecution?: PerpExecutionState;
   log: Logger;
   now: () => number;
   /** Persistent per-strategy scratch state (JSON-serializable). */
@@ -423,6 +472,8 @@ export interface Strategy {
 
 export interface StrategyActionResult {
   placed: boolean;
+  /** Parent admission reserves once; child acknowledgements are not strategy placements. */
+  executionId?: string;
   /** Final order notional after engine risk/capacity caps. Present for placed entries. */
   placedNotional?: number;
   /** Final order size in base units after engine risk/capacity caps. */
@@ -434,6 +485,7 @@ export interface StrategyActionResult {
   status?: OrderStatus;
   /** Size the venue reported filled in the placement acknowledgement, when known. */
   filledSize?: number;
+  avgFillPrice?: number;
   /** Engine clock when the order was accepted. */
   placedAt?: number;
 }
@@ -444,6 +496,9 @@ export interface PreparedOrderMeta {
   tokenId: string;
   conditionId?: string;
   outcome?: "YES" | "NO";
+  /** Exact size and price after the venue SDK's tick/lot normalization. */
+  limitPrice?: number;
+  size?: number;
 }
 
 export interface OrderLifecycleHooks {
@@ -461,6 +516,7 @@ export type RealtimeSubscription<T = unknown> = AsyncIterable<T> & {
 
 /** Read-only slice of a venue adapter, bound to an account. Strategies see only this. */
 export interface VenueReadApi {
+  executionMarket?(marketRef: string, outcome: "YES" | "NO"): Promise<PredictionExecutionMarket>;
   balances(): Promise<Balance[]>;
   positions(): Promise<Position[]>;
   book(marketRef: string): Promise<OrderBook>;
@@ -470,6 +526,9 @@ export interface VenueReadApi {
   /** Canonical parent event for cross-market exposure caps. */
   eventRef?(marketRef: string): Promise<string | undefined>;
   candles?(marketRef: string, interval: CandleInterval, lookback: number): Promise<Candle[]>;
+  perpInstruments?(): Promise<PerpInstrument[]>;
+  perpAccountSnapshot?(): Promise<PerpAccountSnapshot>;
+  perpMarketSnapshot?(marketRef: string): Promise<PerpMarketSnapshot>;
 }
 
 /** Wizard-driven setup UI, injected by the CLI so adapters stay headless. */
@@ -514,7 +573,38 @@ export interface AwaitFundingOpts {
   onPoll?: (msg: string) => void;
 }
 
+/** Fresh selected-outcome inputs used for directional execution and risk checks. */
+export interface PredictionExecutionMarket {
+  marketRef: string;
+  conditionId: string;
+  tokenId: string;
+  outcome: "YES" | "NO";
+  tickSize: number;
+  minOrderSize: number;
+  acceptingOrders: boolean;
+  observedAt: number;
+  book: OrderBook;
+  quote: Quote;
+}
+
+/** Authenticated cumulative matches include quantities still awaiting settlement. */
+export interface PredictionOrderState {
+  orderId: string;
+  status: "open" | "matched" | "canceled" | "expired" | "unknown";
+  size: number;
+  matchedSize: number;
+  observedAt: number;
+}
+
+export interface PredictionCancellationResult {
+  status: "canceled" | "not-canceled";
+  reason?: string;
+}
+
 export interface VenueAdapter {
+  executionMarket?(marketRef: string, outcome: "YES" | "NO"): Promise<PredictionExecutionMarket>;
+  executionOrder?(acct: VenueAccount, orderId: string): Promise<PredictionOrderState | null>;
+  cancelOrderChecked?(acct: VenueAccount, orderId: string): Promise<PredictionCancellationResult>;
   id: VenueId;
   /** Date the adapter's endpoints/contracts were last verified against venue docs. */
   verifiedAgainst: string;
@@ -531,9 +621,12 @@ export interface VenueAdapter {
    */
   runFundingFlow?(ctx: SetupContext, acct: VenueAccount): Promise<VenueAccount>;
   balances(acct: VenueAccount): Promise<Balance[]>;
+  portfolioScope?(acct: VenueAccount): Promise<PerpPortfolioScope>;
   positions(acct: VenueAccount): Promise<Position[]>;
   book(marketRef: string): Promise<OrderBook>;
   quote(marketRef: string): Promise<Quote>;
+  /** Round down to executable share precision before reserving an order; must be idempotent. */
+  normalizeOrderSize?(size: number): number;
   placeOrder(acct: VenueAccount, order: OrderIntent): Promise<OrderAck>;
   /**
    * Crash-safe order path used by market making. The adapter signs through its
@@ -548,18 +641,23 @@ export interface VenueAdapter {
   cancelAll(acct: VenueAccount): Promise<void>;
   openOrders(acct: VenueAccount): Promise<Order[]>;
   fills(acct: VenueAccount, sinceTs: number): Promise<Fill[]>;
+  /** Includes pending and failed settlement records for controllers with a durable settlement journal. */
+  tradeSettlements?(acct: VenueAccount, sinceTs: number): Promise<Fill[]>;
   /** Canonical parent event for cross-market exposure caps. */
   eventRef?(marketRef: string): Promise<string | undefined>;
   candles?(marketRef: string, interval: CandleInterval, lookback: number): Promise<Candle[]>;
   /** Exact outcome-token book; avoids manufacturing NO from YES. */
   tokenBook?(tokenId: string): Promise<OrderBook>;
+  /** Authenticated total token shares; callers subtract their outstanding SELL reservations. */
+  tokenBalance?(acct: VenueAccount, tokenId: string): Promise<number>;
   /** Venue-native realtime feeds. Payload normalization belongs to the runtime adapter. */
   subscribeMarketData?(tokenIds: string[]): Promise<RealtimeSubscription>;
   subscribeUserData?(): Promise<RealtimeSubscription>;
   /** Dead man's switch keep-alive, where the venue supports one. */
   heartbeat?(acct: VenueAccount): Promise<void>;
   /** Resolution redemption (Polymarket). */
-  redeem?(acct: VenueAccount, position: Position): Promise<RedemptionReceipt | undefined>;
+  redeem?(acct: VenueAccount, position: Position, hooks?: RedemptionHooks): Promise<RedemptionReceipt | undefined>;
+  redemptionStatus?(acct: VenueAccount, receipt: RedemptionReceipt): Promise<"pending" | "confirmed" | "failed">;
   /**
    * Withdraw collateral to an external address. Runs locally through the
    * wizard context because it signs with the master/L1 key, which stays in
@@ -568,6 +666,14 @@ export interface VenueAdapter {
   withdraw?(ctx: SetupContext, acct: VenueAccount, params: { to: string; amount: number | "all" }): Promise<string>;
   /** Current funding rate as a decimal per 8h (perps venues). */
   fundingRate?(marketRef: string): Promise<number>;
+  perpInstruments?(): Promise<PerpInstrument[]>;
+  perpAccountSnapshot?(acct: VenueAccount): Promise<PerpAccountSnapshot>;
+  perpMarketSnapshot?(acct: VenueAccount, marketRef: string): Promise<PerpMarketSnapshot>;
+  perpCashFlows?(acct: VenueAccount, sinceTs: number): Promise<PerpCashFlowResult>;
+  configurePerpLeverage?(acct: VenueAccount, request: PerpLeverageRequest): Promise<void>;
+  placePerpStop?(acct: VenueAccount, request: PerpStopRequest): Promise<OrderAck>;
+  lookupPerpOrder?(acct: VenueAccount, clientId: string): Promise<PerpOrderLookup>;
+  disarmScheduledCancel?(acct: VenueAccount): Promise<void>;
 }
 
 // ---------------------------------------------------------------------------
@@ -590,6 +696,8 @@ export interface ForecastQuery {
  * (P&L, balances, account size) must not flow toward the signal API.
  */
 export interface SignalSource {
+  /** Last successful complete signal refresh, distinct from forecast publication time. */
+  refreshedAt?(): number | undefined;
   latest(query: SignalQuery): Promise<Signal[]>;
   /** Held-market forecasts are independent of whether an entry signal is active. */
   forecasts?(query: ForecastQuery): Promise<MarketForecast[]>;
@@ -679,9 +787,7 @@ export interface ThesisTicket {
   riskBudgetPct: number;
   notes?: string;
   /**
-   * The trade's reasoning in the operator's own words, written for an audience
-   * that may copy it — not an internal log line. This is the caption when the
-   * trade is published to a feed (§Ares); nothing is generated on its behalf.
+   * The trade's reasoning in the operator's own words, retained with its alert.
    */
   reasoningSummary?: string;
   /** Path to an alternative mappings file. */

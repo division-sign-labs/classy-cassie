@@ -237,7 +237,8 @@ export class LighterAdapter implements VenueAdapter {
     if (!masterPk) throw new Error("lighter: no master (L1) key in the keystore — run `cassie wallet create` first");
     const { privateKeyToAccount } = await import("viem/accounts");
     const l1Address = privateKeyToAccount(masterPk as `0x${string}`).address;
-    ctx.print(`Lighter L1 identity: ${l1Address} (key stays in the local keystore; only the API key is runtime-eligible)`);
+    ctx.print("Lighter wallet");
+    ctx.print(l1Address);
     return { venue: "lighter", l1Address };
   }
 
@@ -248,15 +249,12 @@ export class LighterAdapter implements VenueAdapter {
       address,
       asset: "USDC",
       minimum: MIN_DEPOSIT_USDC,
-      note: "CCTP intent address — send USDC from the from_addr it was created for",
+      note: "Send only from the selected source wallet.",
     }));
     return {
       venue: "lighter",
       addresses,
-      summary:
-        `Lighter accepts USDC via CCTP intent addresses from Arbitrum, Base, or Avalanche C-Chain (min ${MIN_DEPOSIT_USDC} USDC), ` +
-        `or direct Ethereum-mainnet contract deposits. The first deposit for ${a.l1Address} creates the account. ` +
-        `Run \`cassie fund <botId>\` for the guided flow.`,
+      summary: `Send at least ${MIN_DEPOSIT_USDC} USDC from the selected source wallet.`,
     };
   }
 
@@ -289,14 +287,12 @@ export class LighterAdapter implements VenueAdapter {
 
   async runFundingFlow(ctx: SetupContext, acct: VenueAccount): Promise<VenueAccount> {
     const a = { ...(acct as LighterAccount) };
-    ctx.print(`Funding Lighter account for L1 identity ${a.l1Address}.`);
-    ctx.print(`Sources: ${Object.entries(SOURCE_CHAINS).map(([k, v]) => `${k} (${v.label})`).join(", ")} — USDC, min ${MIN_DEPOSIT_USDC}.`);
     const chainAns = (await ctx.ask("Source chain [arbitrum/base/avalanche]", { default: "arbitrum" })).toLowerCase().trim();
     const chain = SOURCE_CHAINS[chainAns];
     if (!chain) throw new Error(`unsupported source chain "${chainAns}"`);
     const fromAddr = (
       await ctx.ask(
-        `Sending address on ${chain.label} (the address the USDC will come FROM; intent addresses are bound to it)`,
+        `Sending wallet on ${chain.label}`,
         { default: a.l1Address },
       )
     ).trim();
@@ -305,9 +301,10 @@ export class LighterAdapter implements VenueAdapter {
     a.intentAddresses = { ...(a.intentAddresses ?? {}), [chainAns]: intentAddress };
     ctx.print(``);
     ctx.print(`Send at least ${MIN_DEPOSIT_USDC} USDC on ${chain.label}`);
-    ctx.print(`  from: ${fromAddr}`);
-    ctx.print(`  to:   ${intentAddress}`);
-    ctx.print(`cassie never initiates this transfer — you send it and I watch for arrival.`);
+    ctx.print("Send only from this wallet");
+    ctx.print(fromAddr);
+    ctx.print("Deposit address");
+    ctx.print(intentAddress);
 
     const bal = await ctx.poll("waiting for the deposit to credit on Lighter", async () => {
       try {
@@ -320,7 +317,6 @@ export class LighterAdapter implements VenueAdapter {
     ctx.print(`Credited: ${bal.total} USDC.`);
 
     a.accountIndex = await this.resolveAccountIndex(a);
-    ctx.print(`Resolved account_index ${a.accountIndex} for ${a.l1Address}.`);
 
     await this.provisionApiKey(ctx, a);
     return a;
@@ -406,16 +402,16 @@ export class LighterAdapter implements VenueAdapter {
       // Self-registration: ChangePubKey signed by the L1 key, submitted with the new key.
       await register(pair.privateKey, API_KEY_INDEX_DEFAULT);
     } catch (err) {
-      ctx.print(`Self-registration failed (${(err as Error).message.slice(0, 120)}).`);
-      ctx.print(`If this account was never onboarded, open app.lighter.xyz once with the bot's L1 wallet, then paste an existing API private key.`);
-      const existingPk = await ctx.ask("Existing API private key (from web onboarding)", { secret: true });
-      const existingIdx = Number(await ctx.ask("Its api_key_index", { default: "0" }));
+      ctx.print(`API key registration failed: ${(err as Error).message.slice(0, 120)}`);
+      ctx.print("Connect the bot wallet and create an API key");
+      ctx.print("https://app.lighter.xyz");
+      const existingPk = await ctx.ask("Existing API private key", { secret: true });
+      const existingIdx = Number(await ctx.ask("API key index", { default: "0" }));
       await register(existingPk.trim(), existingIdx);
     }
 
     await ctx.putSecret("lighter-api", pair.privateKey, { runtimeEligible: true });
     a.apiKeyIndex = API_KEY_INDEX_DEFAULT;
-    ctx.print(`API key registered at index ${API_KEY_INDEX_DEFAULT} and stored (runtime-eligible). L1 key stays local-only.`);
   }
 
   // ---- Reads ---------------------------------------------------------------

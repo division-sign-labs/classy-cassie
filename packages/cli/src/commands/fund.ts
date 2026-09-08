@@ -25,44 +25,45 @@ export async function runFund(botId: string, opts: { from?: string }): Promise<v
   if (opts.from === "splits") {
     if (cfg.venue === "kalshi") {
       throw new Error(
-        "Kalshi is funded by ACH, debit, or wire on kalshi.com; a Splits crypto treasury cannot fund it.",
+        "Splits cannot fund Kalshi. Use ACH, debit, or wire.\nhttps://kalshi.com",
       );
     }
     if (!cfg.treasury) {
-      throw new Error(`bot "${botId}" has no Splits treasury — run \`cassie init\` and choose the Splits subaccount option`);
+      throw new Error(`bot "${botId}" has no Splits treasury\nCreate a Splits subaccount:\ncassie init`);
     }
     if (cfg.venue === "lighter") {
       throw new Error(
-        "Lighter intent addresses are bound to the sending address. `--from splits` is not automated: run `cassie fund`, choose the source chain, enter this Splits account as the sending address — " +
-          `${cfg.treasury.accountAddress} — then create the Splits transfer on that same chain/token to the returned intent address.`,
+        "Splits funding is manual for Lighter.\nUse this sending address:\n" +
+          `${cfg.treasury.accountAddress}\nRequest a deposit address:\ncassie fund ${botId}\n` +
+          "Create the Splits transfer to that deposit address on the same chain and token.",
       );
     }
     if (cfg.venue === "polymarket") {
       throw new Error(
-        "Polymarket bridge routes and minimums vary by source chain/token. `--from splits` is disabled until Cassie can validate a proposal against the live supported-assets route; use `cassie fund` for the current bridge instructions and create the Splits proposal manually.",
+        `Splits funding requires manual Polymarket route validation.\nCheck supported chains, tokens, and minimums:\ncassie fund ${botId}\nCreate a matching Splits proposal.`,
       );
     }
     if (cfg.venue === "hyperliquid" && cfg.venueUrls.hyperliquid.testnet) {
       throw new Error(
-        "`--from splits` is disabled for Hyperliquid testnet; use the configured testnet faucet through `cassie fund` instead of sending mainnet assets.",
+        `Splits funding is disabled on Hyperliquid testnet.\nDo not send mainnet assets.\nUse testnet funding:\ncassie fund ${botId}`,
       );
     }
     if (cfg.treasury.threshold > 1) {
       throw new Error(
-        "This Splits account requires multiple signatures, but Cassie does not yet provide a safe local Splits signing step. Lower the account threshold in Splits or create the proposal and collect every signature manually.",
+        "Multiple Splits signatures required. Create the proposal and collect signatures in Splits.",
       );
     }
     const instructions = await adapter.fundingInstructions(account);
     const target =
       instructions.addresses.find((a) => a.chain === "evm" || a.chain === "arbitrum") ?? instructions.addresses[0];
     if (!target) throw new Error("no funding address available");
-    const amount = await ask(`Amount of ${target.asset} to disburse (min ${target.minimum})`, { default: "20" });
+    const amount = await ask(`Amount (${target.asset}, minimum ${target.minimum})`, { default: "20" });
     if (!Number.isFinite(Number(amount)) || Number(amount) < target.minimum) {
       throw new Error(`amount must be at least ${target.minimum} ${target.asset}`);
     }
     const chainId = ARBITRUM_CHAIN_ID;
     const token = USDC_ARBITRUM;
-    console.log(pc.dim(`using Arbitrum One (${chainId}) native USDC ${token}; Hyperliquid's bridge sender is chain-bound`));
+    console.log("Arbitrum One · native USDC");
     const command = splitsTransferProposalCommand({
       account: cfg.treasury.accountAddress,
       recipient: target.address,
@@ -70,14 +71,10 @@ export async function runFund(botId: string, opts: { from?: string }): Promise<v
       token,
       amount: amount.trim(),
     });
-    console.log(pc.bold("\nCreate this proposal with the official Splits CLI:\n"));
-    console.log(`  ${command}`);
-    console.log(pc.dim("\nThis proposes a transfer; it does not bypass your account threshold."));
-    console.log(pc.dim("Approve the returned signUrl with your passkey, then come back here."));
-    if (cfg.venue === "hyperliquid") {
-      console.log(pc.yellow(`Also send about $2 of ETH on Arbitrum to ${target.address} for the bridge transaction's gas.`));
-    }
-    await ask("Press Enter after the Splits proposal has executed");
+    console.log("Splits proposal");
+    console.log(command);
+    console.log("Approve the proposal at the returned signUrl with your passkey.");
+    await ask("Press Enter after the transfer completes");
   }
 
   if (adapter.runFundingFlow) {
@@ -87,19 +84,20 @@ export async function runFund(botId: string, opts: { from?: string }): Promise<v
     const instructions = await adapter.fundingInstructions(account);
     console.log(instructions.summary);
     for (const a of instructions.addresses) {
-      console.log(`  [${a.chain}] ${a.address}  (${a.asset}, min ${a.minimum})${a.note ? "  — " + a.note : ""}`);
+      console.log(`${a.chain} · ${a.asset} · minimum ${a.minimum}`);
+      console.log(a.address);
+      if (a.note) console.log(a.note);
     }
     const bal = await adapter.awaitFunding(account, { onPoll: (m) => console.log(pc.dim(m)) });
     console.log(pc.green(`credited: ${bal.total} ${bal.asset}`));
   }
-  console.log(pc.green(`funding flow complete for ${botId}`));
 }
 
 export async function registerSplitsSigner(botId: string): Promise<void> {
   const cfg = loadBotConfig(botId);
   const account = requireAccount(cfg);
   if (account.venue === "kalshi") {
-    throw new Error("Kalshi bots have no on-chain signer to register; funding runs through kalshi.com bank rails.");
+    throw new Error("Kalshi bots have no on-chain signer.");
   }
   const addr =
     account.venue === "polymarket"
@@ -109,12 +107,12 @@ export async function registerSplitsSigner(botId: string): Promise<void> {
         : account.venue === "lighter"
           ? account.l1Address
           : "0x";
-  console.log(pc.bold("Register this EOA with the currently authenticated Splits user:\n"));
-  console.log(`  splits auth register-signer ${addr} --name cassie-${botId}`);
-  console.log("");
-  console.log(pc.yellow("Registration alone grants no account authority."));
-  console.log(pc.dim("Run `cassie init` to create an isolated organization subaccount with an explicit signer set."));
+  console.log("Register signer");
+  console.log(`splits auth register-signer ${addr} --name cassie-${botId}`);
+  console.log("Registration grants no account authority.");
+  console.log("Create a subaccount:");
+  console.log("cassie init");
   if (cfg.venue === "polymarket") {
-    console.log(pc.yellow("Do not attach this Polymarket signer to Splits: its raw key is deployed with the trading runtime."));
+    console.log(pc.yellow("Do not authorize this Polymarket signer in Splits; its private key runs on the bot."));
   }
 }

@@ -8,7 +8,7 @@
 // convention directly rather than trusting the platform to surface it.
 
 import { describe, expect, it } from "vitest";
-import { AresClient, LiveSignalSource, TelegramAlerter, boundFetch } from "@quotient-forecasting/cassie-core";
+import { LiveSignalSource, TelegramAlerter, boundFetch } from "@quotient-forecasting/cassie-core";
 
 /**
  * A fetch stand-in that records the `this` it was invoked with. Declared as a
@@ -61,13 +61,6 @@ describe("callers do not invoke fetch as a method", () => {
     );
     await src.latest({});
     assertNotMethodCall(seen, src);
-  });
-
-  it("AresClient", async () => {
-    const { impl, seen } = spyingFetch({ id: "post_1" });
-    const client = new AresClient({ apiKey: "k", fetchImpl: impl });
-    await client.post({ content: "hi" });
-    assertNotMethodCall(seen, client);
   });
 
   it("TelegramAlerter", async () => {

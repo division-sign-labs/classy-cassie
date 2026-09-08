@@ -6,6 +6,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
   MemoryStateStore,
+  normalizePolymarketOrderSize,
   type Fill,
   type Order,
   type OrderIntent,
@@ -45,9 +46,6 @@ function testConfig(): MarketMakeConfig {
     capital: {
       minimum_free_collateral_usd: 0,
       operational_reserve_usd: 0,
-    },
-    quotient_feed: {
-      daily_api_cost_cap_usd: 0.05,
     },
     eligibility: {
       entry_stability_seconds: 0,
@@ -127,6 +125,7 @@ function fakeVenue(stateStore: MarketMakeStateStore): FakeVenueControl {
       };
     },
     quote: async (marketRef) => ({ marketRef, bid: 0.49, ask: 0.5, mid: 0.495, volume24h: 10_000, spreadBps: 202, ts: START }),
+    normalizeOrderSize: normalizePolymarketOrderSize,
     placeOrder: async () => { throw new Error("controller must use lifecycle placement"); },
     placeOrderWithLifecycle: async (_account, intent, hooks: OrderLifecycleHooks) => {
       control.placeCalls.push(structuredClone(intent));
@@ -148,7 +147,9 @@ function fakeVenue(stateStore: MarketMakeStateStore): FakeVenueControl {
         conditionId: intent.conditionId,
         outcome: intent.outcome,
         side: intent.side,
-        size: intent.size,
+        // The real adapter signs only two decimal shares. Returning the raw
+        // intent here used to conceal the controller's imaginary-fill bug.
+        size: normalizePolymarketOrderSize(intent.size),
         filledSize: 0,
         price: intent.limitPrice,
         tif: intent.tif,
@@ -262,6 +263,7 @@ describe("MarketMakeController", () => {
     control: FakeVenueControl,
     q = quotient(() => clock),
     overrides: Partial<MarketMakeControllerDeps> = {},
+    deploymentId = "deployment-a",
   ): { controller: MarketMakeController; q: ReturnType<typeof quotient> } {
     const controller = new MarketMakeController({
       config: testConfig(),
@@ -273,7 +275,7 @@ describe("MarketMakeController", () => {
       catalog: catalog(() => clock),
       ...overrides,
     }, {
-      deploymentId: "deployment-a",
+      deploymentId,
       now: () => clock,
       autoSchedule: false,
       enableSubscriptions: false,
@@ -439,6 +441,16 @@ describe("MarketMakeController", () => {
     await controller.resume();
     expect(control.placeCalls).toHaveLength(1);
     expect(control.placeCalls[0]!.size * control.placeCalls[0]!.limitPrice).toBeCloseTo(5);
+    expect(control.placeCalls[0]!.size).toBe(10.2);
+    expect(stateStore.listOrders()[0]).toMatchObject({ quantity: 10.2 });
+    expect(stateStore.listOrders()[0]?.reservedCashUsd).toBeCloseTo(4.998);
+    expect(stateStore.availability().collateralFreeUsd).toBeGreaterThanOrEqual(15);
+
+    clock += 1_000;
+    control.bookTs = clock;
+    await applyReconcile(controller);
+    expect(controller.status()).toMatchObject({ lifecycle: "ACTIVE", halted: false });
+    expect(control.cancelCalls).toEqual([]);
 
     control.collateralUsd = 10;
     clock += 1_000;
@@ -617,6 +629,68 @@ describe("MarketMakeController", () => {
     await controller.shutdown();
   });
 
+  it("previews and persists venue-sized shares without inventing fills on repeated reconciliation", async () => {
+    const control = fakeVenue(stateStore);
+    const { controller } = build(control);
+    await controller.start();
+    await applyReconcile(controller);
+
+    const preview = await controller.dryRun();
+    const proposed = preview.actions.find((action) => action.kind === "place");
+    expect(proposed).toMatchObject({ side: "BUY", size: 12.75, limitPrice: 0.49 });
+    expect(preview.state.markets[MARKET_KEY]?.orders[proposed!.clientId]?.size).toBe(12.75);
+    expect(stateStore.listOrders()).toEqual([]);
+
+    await controller.resume();
+    expect(control.placeCalls[0]?.size).toBe(12.75);
+    expect(stateStore.listOrders()[0]).toMatchObject({ quantity: 12.75, filledQuantity: 0, status: "OPEN" });
+    for (let observation = 0; observation < 3; observation += 1) {
+      clock += 1_000;
+      control.bookTs = clock;
+      await applyReconcile(controller);
+    }
+    expect(controller.status()).toMatchObject({ lifecycle: "ACTIVE", halted: false });
+    expect(control.placeCalls).toHaveLength(1);
+    expect(control.cancelCalls).toEqual([]);
+    expect(stateStore.listOrders()[0]).toMatchObject({ quantity: 12.75, filledQuantity: 0, status: "OPEN" });
+    await controller.shutdown();
+  });
+
+  it("normalizes exit shares before reserving them and leaves sub-cent-share inventory unreserved", async () => {
+    const control = fakeVenue(stateStore);
+    const { controller } = build(control);
+    await controller.start();
+    await applyReconcile(controller);
+    await controller.resume();
+    const entry = control.orders[0]!;
+    clock += 1_000;
+    control.bookTs = clock;
+    control.positions = [{
+      marketRef: YES, tokenId: YES, conditionId: CONDITION, outcome: "YES", side: "YES",
+      size: 2.005, avgPrice: entry.price,
+    }];
+    control.orders[0] = { ...entry, filledSize: 2.005 };
+    control.fills = [{
+      id: "precision-fill", orderId: entry.id, makerOrderId: entry.id,
+      marketRef: YES, tokenId: YES, conditionId: CONDITION, outcome: "YES", side: "BUY",
+      size: 2.005, matchedAmountDelta: 2.005, price: entry.price, ts: clock,
+    }];
+    await applyReconcile(controller);
+    clock += 1_000;
+    control.bookTs = clock;
+    await controller.halt({ liquidate: true });
+
+    const exit = control.placeCalls.find((intent) => intent.side === "SELL");
+    expect(exit?.size).toBe(2);
+    expect(stateStore.getOrder(exit!.clientId)).toMatchObject({ quantity: 2, reservedQuantity: 2, status: "OPEN" });
+    expect(controller.stateSnapshot().markets[MARKET_KEY]?.inventory).toMatchObject({
+      freeQuantity: 2.005,
+      reservedSellQuantity: 2,
+    });
+    expect(stateStore.availability(YES).tokens[0]?.freeQuantity).toBeCloseTo(0.005);
+    await controller.shutdown();
+  });
+
   it("reduces refreshed Gamma metadata before the same poll's Quotient signal", async () => {
     const control = fakeVenue(stateStore);
     const { controller } = build(control);
@@ -639,10 +713,9 @@ describe("MarketMakeController", () => {
     await controller.shutdown();
   });
 
-  it("reduces Gamma refreshes for a resting-only market even when Q discovery is budget-gated", async () => {
+  it("reduces Gamma refreshes before the same poll's signal for a resting-only market", async () => {
     const control = fakeVenue(stateStore);
     const config = testConfig();
-    config.quotient_feed.daily_api_cost_cap_usd = 0.02;
     const baseCatalog = catalog(() => clock);
     let eventId = "polymarket:event-before-refresh";
     const { controller } = build(control, undefined, {
@@ -767,15 +840,18 @@ describe("MarketMakeController", () => {
     const before = controller.stateSnapshot();
     const persistedBefore = await snapshotStore.get("market-make:reducer-state:v1");
     const qCallsBefore = q.calls.active;
-    await controller.dryRun();
+    const report = await controller.dryRun();
     expect(control.placeCalls).toHaveLength(placements);
+    expect(report.actions.some((action) => action.kind === "cancel" && action.reason.includes("book-clock-skew"))).toBe(false);
+    expect(report.state.decisions).toEqual([]);
     expect(controller.stateSnapshot()).toEqual(before);
     const persistedAfter = await snapshotStore.get("market-make:reducer-state:v1");
     const beforePayload = JSON.parse(persistedBefore!) as Record<string, unknown>;
     const afterPayload = JSON.parse(persistedAfter!) as Record<string, unknown>;
     expect(afterPayload.state).toEqual(beforePayload.state);
     expect(afterPayload.lastEventSeq).toBe(beforePayload.lastEventSeq);
-    expect(afterPayload.quotientSpendUsd).toBe(Number(beforePayload.quotientSpendUsd) + 0.01);
+    expect(beforePayload).not.toHaveProperty("quotientSpendUsd");
+    expect(afterPayload).not.toHaveProperty("quotientSpendUsd");
     expect(q.calls.active).toBe(qCallsBefore + 1);
 
     clock += 1_000;
@@ -808,6 +884,59 @@ describe("MarketMakeController", () => {
     expect(stateStore.readEvents(500).some((event) => event.type === "shock")).toBe(true);
     expect(control.cancelCalls).toContain("venue-1");
     expect(controller.stateSnapshot().markets[MARKET_KEY]?.shockPausedUntil).toBeGreaterThan(clock);
+    await controller.shutdown();
+  });
+
+  it("does not compare a new deployment's books with the prior deployment's shock baseline", async () => {
+    const control = fakeVenue(stateStore);
+    let controller = build(control).controller;
+    await controller.start();
+    clock += 1_000;
+    control.bookTs = clock;
+    await applyReconcile(controller);
+    await controller.resume();
+
+    clock += 61_000;
+    control.bookTs = clock;
+    control.yesBid = 0.35;
+    control.yesAsk = 0.36;
+    control.noBid = 0.64;
+    control.noAsk = 0.65;
+    await controller.tick();
+    const shocksBeforeRestart = stateStore.readEvents(500).filter((event) => event.type === "shock").length;
+    expect(shocksBeforeRestart).toBeGreaterThan(0);
+    await controller.shutdown();
+
+    control.yesBid = 0.49;
+    control.yesAsk = 0.5;
+    control.noBid = 0.49;
+    control.noAsk = 0.5;
+    clock += 61_000;
+    control.bookTs = clock;
+    controller = build(control, quotient(() => clock), {}, "deployment-b").controller;
+    await controller.start();
+    expect(Object.keys(controller.stateSnapshot().markets)).toEqual([MARKET_KEY]);
+    await controller.tick();
+
+    expect(stateStore.readEvents(500).filter((event) => event.type === "shock")).toHaveLength(shocksBeforeRestart);
+    expect(controller.stateSnapshot().globalEntryPausedUntil).toBe(0);
+    expect(controller.stateSnapshot().markets[MARKET_KEY]?.shockPausedUntil).toBe(0);
+    expect(controller.stateSnapshot().decisions).toEqual([]);
+    await controller.shutdown();
+  });
+
+  it("rejects an unusable flat book locally without turning it into a portfolio shock", async () => {
+    const control = fakeVenue(stateStore);
+    const { controller } = build(control);
+    await controller.start();
+    clock += 1_000;
+    control.bookTs = clock;
+    control.yesBid = 0.51;
+    control.yesAsk = 0.5;
+    await controller.tick();
+
+    expect(stateStore.readEvents(500).some((event) => event.type === "shock")).toBe(false);
+    expect(controller.stateSnapshot().globalEntryPausedUntil).toBe(0);
     await controller.shutdown();
   });
 
@@ -936,12 +1065,11 @@ describe("MarketMakeController", () => {
     await controller.shutdown();
   });
 
-  it("persists the UTC-day Quotient cap and keeps supervising books without polling Q", async () => {
+  it("polls Quotient at cadence without stopping later calls while supervising books between polls", async () => {
     const control = fakeVenue(stateStore);
     const config = testConfig();
-    config.quotient_feed.daily_api_cost_cap_usd = 0.01;
     const firstQ = quotient(() => clock);
-    let controller = build(control, firstQ, { config }).controller;
+    const controller = build(control, firstQ, { config }).controller;
     await controller.start();
     await applyReconcile(controller);
     expect(firstQ.calls.active).toBe(1);
@@ -956,19 +1084,76 @@ describe("MarketMakeController", () => {
     clock += config.quotient_feed.idle_poll_seconds * 1_000;
     control.bookTs = clock;
     await controller.tick();
-    expect(firstQ.calls.active).toBe(1);
-    expect(controller.status().quotientDailySpendUsd).toBeCloseTo(0.01);
-    await controller.shutdown();
+    expect(firstQ.calls.active).toBe(2);
 
-    stateStore.close();
-    stateStore = new MarketMakeStateStore(path);
-    const secondQ = quotient(() => clock);
-    controller = build(control, secondQ, { config }).controller;
     clock += config.quotient_feed.idle_poll_seconds * 1_000;
     control.bookTs = clock;
+    await controller.tick();
+    expect(firstQ.calls.active).toBe(3);
+    await controller.shutdown();
+  });
+
+  it("does not request order books for a closed flat market", async () => {
+    const control = fakeVenue(stateStore);
+    const baseCatalog = catalog(() => clock);
+    const { controller } = build(control, quotient(() => clock), {
+      catalog: {
+        async market(marketKey, nativeMarketId, conditionId) {
+          return {
+            ...await baseCatalog.market(marketKey, nativeMarketId, conditionId),
+            active: false,
+            closed: true,
+            acceptingOrders: false,
+          };
+        },
+      },
+    });
+
     await controller.start();
-    expect(secondQ.calls.active).toBe(0);
-    expect(controller.status().quotientDailySpendUsd).toBeCloseTo(0.01);
+    expect(control.tokenBookCalls).toBe(0);
+    await controller.shutdown();
+  });
+
+  it("does not resurrect a stale catalog when a newly discovered market no longer resolves in Gamma", async () => {
+    const control = fakeVenue(stateStore);
+    let controller = build(control).controller;
+    await controller.start();
+    const callsBeforeRestart = control.tokenBookCalls;
+    await controller.shutdown();
+
+    clock += 1_000;
+    controller = build(control, quotient(() => clock), {
+      catalog: {
+        async market() {
+          throw new Error("Gamma market expected exactly one result, received 0");
+        },
+      },
+    }, "deployment-b").controller;
+    await controller.start();
+
+    expect(control.tokenBookCalls).toBe(callsBeforeRestart);
+    await controller.shutdown();
+  });
+
+  it("retries HTTP 500 order-book reads in place", async () => {
+    const control = fakeVenue(stateStore);
+    const tokenBook = control.adapter.tokenBook?.bind(control.adapter);
+    if (!tokenBook) throw new Error("fixture requires tokenBook");
+    let attempts = 0;
+    control.adapter.tokenBook = async (tokenId) => {
+      attempts += 1;
+      if (attempts <= 2) {
+        const error = new Error("internal server error") as Error & { status: number };
+        error.status = 500;
+        throw error;
+      }
+      return tokenBook(tokenId);
+    };
+    const { controller } = build(control);
+
+    await controller.start();
+    expect(attempts).toBe(4);
+    expect(control.tokenBookCalls).toBe(2);
     await controller.shutdown();
   });
 });

@@ -102,7 +102,7 @@ async function offerToRememberPassphrase(botId: string, passphrase: string): Pro
     {
       type: "confirm",
       name: "remember",
-      message: `Save in ${systemPassphraseStore.label()} for later non-interactive commands?`,
+      message: `Save passphrase in ${systemPassphraseStore.label()}?`,
       initial: true,
     },
     { onCancel: () => process.exit(130) },
@@ -155,7 +155,7 @@ export async function select(
 export function openUrl(url: string): void {
   const opener = process.platform === "darwin" ? "open" : process.platform === "win32" ? "start" : "xdg-open";
   const res = spawnSync(opener, [url], { stdio: "ignore" });
-  if (res.status !== 0) console.log(pc.dim(`→ ${url}`));
+  if (res.status !== 0) console.log(url);
 }
 
 export function makeSetupContext(botId: string): SetupContext {
@@ -169,12 +169,11 @@ export function makeSetupContext(botId: string): SetupContext {
     async poll(waitingMsg, check, opts = {}) {
       const interval = opts.intervalMs ?? 15_000;
       const deadline = Date.now() + (opts.timeoutMs ?? 60 * 60_000);
-      process.stdout.write(pc.dim(`${waitingMsg} (Ctrl-C aborts; polling every ${Math.round(interval / 1000)}s)\n`));
+      process.stdout.write(pc.dim(`${waitingMsg}\n`));
       for (;;) {
         const result = await check();
         if (result !== null) return result;
         if (Date.now() > deadline) throw new Error(`timed out: ${waitingMsg}`);
-        process.stdout.write(pc.dim("."));
         await new Promise((r) => setTimeout(r, interval));
       }
     },
@@ -211,14 +210,8 @@ async function pollWithSkip<T>(
   const wasRaw = canReadSkip ? Boolean(input.isRaw) : false;
   const wasPaused = canReadSkip ? input.isPaused() : false;
   let skipped = false;
-  let lineOpen = false;
   let wakeForSkip: (() => void) | undefined;
 
-  const finishLine = (): void => {
-    if (!lineOpen) return;
-    process.stdout.write("\n");
-    lineOpen = false;
-  };
   const restoreInput = (): void => {
     if (!canReadSkip) return;
     input.off("data", onData);
@@ -229,7 +222,6 @@ async function pollWithSkip<T>(
     const key = chunk.toString();
     if (key.includes("\u0003")) {
       restoreInput();
-      finishLine();
       process.kill(process.pid, "SIGINT");
       return;
     }
@@ -244,8 +236,8 @@ async function pollWithSkip<T>(
     input.resume();
     input.on("data", onData);
   }
-  const controls = canReadSkip ? "press s to skip; Ctrl-C aborts" : "Ctrl-C aborts";
-  process.stdout.write(pc.dim(`${waitingMsg} (${controls}; polling every ${Math.round(interval / 1000)}s)\n`));
+  process.stdout.write(pc.dim(`${waitingMsg}\n`));
+  if (canReadSkip) process.stdout.write(pc.dim("Press s to skip\n"));
 
   try {
     for (;;) {
@@ -254,8 +246,6 @@ async function pollWithSkip<T>(
       if (result !== null) return result;
       if (skipped) return null;
       if (Date.now() > deadline) throw new Error(`timed out: ${waitingMsg}`);
-      process.stdout.write(pc.dim("."));
-      lineOpen = true;
       if (canReadSkip) {
         await new Promise<void>((resolve) => {
           let settled = false;
@@ -277,7 +267,6 @@ async function pollWithSkip<T>(
     }
   } finally {
     restoreInput();
-    finishLine();
   }
 }
 
@@ -345,7 +334,8 @@ export async function adapterFor(cfg: BotConfig, opts: { needCreds?: boolean; fi
     if (opts.needCreds) throw err;
     return undefined;
   });
-  return createAdapter(cfg.venue, { urls: withOperatorRpc(cfg), creds, fixtureBooks: opts.fixtureBooks });
+  return createAdapter(cfg.venue, { urls: withOperatorRpc(cfg), creds, fixtureBooks: opts.fixtureBooks,
+    perpDex: cfg.strategy.id === "quotient-swing" ? "xyz" : undefined });
 }
 
 export async function getKeystoreSecret(botId: string, role: string): Promise<string | null> {

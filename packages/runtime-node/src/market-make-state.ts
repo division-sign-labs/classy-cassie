@@ -7,16 +7,19 @@ import { dirname } from "node:path";
 
 export const MARKET_MAKE_SCHEMA_VERSION = 1;
 
-const DEFAULT_MAX_EVENTS = 50_000;
+// Events are a crash-recovery journal, not analytics storage. Their payloads
+// are compacted as soon as the reducer checkpoint absorbs them; a small tail
+// of event IDs remains only for duplicate suppression.
+const DEFAULT_MAX_EVENTS = 1_000;
 const DEFAULT_MAX_EVENT_AGE_MS = 7 * 24 * 60 * 60 * 1_000;
 // Decision and reconciliation rows are research telemetry. They are never read
 // back into memory by the runtime, but a market maker watching dozens of
 // markets writes them by the hundred per minute, so they need a ceiling too.
 const DEFAULT_MAX_DECISIONS = 250_000;
 const DEFAULT_MAX_DECISION_AGE_MS = 14 * 24 * 60 * 60 * 1_000;
-const DEFAULT_MAX_RECONCILIATIONS = 20_000;
+const DEFAULT_MAX_RECONCILIATIONS = 1;
 const DECISION_PRUNE_EVERY = 1_000;
-const RECONCILIATION_PRUNE_EVERY = 100;
+const RECONCILIATION_PRUNE_EVERY = 1;
 const EPSILON = 1e-9;
 
 export type MarketMakeLifecycle =
@@ -466,6 +469,7 @@ export class MarketMakeStateStore {
     this.db.pragma("foreign_keys = ON");
     this.db.pragma("busy_timeout = 5000");
     this.migrate();
+    this.purgeNonTradingTelemetry();
   }
 
   private migrate(): void {
@@ -723,6 +727,18 @@ export class MarketMakeStateStore {
 
   close(): void {
     this.db.close();
+  }
+
+  /**
+   * Remove research-only rows. Orders, fills, inventory, balances, loss state,
+   * lifecycle, and reconciliation identity remain untouched.
+   */
+  private purgeNonTradingTelemetry(): void {
+    this.db.transaction(() => {
+      this.db.prepare("DELETE FROM mm_decisions").run();
+      this.db.prepare("DELETE FROM mm_markouts").run();
+      this.pruneReconciliations();
+    })();
   }
 
   schemaVersion(): number {
@@ -1845,6 +1861,23 @@ export class MarketMakeStateStore {
       return result.changes === 1;
     })();
     return inserted;
+  }
+
+  /**
+   * Replace checkpointed recovery payloads with a tiny duplicate-suppression
+   * marker. Events after `seq` retain their payload because startup must replay
+   * them if the process exits before the next checkpoint.
+   */
+  compactEventsThrough(seq: number): void {
+    if (!Number.isSafeInteger(seq) || seq < 0) throw new Error("seq must be a non-negative whole number");
+    this.db.transaction(() => {
+      this.db.prepare("UPDATE mm_events SET payload_json = 'null' WHERE seq <= ? AND payload_json <> 'null'").run(seq);
+      this.db.prepare(`
+        DELETE FROM mm_events WHERE seq NOT IN (
+          SELECT seq FROM mm_events ORDER BY seq DESC LIMIT ?
+        )
+      `).run(this.maxEvents);
+    })();
   }
 
   private pruneEvents(now: number): void {

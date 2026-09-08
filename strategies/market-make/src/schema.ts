@@ -2,6 +2,7 @@
 // Strict external configuration and normalized replay-event schemas.
 
 import { z } from "zod";
+import { TwoSidedPolicySchema } from "./two-sided.js";
 
 const finite = z.number().finite();
 const nonnegative = finite.nonnegative();
@@ -29,7 +30,6 @@ const QuotientFeedSchema = strict({
   exact_forecast_command_template: z.array(z.string()).min(1),
   idle_poll_seconds: positive,
   active_poll_seconds: positive,
-  daily_api_cost_cap_usd: positive,
   require_published_signal_for_new_entry: z.boolean(),
   require_is_active: z.boolean(),
   require_live_priced: z.boolean(),
@@ -312,11 +312,11 @@ export const CassieOverridesSchema = strict({
 }).prefault({});
 
 export const MarketMakeConfigSchema = strict({
-  schema_version: z.literal("q-directed-polymarket-mm/1"),
-  strategy_id: z.literal("q-directed-passive-inventory-v1"),
+  schema_version: z.enum(["q-directed-polymarket-mm/1", "polymarket-two-sided-mm/1", "polymarket-adaptive-mm/1"]),
+  strategy_id: z.enum(["q-directed-passive-inventory-v1", "two-sided-spread-v1", "quotient-adaptive-liquidity-v1"]),
   venue: z.literal("polymarket"),
-  mode: z.literal("passive_entry_passive_inventory_exit"),
-  decision_probability: z.literal("latest canonical served Q probability"),
+  mode: z.enum(["passive_entry_passive_inventory_exit", "two_sided_spread_and_inventory", "forecast_conditioned_liquidity"]),
+  decision_probability: z.enum(["latest canonical served Q probability", "executable venue book with inventory skew", "Q disagreement, executable books and inventory"]),
   external_news_or_x_enabled: z.literal(false),
   capital: CapitalSchema,
   quotient_feed: QuotientFeedSchema,
@@ -347,10 +347,38 @@ export const MarketMakeConfigSchema = strict({
   global_kill_switches: GlobalKillSwitchesSchema,
   telemetry: TelemetrySchema,
   cassie_overrides: CassieOverridesSchema,
+  two_sided: TwoSidedPolicySchema.optional(),
 }).superRefine((cfg, ctx) => {
   const issue = (path: (string | number)[], message: string): void => {
     ctx.addIssue({ code: "custom", path, message });
   };
+  const twoSided = cfg.two_sided !== undefined;
+  for (const [field, expected] of Object.entries(cfg.two_sided?.adaptive ? {
+    schema_version: "polymarket-adaptive-mm/1",
+    strategy_id: "quotient-adaptive-liquidity-v1",
+    mode: "forecast_conditioned_liquidity",
+    decision_probability: "Q disagreement, executable books and inventory",
+  } : twoSided ? {
+    schema_version: "polymarket-two-sided-mm/1",
+    strategy_id: "two-sided-spread-v1",
+    mode: "two_sided_spread_and_inventory",
+    decision_probability: "executable venue book with inventory skew",
+  } : {
+    schema_version: "q-directed-polymarket-mm/1",
+    strategy_id: "q-directed-passive-inventory-v1",
+    mode: "passive_entry_passive_inventory_exit",
+    decision_probability: "latest canonical served Q probability",
+  })) {
+    if (cfg[field as "schema_version" | "strategy_id" | "mode" | "decision_probability"] !== expected) {
+      issue([field], `must be ${expected} for the selected execution policy`);
+    }
+  }
+  if (twoSided && cfg.two_sided!.target_markets > cfg.capital.max_active_markets) {
+    issue(["two_sided", "target_markets"], "target markets cannot exceed the active market limit");
+  }
+  if (twoSided && cfg.two_sided!.target_markets * 2 > cfg.capital.max_live_orders) {
+    issue(["capital", "max_live_orders"], "two-sided quoting needs two order slots per target market");
+  }
   if (cfg.capital.max_order_notional_usd > cfg.capital.hard_market_cost_usd) {
     issue(["capital", "max_order_notional_usd"], "max order cannot exceed hard market cost");
   }
@@ -360,6 +388,11 @@ export const MarketMakeConfigSchema = strict({
   ) {
     issue(["capital"], "deployment, free collateral, and reserve exceed sizing bankroll");
   }
+  if (cfg.cassie_overrides.bankroll.mode === "fixed" && cfg.cassie_overrides.bankroll.maximum_sizing_bankroll_usd !== null) {
+    issue(["cassie_overrides", "bankroll", "maximum_sizing_bankroll_usd"], "a sizing-bankroll ceiling applies only in live bankroll mode");
+  }
+  // Forecast and legacy liquidity invariants do not govern the spread policy.
+  if (twoSided) return;
   if (cfg.eligibility.q_market_edge_min_pp > cfg.eligibility.q_market_edge_max_pp) {
     issue(["eligibility"], "minimum Q edge exceeds maximum");
   }
@@ -371,6 +404,12 @@ export const MarketMakeConfigSchema = strict({
   }
   if (cfg.eligibility.min_selected_side_price >= cfg.eligibility.max_selected_side_price) {
     issue(["eligibility"], "selected-side price interval is empty");
+  }
+  if (
+    cfg.quotient_feed.new_entry_max_forecast_age_seconds > cfg.quotient_feed.stale_forecast_exit_seconds ||
+    cfg.quotient_feed.no_add_forecast_age_seconds > cfg.quotient_feed.stale_forecast_exit_seconds
+  ) {
+    issue(["quotient_feed"], "entry and add forecast ages cannot exceed the stale-forecast exit age");
   }
   for (const side of ["NO", "YES"] as const) {
     if (cfg.direction_policy[side].minimum_edge_pp > cfg.direction_policy[side].maximum_edge_pp) {
@@ -388,15 +427,6 @@ export const MarketMakeConfigSchema = strict({
   }
   if (cfg.cassie_overrides.liquidity.minimum_exit_bid_depth_1c_usd > cfg.cassie_overrides.liquidity.minimum_exit_bid_depth_2c_usd) {
     issue(["cassie_overrides", "liquidity"], "1c minimum depth cannot exceed 2c minimum depth");
-  }
-  if (
-    cfg.cassie_overrides.bankroll.mode === "fixed" &&
-    cfg.cassie_overrides.bankroll.maximum_sizing_bankroll_usd !== null
-  ) {
-    issue(
-      ["cassie_overrides", "bankroll", "maximum_sizing_bankroll_usd"],
-      "a sizing-bankroll ceiling applies only in live bankroll mode",
-    );
   }
 });
 

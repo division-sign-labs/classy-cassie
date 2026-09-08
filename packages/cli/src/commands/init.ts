@@ -7,6 +7,7 @@ import { existsSync } from "node:fs";
 import {
   addressFromPk,
   KeyRoles,
+  CommodityConfigSchema,
   TelegramAlerter,
   createAdapter,
   generateEoa,
@@ -19,12 +20,12 @@ import { clearInitState, loadInitState, saveInitState, type InitState } from "..
 import { botConfigPath, loadBotConfig, saveBotConfig } from "../paths.js";
 import { createSplitsTreasury } from "../splits-init.js";
 import { discoverQuotientToken } from "../quotient-token.js";
-import { discoverAresApiKey, discoverAresBuilderCode, verifyAresApiKey } from "../ares-config.js";
 import { recommendedStrategySummary, elicitRecommendedStrategyConfig, elicitStrategyConfig } from "./strategy.js";
 import { AGENT_STRATEGY_SUMMARY, elicitAgentConfig, fetchAndStorePersona } from "./agent.js";
 import { discoverSurplusApiKey, verifySurplusApiKey } from "../surplus-config.js";
 import { runDeploy } from "./deploy.js";
 import { runFund } from "./fund.js";
+import { QuotientSwingConfigSchema } from "@quotient-forecasting/strategy-quotient-swing";
 import {
   MARKET_MAKE_PRESET,
   MarketMakeConfigSchema,
@@ -36,6 +37,12 @@ import {
  * V1 therefore requires a separate bot id for a different strategy.
  */
 export function requireSafeStrategyTransition(existingStrategyId: string | undefined, nextStrategyId: string): void {
+  if (existingStrategyId && existingStrategyId !== nextStrategyId && [existingStrategyId, nextStrategyId].includes("kalshi-commodities")) {
+    throw new Error("kalshi-commodities requires a separate bot id for its durable exposure and execution state");
+  }
+  if (existingStrategyId && existingStrategyId !== nextStrategyId && (existingStrategyId === "quotient-swing" || nextStrategyId === "quotient-swing")) {
+    throw new Error("quotient-swing requires a separate bot id so existing exposure and protection cannot be orphaned");
+  }
   if (existingStrategyId === "market-make" && nextStrategyId !== "market-make") {
     throw new Error(
       "cannot switch an existing market-make bot to another strategy in place; keep this bot id for halt/status/reconciliation and create a separate bot id",
@@ -89,11 +96,71 @@ export async function offerInitDeployment(
   }
 
   if (hasExistingDeployment) {
-    dependencies.print(pc.dim(`apply later with: cassie deploy ${botId}`));
+    dependencies.print(`cassie deploy ${botId}`);
     return;
   }
-  dependencies.print(pc.dim(`run locally with: cassie run ${botId}`));
-  dependencies.print(pc.dim(`deploy later with: cassie deploy ${botId}`));
+  dependencies.print(`cassie run ${botId}`);
+  dependencies.print(`cassie deploy ${botId}`);
+}
+
+export interface InitTelegramDependencies {
+  ask: typeof ask;
+  confirm: typeof confirm;
+  select: typeof select;
+  print: (message: string) => void;
+  send: (token: string, chatId: string) => Promise<void>;
+  saveToken: (token: string) => void;
+}
+
+/** Keep failed test credentials out of the saved configuration. */
+export async function configureInitTelegram(
+  existing: { chatId: string } | undefined,
+  d: InitTelegramDependencies,
+): Promise<{ chatId: string } | undefined> {
+  if (!(await d.confirm("Set up Telegram alerts?", true))) return existing;
+  d.print("Bot token: @BotFather");
+  d.print("Personal chat ID: @userinfobot");
+  d.print("Open your alert bot in Telegram and press Start.");
+  for (;;) {
+    const token = (await d.ask("Telegram bot token", { secret: true })).trim();
+    const chatId = (await d.ask("Telegram chat ID")).trim();
+    if (!token || !chatId) {
+      d.print("Token and chat ID are required.");
+      if (await d.confirm("Skip Telegram alerts?", false)) return undefined;
+      continue;
+    }
+    if (!(await d.confirm("Send a test message?", true))) {
+      d.saveToken(token);
+      d.print("Telegram saved without a test.");
+      return { chatId };
+    }
+    for (;;) {
+      try {
+        await d.send(token, chatId);
+      } catch (error) {
+        // Do not echo provider payloads: they may contain credentials or URLs.
+        const message = error instanceof Error ? error.message : "";
+        d.print(/bot.*send.*bot/i.test(message)
+          ? "Telegram rejected a bot chat ID. Use your personal chat ID."
+          : /chat not found|blocked|initiate conversation/i.test(message)
+          ? "Telegram cannot reach that chat. Check the chat ID and press Start in your alert bot."
+          : /401|unauthorized/i.test(message)
+          ? "Telegram rejected the token. Copy it from @BotFather."
+          : "Telegram test failed. Check the token, chat ID and connection.");
+        const next = await d.select("Telegram", [
+          { value: "edit", title: "Correct settings" },
+          { value: "retry", title: "Retry test" },
+          { value: "skip", title: "Skip alerts" },
+        ]);
+        if (next === "skip") { d.print("Telegram alerts skipped."); return undefined; }
+        if (next === "edit") break;
+        continue;
+      }
+      d.saveToken(token);
+      d.print("Telegram test sent.");
+      return { chatId };
+    }
+  }
 }
 
 /**
@@ -104,18 +171,19 @@ function describeAccount(account: NonNullable<BotConfig["account"]>): string[] {
   switch (account.venue) {
     case "polymarket":
       return [
-        `trading address:       ${account.funder}`,
-        "Polygon pUSD only.",
-        `signer (signs orders): ${account.signerAddress}`,
+        "Trading address — Polygon pUSD only",
+        account.funder,
+        "Signer address",
+        account.signerAddress,
       ];
     case "hyperliquid":
-      return [`master address: ${account.masterAddress}`];
+      return ["Master address", account.masterAddress];
     case "lighter":
-      return [`L1 address: ${account.l1Address}`, ...(account.accountIndex === undefined ? [] : [`account index: ${account.accountIndex}`])];
+      return ["L1 address", account.l1Address, ...(account.accountIndex === undefined ? [] : [`Account index: ${account.accountIndex}`])];
     case "kalshi":
       return [
-        `API key id: ${account.keyId}`,
-        "funds live in your Kalshi account (bank rails on kalshi.com)",
+        "API key ID",
+        account.keyId,
       ];
     default:
       return [];
@@ -187,10 +255,10 @@ async function reuseExistingAccount(
     return undefined;
   }
 
-  console.log(pc.bold(`\nThis bot already has a ${venue} account:`));
-  for (const line of describeAccount(account)) console.log(`  ${line}`);
+  console.log(`Existing ${venue} account`);
+  for (const line of describeAccount(account)) console.log(line);
   if (await confirm("Keep it?", true)) {
-    console.log(pc.dim("keeping the existing account — no new wallet is created."));
+    console.log("Existing account retained.");
     return account;
   }
   if (existing?.deployment) {
@@ -198,16 +266,15 @@ async function reuseExistingAccount(
       "this account has a deployed runtime. Cassie will not repoint the same bot id while that deployment exists; keep the account or use a new bot id",
     );
   }
-  console.log(pc.yellow("provisioning a new account; funds on the old one stay where they are."));
+  console.log("Existing funds remain on the old account.");
   return undefined;
 }
 
 export async function runInit(): Promise<void> {
-  console.log(pc.bold(pc.cyan("\nC A S S I E\n")));
-  console.log("Cassie is experimental, open-source software.");
-  console.log("Check every funding destination carefully: something may go wrong, and you may lose funds.");
-  console.log("Quotient is a publisher; its signals are informational and are not trading advice.\n");
-  console.log(pc.bold("Set up a trading bot: wallet, venue, strategy, alerts, funding.\n"));
+  console.log("Cassie setup");
+  console.log("Experimental software. You can lose your entire balance.");
+  console.log("Verify funding destinations before sending money.");
+  console.log("Quotient forecasts are not trading advice.");
 
   const botId = (await ask("Bot id (lowercase, dashes ok)", { default: "bot-1" })).trim();
   const configPath = botConfigPath(botId);
@@ -262,9 +329,9 @@ export async function runInit(): Promise<void> {
     savedIdentityAddress
   ) {
     throw new Error(
-      `the saved bot identifies wallet ${savedIdentityAddress}, but its local master key is missing. ` +
-        `Cassie will not replace a potentially funded identity. Restore it with \`cassie wallet import ${botId}\`, ` +
-        "or use a new bot id for a new wallet.",
+      `Local master key missing for the saved wallet:\n${savedIdentityAddress}\n` +
+        "Restore the matching key or use a new bot ID.\n" +
+        `cassie wallet import ${botId}`,
     );
   }
   let wallet: BotConfig["wallet"];
@@ -275,7 +342,8 @@ export async function runInit(): Promise<void> {
       throw new Error("the init checkpoint's wallet does not match the encrypted local master key");
     }
     wallet = state.wallet;
-    console.log(pc.dim(`reusing verified local wallet ${wallet.address}`));
+    console.log("Local wallet verified.");
+    console.log(wallet.address);
   } else if (ks.entryMeta(botId, KeyRoles.master)) {
     const passphrase = await getPassphrase(botId);
     const stored = ks.getEntry(botId, KeyRoles.master, passphrase);
@@ -283,13 +351,14 @@ export async function runInit(): Promise<void> {
     const storedAddress = addressFromPk(stored);
     if (savedIdentityAddress && storedAddress.toLowerCase() !== savedIdentityAddress.toLowerCase()) {
       throw new Error(
-        `the encrypted master key derives ${storedAddress}, but the saved bot identifies ${savedIdentityAddress}. ` +
-          "Restore the matching keystore/config pair or use a new bot id; Cassie will not replace either identity.",
+        `Master key wallet:\n${storedAddress}\nSaved wallet:\n${savedIdentityAddress}\n` +
+          "Wallets do not match. Restore the matching keystore/config pair or use a new bot ID.",
       );
     }
     wallet = { origin: "local", address: storedAddress };
     checkpoint({ ...state, wallet });
-    console.log(pc.dim(`reusing existing master key for ${botId} (${wallet.address})`));
+    console.log("Existing wallet retained.");
+    console.log(wallet.address);
   } else {
     const passphrase = await getPassphrase(botId, !ks.exists(botId));
     if (ks.exists(botId)) ks.verifyPassphrase(botId, passphrase);
@@ -300,11 +369,12 @@ export async function runInit(): Promise<void> {
     });
     wallet = { origin: "local", address: eoa.address };
     checkpoint({ ...state, wallet });
-    console.log(`generated local wallet: ${pc.green(eoa.address)}`);
+    console.log("Local wallet created.");
+    console.log(eoa.address);
   }
   if (savedIdentityAddress && wallet.address!.toLowerCase() !== savedIdentityAddress.toLowerCase()) {
     throw new Error(
-      `the verified wallet ${wallet.address} does not match saved bot identity ${savedIdentityAddress}; refusing external setup`,
+      `Verified wallet:\n${wallet.address}\nSaved wallet:\n${savedIdentityAddress}\nWallets do not match; setup stopped.`,
     );
   }
   if (
@@ -327,9 +397,11 @@ export async function runInit(): Promise<void> {
     existingAccountAddress.toLowerCase() !== wallet.address!.toLowerCase()
   ) {
     console.log(pc.yellow("The saved venue account is controlled by a different wallet."));
-    for (const line of describeAccount(existingAccount)) console.log(`  ${line}`);
-    console.log(pc.dim(`current verified wallet: ${wallet.address}`));
-    if (!(await confirm("Continue by provisioning a new venue account? Existing funds stay on the old account.", false))) {
+    for (const line of describeAccount(existingAccount)) console.log(line);
+    console.log("Current wallet");
+    console.log(wallet.address);
+    console.log("Existing funds remain on the old account.");
+    if (!(await confirm("Create a new venue account?", false))) {
       return;
     }
   }
@@ -366,7 +438,8 @@ export async function runInit(): Promise<void> {
     });
     const { pendingTreasury: _completedPlan, ...completedState } = state;
     checkpoint({ ...completedState, treasury });
-    console.log(pc.green(`Splits subaccount created and linked: ${treasury.accountName} (${treasury.accountAddress})`));
+    console.log(`Splits subaccount linked: ${treasury.accountName}`);
+    console.log(treasury.accountAddress);
   }
 
   // Venue account provisioning (wizard-driven, adapter-owned).
@@ -375,8 +448,9 @@ export async function runInit(): Promise<void> {
   // config below.
   let venueUrlsOverride = existing?.venueUrls;
   if (venue === "kalshi") {
+    console.log("Kalshi demo uses simulated funds and separate keys.");
     const useDemo = await confirm(
-      "Use Kalshi's demo environment? (paper funds; keys from demo.kalshi.co)",
+      "Use Kalshi demo?",
       existing?.venueUrls.kalshi.demo ?? false,
     );
     venueUrlsOverride = {
@@ -412,8 +486,8 @@ export async function runInit(): Promise<void> {
   // or owned by the Quotient CLI. Say exactly which source won without
   // displaying any key material.
   const discovered = discoverQuotientToken();
-  if (discovered) console.log(pc.dim(`found a Quotient API key from ${discovered.origin}`));
-  const token = discovered && (await confirm("Use that key for Quotient signals and research?", true))
+  if (discovered) console.log(`Quotient credential: ${discovered.origin}`);
+  const token = discovered && (await confirm("Use this Quotient key?", true))
     ? discovered.token
     : (await ask("Quotient API key", { secret: true })).trim();
   if (token) ks.putEntry(botId, KeyRoles.quotientToken, token, pass, { runtimeEligible: true });
@@ -440,11 +514,20 @@ export async function runInit(): Promise<void> {
         }]
       : []),
   ];
+  if (venue === "kalshi") strategyChoices.unshift({ value: "kalshi-commodities", title: "kalshi-commodities", description: "oil, gold, BTC, copper and silver; diversified exact-contract Q with bounded limits" });
+  if (venue === "hyperliquid") strategyChoices.splice(0, strategyChoices.length,
+    { value: "quotient-swing", title: "quotient-swing", description: "1–5 day equity/commodity perps, NAV sizing, native stops" },
+    { value: "signals", title: "signals", description: "legacy Quotient signal follower" });
+  if (existing?.strategy.id === "quotient-swing") {
+    const swing = strategyChoices.find(choice => choice.value === "quotient-swing");
+    if (!swing) throw new Error("an existing quotient-swing bot must remain on Hyperliquid");
+    strategyChoices.splice(0, strategyChoices.length, swing);
+  }
   if (existing?.strategy.id === "market-make") {
     const marketMake = strategyChoices.find((choice) => choice.value === "market-make");
     if (!marketMake) throw new Error("an existing market-make bot must remain on Polymarket");
     strategyChoices.splice(0, strategyChoices.length, marketMake);
-    console.log(pc.dim("This bot id remains bound to market-make durable state; use a new bot id for another strategy."));
+    console.log("Changing strategies requires a new bot ID.");
   }
   const currentStrategy = strategyChoices.findIndex((choice) =>
     choice.value === (existing?.strategy.id === "flip-flat" ? "signals" : existing?.strategy.id),
@@ -453,28 +536,48 @@ export async function runInit(): Promise<void> {
     const [current] = strategyChoices.splice(currentStrategy, 1);
     strategyChoices.unshift(current!);
   }
-  const strategyId = isPredictionVenue(venue) ? await select("Strategy", strategyChoices) : "signals";
+  const strategyId = isPredictionVenue(venue) || venue === "hyperliquid" ? await select("Strategy", strategyChoices) : "signals";
   requireSafeStrategyTransition(existing?.strategy.id, strategyId);
 
   let strategyConfig: Record<string, unknown>;
   let tickIntervalMin: number;
-  if (strategyId === "agent") {
-    console.log(pc.bold("\nStrategy: agent — your mandate, Quotient research, model-selected entries, quarter-Kelly sizing."));
+  if (strategyId === "kalshi-commodities") {
+    strategyConfig = CommodityConfigSchema.parse(existing?.strategy.id === strategyId ? existingStrategy : {});
+    tickIntervalMin = 1;
+    console.log("Commodity entries: bounded limits, one position per asset.");
+    console.log("Gross premium limit: 10% of capital.");
+    console.log("Trading starts paused.");
+  } else if (strategyId === "quotient-swing") {
+    strategyConfig = QuotientSwingConfigSchema.parse(existing?.strategy.id === "quotient-swing" ? existingStrategy : {});
+    tickIntervalMin = Number(strategyConfig.tickIntervalMin);
+    console.log("Running or deploying starts live trading.");
+    console.log("Collateral: Standard account mode, xyz USDC balance.");
+    console.log("Planned stop risk: 5–10% of NAV per trade.");
+    console.log("Gross exposure limit: 4× NAV.");
+    console.log("Gaps and liquidation can exceed planned losses.");
+    const found = discoverSurplusApiKey();
+    const surplusKey = found?.value ?? (await ask("Surplus Intelligence API key", { secret: true })).trim();
+    if (!surplusKey) throw new Error("quotient-swing requires a Surplus Intelligence API key");
+    await verifySurplusApiKey(surplusKey);
+    ks.putEntry(botId, KeyRoles.surplusApiKey, surplusKey, pass, { runtimeEligible: true });
+  } else if (strategyId === "agent") {
+    console.log("Agent strategy: model-selected entries, quarter-Kelly sizing.");
     strategyConfig = await elicitAgentConfig(existing?.strategy.id === "agent" ? existingStrategy : {});
 
     // SURPLUS_API_KEY is a hard prerequisite for this strategy: discover it,
     // store it runtime-eligible, and verify it live before saving the config.
     const discoveredSurplus = discoverSurplusApiKey();
-    if (discoveredSurplus) console.log(pc.dim(`found a Surplus API key in ${discoveredSurplus.origin}`));
+    if (discoveredSurplus) console.log(`Surplus credential: ${discoveredSurplus.origin}`);
     const surplusKey = discoveredSurplus
       ? discoveredSurplus.value
-      : (await ask("Surplus Intelligence API key (inf_…; the agent's LLM credential)", { secret: true })).trim();
+      : (await ask("Surplus Intelligence API key", { secret: true })).trim();
     if (!surplusKey) throw new Error("the agent strategy requires a Surplus Intelligence API key");
     ks.putEntry(botId, KeyRoles.surplusApiKey, surplusKey, pass, { runtimeEligible: true });
     await verifySurplusApiKey(surplusKey);
-    console.log(pc.green("Surplus API key verified"));
+    console.log("Surplus key verified.");
 
-    const personaHandle = (await ask('Persona X handle for the judgment layer (optional; costs $1 — or "none")', {
+    console.log("Persona lookup costs $1.");
+    const personaHandle = (await ask('Persona X handle (or "none")', {
       default: (strategyConfig.persona as { handle?: string } | undefined)?.handle ?? "none",
     })).trim();
     if (personaHandle && personaHandle.toLowerCase() !== "none") {
@@ -485,12 +588,8 @@ export async function runInit(): Promise<void> {
     // Engine ticks stay cheap housekeeping between paid wakes.
     tickIntervalMin = 15;
   } else if (strategyId === "market-make") {
-    console.log(pc.bold("\nStrategy: market-make — Q-directed passive inventory on Polymarket."));
-    console.log(
-      pc.dim(
-        "Sizing follows funded strategy capital automatically. At the $500 reference: $350 deployed, 6 markets; $1k bid depth within 1¢ and $2.5k within 2¢.",
-      ),
-    );
+    console.log("Market-make strategy: Q-directed passive inventory.");
+    console.log("Sizing follows funded capital.");
     strategyConfig = structuredClone(
       existing?.strategy.id === "market-make"
         ? MarketMakeConfigSchema.parse(existingStrategy)
@@ -498,8 +597,8 @@ export async function runInit(): Promise<void> {
     ) as unknown as Record<string, unknown>;
     tickIntervalMin = MarketMakeConfigSchema.parse(strategyConfig).reconciliation.rest_reconcile_seconds / 60;
   } else {
-    console.log(pc.bold("\nStrategy: signals — follow Quotient signals, hold until the forecast converges with the price."));
-    console.log(pc.dim(`Recommended: ${recommendedStrategySummary(venue)}.`));
+    console.log("Signals strategy: published Quotient signals.");
+    for (const rule of recommendedStrategySummary(venue).split(", ")) console.log(rule);
     strategyConfig = (await confirm("Use recommended allocation rules?", true))
       ? await elicitRecommendedStrategyConfig(existingStrategy, venue)
       : await elicitStrategyConfig(existingStrategy, venue);
@@ -507,54 +606,12 @@ export async function runInit(): Promise<void> {
   }
 
   // Alerts: Telegram only in MVP.
-  let telegram: { chatId: string } | undefined = existing?.alerts.telegram;
-  if (await confirm("Wire Telegram alerts now?", true)) {
-    console.log(pc.dim("Token from @BotFather, chat id from @userinfobot."));
-    const tgToken = (await ask("Telegram bot token", { secret: true })).trim();
-    const chatId = (await ask("Telegram chat id")).trim();
-    if (tgToken && chatId) {
-      ks.putEntry(botId, KeyRoles.telegramToken, tgToken, pass, { runtimeEligible: true });
-      telegram = { chatId };
-      if (await confirm("Send a test ping now?", true)) {
-        try {
-          await new TelegramAlerter(tgToken, chatId).send({ kind: "test", botId, message: "cassie is wired up 🎉" });
-          console.log(pc.green("telegram ping sent"));
-        } catch (err) {
-          console.log(pc.yellow(`telegram test failed: ${(err as Error).message} — continuing`));
-        }
-      }
-    }
-  }
-
-  // Ares is explicitly per bot. Finding credentials never enables it by
-  // itself; the operator opts this Polymarket bot into attribution + posts.
-  let reporting: BotConfig["reporting"];
-  if (venue === "polymarket" && (await confirm("Publish this bot's verified position cards to Ares?", Boolean(existing?.reporting)))) {
-    const discoveredBuilder = discoverAresBuilderCode();
-    const builderCode =
-      discoveredBuilder?.value ??
-      existing?.reporting?.builderCode ??
-      (await ask("Ares builder code (0x + 64 hex)")).trim();
-    if (discoveredBuilder) console.log(pc.dim(`found the Ares builder code in ${discoveredBuilder.origin}`));
-
-    const discoveredKey = discoverAresApiKey();
-    let apiKey = discoveredKey?.value;
-    if (discoveredKey) console.log(pc.dim(`found an Ares API key in ${discoveredKey.origin}`));
-    if (!apiKey) {
-      apiKey = (await ask("Ares API key", { secret: true })).trim();
-      if (apiKey) ks.putEntry(botId, KeyRoles.aresApiKey, apiKey, pass, { runtimeEligible: true });
-    }
-    if (!apiKey) throw new Error("Ares posting was enabled without an API key");
-    const username = await verifyAresApiKey(apiKey, existing?.reporting?.baseUrl);
-    console.log(pc.green(`Ares key verified for @${username}`));
-    reporting = {
-      provider: "ares",
-      builderCode,
-      post: true,
-      postOn: existing?.reporting?.postOn ?? ["entry", "exit"],
-      baseUrl: existing?.reporting?.baseUrl ?? "https://api.ares.pro",
-    };
-  }
+  const telegram = await configureInitTelegram(existing?.alerts.telegram, {
+    ask, confirm, select,
+    print: message => console.log(message),
+    send: (token, chatId) => new TelegramAlerter(token, chatId).send({ kind: "test", botId, message: "Cassie alert test" }),
+    saveToken: token => ks.putEntry(botId, KeyRoles.telegramToken, token, pass, { runtimeEligible: true }),
+  });
 
   const cfg = parseBotConfig({
     id: botId,
@@ -566,10 +623,10 @@ export async function runInit(): Promise<void> {
       id: strategyId,
       config: strategyConfig,
     },
-    risk: existing?.risk,
-    signals: existing?.signals ?? {},
+    risk: strategyId === "kalshi-commodities" ? { ...existing?.risk, minDailyVolume: 0, depthCapPct: 2, minViableNotional: 1, maxOrderNotional: 100, slippagePct: 3 } : existing?.risk,
+    signals: strategyId === "kalshi-commodities" ? { ...existing?.signals, maxAgeSec: Number(strategyConfig.maxForecastAgeHours) * 3600 } : existing?.signals ?? {},
+    execution: strategyId === "kalshi-commodities" ? { mode: "adaptive", entryDeadlineSec: strategyConfig.entryDeadlineSec, exitPassiveSec: strategyConfig.exitPassiveSec } : existing?.execution,
     alerts: { ...existing?.alerts, telegram },
-    reporting,
     venueUrls: venueUrlsOverride,
     tickIntervalMin,
     deployment: existing?.deployment,
@@ -578,9 +635,11 @@ export async function runInit(): Promise<void> {
   // Recovery boundary: the complete bot and venue identity are durable before
   // any deposit address is shown or any deployment work begins.
   commitInitConfig(cfg);
-  console.log(pc.green(`\nsaved ${botConfigPath(botId)}`));
+  console.log("Configuration saved.");
+  console.log(botConfigPath(botId));
   if (existing?.deployment) {
-    console.log(pc.yellow(`The droplet still runs the old configuration. Apply this one with cassie deploy ${botId}.`));
+    console.log("Droplet configuration unchanged until deployment.");
+    console.log(`cassie deploy ${botId}`);
   }
 
   if (venue === "polymarket") {
@@ -590,18 +649,16 @@ export async function runInit(): Promise<void> {
     const bridge = instructions.addresses.find((address) => address.chain === "evm");
     if (!bridge) throw new Error("Polymarket bridge returned no EVM deposit address");
     console.log(pc.bold("\nFunding"));
-    console.log(`Bridge deposit address (${bridge.asset} on a supported EVM chain): ${pc.green(bridge.address)}`);
+    console.log(`Bridge deposit: ${bridge.asset}, supported EVM chains only.`);
+    console.log(bridge.address);
     if (treasury) {
-      console.log(
-        pc.yellow(
-          "Splits is linked, but Cassie will not construct this proposal until it can validate the bridge's live source-chain/token route. Use the shown address with a currently supported route in Splits, then continue here to wait for credit.",
-        ),
-      );
+      console.log("Splits funding proposal unavailable: bridge route not verified.");
+      console.log("Verify the source chain and token before transferring.");
     }
-    if (await confirm("Continue the funding flow and wait for credit now?", true)) {
+    if (await confirm("Continue funding?", true)) {
       await runFund(botId, {});
     } else {
-      console.log(pc.dim(`fund later with: cassie fund ${botId}`));
+      console.log(`cassie fund ${botId}`);
     }
   } else if (await confirm("Run the funding flow now?", true)) {
     if (venue === "hyperliquid" && treasury && !cfg.venueUrls.hyperliquid.testnet) {
@@ -609,28 +666,25 @@ export async function runInit(): Promise<void> {
         {
           value: "splits",
           title: `Splits · ${treasury.accountName}`,
-          description: "Create an Arbitrum native-USDC proposal, approve it with your passkey, then bridge.",
+          description: "Approve an Arbitrum USDC transfer with your passkey.",
         },
         {
           value: "external",
           title: "Another wallet or exchange",
-          description: "Use the ordinary USDC + ETH funding instructions.",
+          description: "Send USDC and gas ETH.",
         },
       ]);
       await runFund(botId, source === "splits" ? { from: "splits" } : {});
     } else {
       if (venue === "lighter" && treasury) {
-        console.log(
-          pc.yellow(
-            `When Lighter asks for the sending address, enter the Splits account ${treasury.accountAddress}; its intent is sender-bound. Then propose the same-chain transfer in Splits.`,
-          ),
-        );
+        console.log("Lighter sending address");
+        console.log(treasury.accountAddress);
+        console.log("Use this sender and the same chain for the Splits transfer.");
       }
       await runFund(botId, {});
     }
   } else {
-    console.log(pc.dim(`fund later with: cassie fund ${botId}`));
+    console.log(`cassie fund ${botId}`);
   }
-  console.log(pc.bold(`\nbot "${botId}" setup complete.`));
   await offerInitDeployment(botId, Boolean(existing?.deployment));
 }

@@ -38,6 +38,9 @@ importers:
       '@quotient-forecasting/strategy-market-make':
         specifier: workspace:*
         version: link:../../strategies/market-make
+      '@quotient-forecasting/strategy-quotient-swing':
+        specifier: workspace:*
+        version: link:../../strategies/quotient-swing
       commander:
         specifier: 15.0.0
         version: 15.0.0
@@ -97,9 +100,15 @@ importers:
       '@quotient-forecasting/strategy-market-make':
         specifier: workspace:*
         version: link:../../strategies/market-make
+      '@quotient-forecasting/strategy-quotient-swing':
+        specifier: workspace:*
+        version: link:../../strategies/quotient-swing
       better-sqlite3:
         specifier: 13.0.3
         version: 13.0.3
+      zod:
+        specifier: 4.4.3
+        version: 4.4.3
     devDependencies:
       '@types/better-sqlite3':
         specifier: 7.6.13
@@ -147,6 +156,22 @@ importers:
 
   strategies/market-make:
     dependencies:
+      zod:
+        specifier: 4.4.3
+        version: 4.4.3
+    devDependencies:
+      '@types/node':
+        specifier: 24.2.1
+        version: 24.2.1
+      typescript:
+        specifier: 5.9.2
+        version: 5.9.2
+
+  strategies/quotient-swing:
+    dependencies:
+      '@quotient-forecasting/cassie-core':
+        specifier: workspace:*
+        version: link:../../packages/core
       zod:
         specifier: 4.4.3
         version: 4.4.3

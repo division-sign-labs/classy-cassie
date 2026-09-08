@@ -8,14 +8,14 @@
 // market-scope parameters only. No account state — P&L, balances, sizes,
 // budgets — ever flows toward the Quotient API.
 //
-// Every call is billed (cents; profiles $1), so callers meter usage: batch
+// Every call is billed (cents; profiles $1), so callers record usage: batch
 // lookups (up to 10 refs per call), cache results, and reuse a stored persona
 // instead of re-profiling.
 
 import { z } from "zod";
 import { boundFetch } from "../http.js";
 
-/** Per-call prices, USD — used by the strategy's per-wake spend meter. */
+/** Per-call prices, USD — used for cost telemetry. */
 export const QUOTIENT_CALL_COST_USD = {
   search: 0.01,
   lookup: 0.005,

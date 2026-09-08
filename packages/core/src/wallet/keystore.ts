@@ -260,7 +260,6 @@ export const KeyRoles = {
   polymarketL2: "polymarket-l2", // CLOB L2 creds JSON (runtime-eligible)
   telegramToken: "telegram-token", // bot token (runtime-eligible)
   quotientToken: "quotient-token", // signal API token (runtime-eligible)
-  aresApiKey: "ares-api-key", // Ares feed key, ares_sk_live_… (runtime-eligible)
   kalshiApi: "kalshi-api", // Kalshi RSA private key, single-line base64 PKCS#8 DER (runtime-eligible)
   surplusApiKey: "surplus-api-key", // Surplus Intelligence LLM key, inf_… (runtime-eligible)
 } as const;

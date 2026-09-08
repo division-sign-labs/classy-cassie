@@ -186,7 +186,9 @@ export function evaluateEntryGates(candidate: NormalizedCandidate, context: Entr
   if (candidate.depthWithin2cUsd + EPSILON < config.cassie_overrides.liquidity.minimum_exit_bid_depth_2c_usd) reasons.push("exit-bid-depth-2c-low");
   if (candidate.volume24hUsd + EPSILON < config.eligibility.min_volume_24h_usd) reasons.push("volume-low");
   if (!Number.isFinite(candidate.yesMid) || !Number.isFinite(candidate.noMid) || Math.abs(candidate.yesMid + candidate.noMid - 1) * 100 > config.market_data.max_yes_no_midpoint_complement_error_pp + EPSILON) reasons.push("yes-no-complement-error");
-  if (candidate.volatilityRegime === "dead" || candidate.volatilityRegime === "extreme") reasons.push(`volatility-${candidate.volatilityRegime}`);
+  if (!config.volatility.regimes[candidate.volatilityRegime].new_entry_enabled) {
+    reasons.push(`volatility-${candidate.volatilityRegime}`);
+  }
   // Drawdown risk is a covariate under test, not evidence against the edge: the
   // preset ranks flagged candidates below clean ones instead of excluding them.
   if (config.eligibility.reject_drawdown_risk_elevated && candidate.drawdownRiskElevated) reasons.push("q-drawdown-risk-elevated");

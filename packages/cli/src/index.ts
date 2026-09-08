@@ -16,7 +16,6 @@ import { runTrade } from "./commands/trade.js";
 import { runDeploy } from "./commands/deploy.js";
 import { runDestroy } from "./commands/destroy.js";
 import { agentDryRun, agentPersona, agentPrompt, agentStatus } from "./commands/agent.js";
-import { configureReporting } from "./commands/reporting.js";
 import { configureSignalsKey } from "./commands/signals-key.js";
 import { installSkill } from "./commands/skill.js";
 import { changePassphrase, forgetPassphrase, passphraseStatus, rememberPassphrase } from "./commands/passphrase.js";
@@ -30,18 +29,45 @@ import {
   marketMakeStatus,
 } from "./commands/market-make.js";
 import { cliVersion } from "./version.js";
+import { configureSwing, swingStatus, swingDryRun, swingHalt, swingResume, swingReplay } from "./commands/swing.js";
+import { configureCommodities, scanCommodities, commodityStatus, commodityDryRun, commodityHalt, commodityResume, commodityHistory } from "./commands/commodities.js";
 
 export const program = new Command();
 
 program
   .name("cassie")
-  .description("self-hosted, non-custodial trading bots for prediction markets and perps venues")
+  .description("self-hosted trading bots")
   .version(cliVersion());
 
-program.command("init").description("wizard: create a bot (wallet, venue, strategy, alerts, funding)").action(wrap(runInit));
+program.command("init").description("create or finish setting up a bot").action(wrap(runInit));
 
-const wallet = program.command("wallet").description("per-bot key management (encrypted local keystore)");
-wallet.command("create <botId>").description("generate a fresh EOA for a bot").action(wrap(walletCreate));
+const commodities = program.command("commodities").description("Kalshi oil, gold, BTC, copper and silver strategy");
+commodities.command("scan").option("--equity <usd>", "hypothetical flat portfolio equity", "1000").option("--config <file>", "strategy JSON")
+  .option("--output <file>", "save full research and decision JSON").description("preview public markets; no exchange credentials or orders").action(wrap(scanCommodities));
+commodities.command("configure <botId>").option("--config <file>", "strategy JSON").option("--execution <style>", "marketable or adaptive")
+  .description("configure a stopped commodity bot").action(wrap(configureCommodities));
+commodities.command("status <botId>").description("risk, decisions and managed orders").action(wrap(commodityStatus));
+commodities.command("dry-run <botId>").option("--output <file>", "save decision JSON").description("preview against current account without orders").action(wrap(commodityDryRun));
+commodities.command("halt <botId>").description("pause trading and cancel working orders").action(wrap(commodityHalt));
+commodities.command("history <botId>").option("--from <iso>", "inclusive start").option("--until <iso>", "inclusive end")
+  .option("--limit <count>", "maximum frames, 1–10000", "100").option("--output <file>", "save observations JSON")
+  .description("export recorded inputs and decisions for forward evaluation").action(wrap(commodityHistory));
+commodities.command("resume <botId>").option("--acknowledge-loss-reset", "reset reviewed loss limits while flat")
+  .description("explicitly activate automated trading").action(wrap(commodityResume));
+
+const swing = program.command("swing").description("Quotient equity and commodity perps");
+swing.command("configure <botId>").option("--config <file>", "strategy JSON")
+  .action(wrap(configureSwing));
+swing.command("status <botId>").description("NAV, risk, research, and protection").action(wrap(swingStatus));
+swing.command("dry-run <botId>").description("refresh research and preview decisions without orders").action(wrap(swingDryRun));
+swing.command("halt <botId>").description("halt additions; keep native stops and exit supervision").action(wrap(swingHalt));
+swing.command("resume <botId>").option("--acknowledge-loss-reset", "request a separately confirmed drawdown reset").description("resume after an operator or execution halt").action(wrap(swingResume));
+swing.command("replay <botId>").option("--from <iso>", "inclusive recording start").option("--until <iso>", "inclusive recording end")
+  .option("--costs <multiplier>", "fee/slippage stress multiplier, minimum 1", "1").option("--fill-model <model>", "cross or touch", "cross")
+  .description("replay recorded market data").action(wrap(swingReplay));
+
+const wallet = program.command("wallet").description("encrypted bot wallets");
+wallet.command("create <botId>").description("create a bot wallet").action(wrap(walletCreate));
 wallet.command("import <botId>").description("import a private key via stdin").action(wrap(walletImport));
 wallet
   .command("export <botId>")
@@ -51,7 +77,7 @@ wallet
 wallet.command("list").description("list bots and key roles").action(wrap(walletList));
 wallet
   .command("register-splits <botId>")
-  .description("print the safe Splits EOA registration command (does not attach account authority)")
+  .description("print the Splits signer registration command")
   .action(wrap(registerSplitsSigner));
 
 const passphrase = program.command("passphrase").description("local keystore passphrase management");
@@ -71,7 +97,7 @@ passphrase.command("status <botId>").description("show whether a passphrase is s
 
 program
   .command("fund <botId>")
-  .description("run/re-run the venue funding flow")
+  .description("fund a bot")
   .option("--from <source>", "treasury source: splits")
   .action(wrap(runFund));
 
@@ -90,7 +116,8 @@ program
 
 program
   .command("deploy <botId>")
-  .description("run the bot on a DigitalOcean droplet in your own account")
+  .option("--from-workspace", "deploy this checkout")
+  .description("deploy to DigitalOcean")
   .option("--region <slug>", "droplet region (default: blr1)")
   .option("--size <slug>", "droplet size (default: s-1vcpu-1gb)")
   .option("-y, --yes", "skip confirmation")
@@ -105,7 +132,7 @@ program
 
 program
   .command("status <botId>")
-  .description("droplet, service, and engine on one screen")
+  .description("show bot status")
   .action(wrap(showStatus));
 
 program
@@ -119,13 +146,6 @@ program
   .option("--auto", "unpin: resolve the key from .local.env, the environment, then the keystore")
   .action(wrap(configureSignalsKey));
 
-program
-  .command("reporting <botId>")
-  .description("configure per-bot Ares builder attribution and verified position posts")
-  .option("--off", "disable Ares attribution and posting for this bot")
-  .option("--no-post", "keep builder attribution but do not publish posts")
-  .action(wrap(configureReporting));
-
 program.command("portfolio [botId]").description("balances, positions, orders, PnL (per bot and aggregate)").action(wrap(showPortfolio));
 
 program
@@ -137,7 +157,7 @@ program
 
 program
   .command("trade <botId> [side] [marketRef]")
-  .description("place a trade: buy|sell <marketRef> --size … | --thesis (develop a trade from a thesis)")
+  .description("place a trade")
   .option("--size <n>", "size in base units (shares/contracts)")
   .option("--limit <px>", "limit price (default: crossing limit within slippage band)")
   .option("--tif <tif>", "gtc|ioc|fok", "gtc")
@@ -145,9 +165,9 @@ program
   .option("--trail <bps>", "trailing stop distance in bps (engine-managed)")
   .option("--tp <px>", "take-profit trigger")
   .option("--outcome <yes|no>", "prediction venues: which outcome token")
-  .option("--note <text>", "rationale for the trade; becomes the caption if the bot publishes to a feed")
+  .option("--note <text>", "operator rationale included in the order alert")
   .option("--slippage <pct>", "max book walk from the best price, as a percentage (default: bot risk config)")
-  .option("--thesis", "six questions → sized, guardrailed trade → approve → place (numbers computed in code)")
+  .option("--thesis", "build a trade from a thesis")
   .option("--save <file>", "with --thesis: also save the thesis JSON for reuse")
   .option("--from-thesis <file>", "place from a saved thesis JSON")
   .option("--mappings <file>", "alternative thesis mappings file")
@@ -169,7 +189,10 @@ alerts.command("test <botId>").description("send a Telegram test ping").action(w
 
 program
   .command("strategy <botId>")
-  .description("view/tune ranked positions, portfolio or daily-budget allocation, and signal guardrails")
+  .description("view or change strategy settings")
+  .option("--execution <adaptive|legacy>", "Polymarket signals: managed post-only limits or legacy crossing limits")
+  .option("--entry-deadline-seconds <seconds>", "Polymarket signals: deadline for an adaptive entry (default 120)")
+  .option("--exit-passive-seconds <seconds>", "Polymarket signals: passive exit phase before bounded immediate execution (default 60; 0 skips)")
   .option("--top <n|unlimited>", "optional signal-position cap; widest eligible edges enter first")
   .option("--allocation-mode <mode>", "portfolio-kelly or daily-budget")
   .option("--kelly-fraction <fraction>", "fraction of full Kelly, from 0 to 1 (0.25 = quarter Kelly)")
@@ -217,12 +240,12 @@ agent
 agent.command("status <botId>").description("agent configuration and the last wake's run report").action(wrap(agentStatus));
 agent
   .command("dry-run <botId>")
-  .description("one full scan+decide cycle — candidates, model reasoning, sizing arithmetic — placing nothing")
+  .description("preview decisions without placing orders")
   .action(wrap(agentDryRun));
 
 const marketMake = program
   .command("market-make")
-  .description("Q-directed Polymarket passive-inventory strategy");
+  .description("Polymarket two-sided market making and legacy forecast inventory");
 export function addMarketMakeConfigureOptions(command: Command): Command {
   return command
     .option("--config <file>", "replace with a complete strategy JSON document")
@@ -232,6 +255,8 @@ export function addMarketMakeConfigureOptions(command: Command): Command {
     .option("--max-deployed-usd <usd>", "inventory plus pending-entry cost ceiling")
     .option("--max-markets <n>", "maximum active markets")
     .option("--base-order-usd <usd>", "base passive ticket")
+    .option("--two-sided", "select inventory-aware two-sided spread quoting")
+    .option("--adaptive", "select experimental Q-adaptive liquidity (requires Quotient)")
     .option("--max-order-usd <usd>", "hard order notional cap")
     .option("--target-no-usd <usd>", "NO inventory target per market")
     .option("--yes-target-usd <usd>", "YES inventory target per market")
@@ -243,6 +268,18 @@ export function addMarketMakeConfigureOptions(command: Command): Command {
       parseMaxEdgePp,
     )
     .option("--max-book-spread-pp <pp>", "operational selected-token spread ceiling")
+    .option("--max-forecast-age-hours <hours>", "maximum forecast age for a new entry or add")
+    .option("--stale-forecast-exit-hours <hours>", "forecast age that triggers a mandatory exit")
+    .option("--min-volume-usd <usd>", "minimum trailing 24-hour market volume")
+    .option("--source-min-depth-2c-usd <usd>", "minimum signal-source depth within 2¢")
+    .option("--entry-stability-seconds <seconds>", "required stable-price window before entry")
+    .option("--max-move-away-from-q-pp <pp>", "maximum move away from Q during the stability window")
+    .option("--allow-dead-volatility", "allow new entries in dead volatility at 0.5x size")
+    .option("--allow-extreme-volatility", "allow new entries in extreme volatility at 0.25x size")
+    .option("--allow-current-q-after-shock", "remove the newer-Q requirement after an adverse shock")
+    .option("--correlated-shocks-for-global-pause <n>", "distinct shocked markets required for a global pause")
+    .option("--market-data-stale-seconds <seconds>", "maximum order-book age during evaluation")
+    .option("--venue-quote-max-age-seconds <seconds>", "maximum venue-quote age during evaluation")
     .option("--convergence-edge-pp <pp>", "remaining edge that triggers an exit")
     .option("--gap-capture-pct <pct>", "percentage of the first-fill gap captured at exit (75 = 75%)")
     .option("--review-hours <hours>", "review-only age")

@@ -71,10 +71,15 @@ const LookupRowSchema = z
     quotient_odds: z.number().nullish(),
     forecast_at: z.string().nullish(),
     last_updated: z.string().nullish(),
+    forecast_id: z.string().nullish(),
+    forecastId: z.string().nullish(),
+    drawdown_risk_elevated: z.boolean().nullish(),
+    drawdownRiskElevated: z.boolean().nullish(),
     retired_reason: z.string().nullish(),
     forecast_status: ForecastStatusSchema,
     forecast: z
       .object({
+        id: z.string().nullish(),
         probability: z.number().nullish(),
         created_at: z.string().nullish(),
       })
@@ -113,6 +118,8 @@ export interface MarketMakeExactForecast {
   marketKey: string;
   qYes: number;
   forecastAt: string;
+  /** Actual forecast identity when supplied; never the market or signal id. */
+  forecastId?: string;
   retiredReason?: string;
   forecastStatus: MarketMakeForecastStatus;
 }
@@ -125,6 +132,21 @@ function rowsFrom(body: unknown): unknown[] {
     if (Array.isArray(record[key])) return record[key] as unknown[];
   }
   return [];
+}
+
+/** An invalid batch response must not masquerade as a successful empty lookup. */
+function exactRowsFrom(body: unknown): unknown[] {
+  if (Array.isArray(body)) return body;
+  if (typeof body === "object" && body !== null) {
+    const record = body as Record<string, unknown>;
+    for (const key of ["markets", "results", "rows", "items", "data"]) {
+      if (Object.hasOwn(record, key)) {
+        if (!Array.isArray(record[key])) throw new Error(`quotient exact forecast response ${key} must be an array`);
+        return record[key] as unknown[];
+      }
+    }
+  }
+  throw new Error("quotient exact forecast response must contain a result array");
 }
 
 function probability01(label: string, value: number | null | undefined): number {
@@ -217,21 +239,28 @@ export class MarketMakeQuotientClient {
     return this.#spentUsd;
   }
 
-  async #get(path: string, query: Record<string, string | number>): Promise<unknown> {
+  async #get(path: string, query: Record<string, string | number>, timeoutMs?: number): Promise<unknown> {
     const url = new URL(this.#baseUrl + path);
     for (const [key, value] of Object.entries(query)) url.searchParams.set(key, String(value));
     const response = await this.#fetch(url, {
       headers: { "x-quotient-api-key": this.#token, accept: "application/json" },
+      ...(timeoutMs === undefined ? {} : { signal: AbortSignal.timeout(timeoutMs) }),
     });
     if (!response.ok) {
       const detail = await response.text().catch(() => "");
-      throw new Error(`quotient GET ${url.pathname} → ${response.status}${detail ? `: ${detail.slice(0, 300)}` : ""}`);
+      const retry = response.headers.get("retry-after");
+      const retryAfterMs = retry === null ? undefined : /^\d+(\.\d+)?$/.test(retry)
+        ? Number(retry) * 1_000 : Math.max(0, Date.parse(retry) - Date.now());
+      throw Object.assign(new Error(`quotient GET ${url.pathname} → ${response.status}${detail ? `: ${detail.slice(0, 300)}` : ""}`), {
+        status: response.status,
+        ...(retryAfterMs !== undefined && Number.isFinite(retryAfterMs) ? { retryAfterMs } : {}),
+      });
     }
     return response.json();
   }
 
   async activeSignals(limit = 500): Promise<MarketMakeSignalRow[]> {
-    const body = await this.#get(this.#signalsPath, { venue: "polymarket", status: "active", limit });
+    const body = await this.#get(this.#signalsPath, { venue: "polymarket", status: "active", limit }, 4_000);
     this.#spentUsd += QUOTIENT_CALL_COST_USD.signals;
     const out: MarketMakeSignalRow[] = [];
     for (const raw of rowsFrom(body)) {
@@ -250,22 +279,32 @@ export class MarketMakeQuotientClient {
     const body = await this.#get("/api/v1/markets/lookup", {
       market_keys: keys.join(","),
       venue: "polymarket",
-    });
+    }, 4_000);
     this.#spentUsd += QUOTIENT_CALL_COST_USD.lookup;
-    return rowsFrom(body).flatMap((raw) => {
+    const requestedKeys = new Set(keys);
+    return exactRowsFrom(body).flatMap((raw) => {
       const parsed = LookupRowSchema.safeParse(raw);
       if (!parsed.success) return [];
       const row = parsed.data;
-      const marketKey = row.marketKey ?? row.market_key;
+      const marketKey = (row.marketKey ?? row.market_key)?.trim();
       const q = row.latest_q_probability ?? row.quotient_odds ?? row.latest_q ?? row.forecast?.probability;
-      const at = row.forecast_at ?? row.last_updated ?? row.forecast?.created_at;
-      if (!marketKey || !at) return [];
+      // Generic last_updated can describe a fresh venue quote on an OLD Q.
+      // Cache observation time and forecast publication time are independent.
+      const at = (row.forecast_at ?? row.forecast?.created_at)?.trim();
+      if (!marketKey || !requestedKeys.has(marketKey) || !at || !Number.isFinite(Date.parse(at))) return [];
+      // One malformed probability must not discard otherwise valid batch rows.
+      if (q === null || q === undefined || !Number.isFinite(q) || q < 0 || q > 1) return [];
+      const forecastId = (row.forecast_id ?? row.forecastId ?? row.forecast?.id)?.trim();
+      const forecastStatus = statusOf(row.forecast_status);
+      forecastStatus.drawdownRiskElevated = forecastStatus.drawdownRiskElevated ||
+        row.drawdown_risk_elevated === true || row.drawdownRiskElevated === true;
       return [{
         marketKey,
-        qYes: probability01("exact forecast probability", q),
+        qYes: q,
         forecastAt: at,
+        ...(forecastId ? { forecastId } : {}),
         ...(row.retired_reason ? { retiredReason: row.retired_reason } : {}),
-        forecastStatus: statusOf(row.forecast_status),
+        forecastStatus,
       }];
     });
   }

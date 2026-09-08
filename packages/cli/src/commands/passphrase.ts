@@ -47,27 +47,27 @@ export async function changePassphrase(botId: string): Promise<void> {
       console.log(`Updated the saved passphrase in ${systemPassphraseStore.label()}.`);
     } catch (error) {
       console.error(
-        `Warning: the keystore passphrase was changed, but the saved ${systemPassphraseStore.label()} entry ` +
-          `could not be updated: ${(error as Error).message}. ` +
-          `Run \`cassie passphrase remember ${botId}\` to repair it.`,
+        `Warning: the keystore passphrase was changed.\n` +
+          `The saved ${systemPassphraseStore.label()} entry could not be updated: ${(error as Error).message}.\n` +
+          `cassie passphrase remember ${botId}`,
       );
     }
   } else if (savedPassphraseReadError) {
     console.error(
-      `Warning: the keystore passphrase was changed, but Cassie could not check ${systemPassphraseStore.label()} ` +
-        `for an existing saved entry: ${savedPassphraseReadError.message}. ` +
-        `Run \`cassie passphrase remember ${botId}\` if this bot should have a saved passphrase.`,
+      `Warning: the keystore passphrase was changed.\n` +
+        `Saved ${systemPassphraseStore.label()} entry could not be checked: ${savedPassphraseReadError.message}.\n` +
+        `cassie passphrase remember ${botId}`,
     );
   }
 
   if (explicitOverrideOrigin) {
     console.error(
-      `Warning: CASSIE_PASSPHRASE is still supplied by ${explicitOverrideOrigin}. ` +
+      `Warning: CASSIE_PASSPHRASE is still supplied by ${explicitOverrideOrigin}.\n` +
         "Update or remove that override before the next local keystore command.",
     );
   }
 
-  console.log("Running deployments are unaffected; they use already-deployed runtime credentials, not this local passphrase.");
+  console.log("Running deployments are unaffected.");
 }
 
 export async function rememberPassphrase(botId: string): Promise<void> {

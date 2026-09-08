@@ -41,7 +41,7 @@ function fakeService(over: Partial<Record<string, unknown>> = {}) {
     resume: record("resume"),
     logs: record("logs", []),
     signalCheck: record("signalCheck", { count: 3 }),
-    reportingCheck: record("reportingCheck", { ok: true, enabled: false }),
+    executionStatus: record("executionStatus", { parents: [], blocked: false }),
     geoblockCheck: record("geoblockCheck", { blocked: false, country: "SG" }),
     marketMakeStatus: () => ({ strategyId: "market-make", lifecycle: "HALTED" }),
     marketMakeSnapshot: () => ({ strategy: {}, persistence: {} }),
@@ -123,6 +123,11 @@ describe("serveControl", () => {
   it("reports runtime identity and pause state", async () => {
     const { json } = await call(socketPath, "GET", "/runtime");
     expect(json).toMatchObject({ runtime: "droplet", region: "sgp1", paused: false });
+  });
+
+  it("exposes execution receipts and removes the retired reporting endpoint", async () => {
+    expect((await call(socketPath, "GET", "/execution/status")).json).toEqual({ parents: [], blocked: false });
+    expect((await call(socketPath, "GET", "/reporting/check")).status).toBe(404);
   });
 
   it("accepts the /bots/:botId prefix as well as a bare path", async () => {

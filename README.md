@@ -77,9 +77,9 @@ can run the same flow later. It provisions a DigitalOcean droplet in the operato
 account — `s-1vcpu-1gb`, $6/mo, `blr1` by default — and runs the bot there under systemd. Orders
 leave from that droplet, which is what the region choice decides.
 
-Deploy refuses to start or authorize trading unless four things hold: the droplet confirms
-its region to DigitalOcean's metadata service, the venue accepts orders from there, the
-signal credential works from the droplet, and Ares reporting matches local configuration.
+Deploy refuses to start or authorize trading unless three things hold: the droplet confirms
+its region to DigitalOcean's metadata service, the venue accepts orders from there, and the
+signal credential works from the droplet.
 Even after those checks, a newly deployed market-maker remains `HALTED` pending the
 hash-bound operator review below. Any failure stops the deploy with the reason and leaves
 the bot idle.
@@ -122,17 +122,13 @@ then ignores `QUOTIENT_API_TOKEN` / `QUOTIENT_API_KEY` from the directory and th
 environment. `cassie signals-key <botId> --auto` unpins it. Deploy afterward — the droplet
 keeps the key it was last deployed with.
 
-## Ares reporting (per bot)
-
-For a Polymarket bot, `cassie reporting <botId>` opts only that bot into Ares builder
-attribution and verified position-card posts. Put `ARES_BUILDER_CODE` and
-`ARES_API_KEY` in the nearest `.local.env`; the command verifies the key against Ares
-before saving the bot config. Use `--no-post` to retain attribution without posts, or
-`--off` to remove both from that bot. Captions are per trade: `--note` supplies a manual
-caption; without it, a direct Polymarket trade uses the latest Quotient forecast thesis.
-Thesis trades use their public reasoning summary.
-
 ## Signals
+
+Polymarket signals bots use adaptive post-only limits: entries expire after 120 seconds,
+and normal exits have a 60-second passive phase before bounded immediate execution.
+Partial fills are retained and stale remainders canceled. Tune the durations or select
+legacy crossing limits with `cassie strategy <botId> --execution adaptive|legacy`; see
+[execution settings](packages/cli/README.md#execution).
 
 Bots consume this contract live from Quotient. Contributor tests use internal test
 doubles rather than a configurable venue or signal source:

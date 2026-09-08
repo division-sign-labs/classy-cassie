@@ -37,8 +37,6 @@ export const AgentConfigSchema = z.object({
   minEntryNotional: z.number().nonnegative().default(1),
   /** Paid wake cadence; engine ticks stay cheap housekeeping between wakes. */
   agentIntervalMin: z.number().positive().default(60),
-  /** Hard ceiling on Quotient spend per wake, USD. */
-  maxQuotientSpendUsdPerWake: z.number().positive().default(0.1),
   quotientCacheTtlMin: z.number().positive().default(240),
   /** How many enriched candidates the model sees per wake. */
   maxCandidates: z.number().int().positive().default(30),

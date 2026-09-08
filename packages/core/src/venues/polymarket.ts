@@ -1,7 +1,7 @@
 // packages/core/src/venues/polymarket.ts
 // Polymarket venue adapter (§5.1), built on the official unified SDK
 // @polymarket/client 0.6.0 (pinned). Verified against the installed SDK's type
-// surface and docs.polymarket.com on 2026-08-13.
+// surface and docs.polymarket.com on 2026-09-06.
 //
 // Conventions:
 //  - marketRef is the CLOB token ID of the YES token (§7). NO-side orders carry
@@ -23,6 +23,7 @@ import {
   relayerApiKey,
   OrderSide as PmOrderSide,
   OrderType as PmOrderType,
+  UnexpectedResponseError,
   type ApiKeyAuthorization,
   type AssetType,
   type EnvironmentContracts,
@@ -78,18 +79,10 @@ async function pollUntil(check: () => Promise<boolean>, opts: { attempts: number
   return check();
 }
 
-/** Last 4 chars of a stored credential, so a menu can identify it without revealing it. */
-function maskSecret(savedJson: string): string {
-  try {
-    const key = (JSON.parse(savedJson) as { key?: string }).key ?? "";
-    return key.length >= 4 ? `••••${key.slice(-4)}` : "••••";
-  } catch {
-    return "••••";
-  }
-}
 import {
   fetchBalanceAllowance,
   fetchMarketInfo,
+  fetchTransaction,
   resolveConditionByToken,
   updateBalanceAllowance,
 } from "@polymarket/client/actions";
@@ -105,9 +98,12 @@ import type {
   OrderBook,
   OrderIntent,
   OrderLifecycleHooks,
+  PredictionExecutionMarket,
+  PredictionOrderState,
   Position,
   Quote,
   RedemptionReceipt,
+  RedemptionHooks,
   RealtimeSubscription,
   RuntimeCreds,
   SetupContext,
@@ -122,8 +118,20 @@ type PmSignedOrder = Awaited<ReturnType<PmSecureClient["createLimitOrder"]>>;
 type PmCreds = Extract<RuntimeCreds, { venue: "polymarket" }>;
 type PmAccount = Extract<VenueAccount, { venue: "polymarket" }>;
 
-/** Local-only keystore role holding the operator's relayer/builder key (§11). */
+/** Keystore role for gasless service auth; directional deploys also receive it via private stdin. */
 export const GASLESS_AUTH_ROLE = "polymarket-gasless";
+
+/** Only explicit venue rejection proves that a prepared order was not accepted. */
+export class PolymarketOrderRejectedError extends Error {
+  readonly submissionRejected = true;
+  readonly postOnlyRejected: boolean;
+
+  constructor(message: string, options?: ErrorOptions) {
+    super(message, options);
+    this.name = "PolymarketOrderRejectedError";
+    this.postOnlyRejected = /post.?only|invalid_post_only_order/i.test(message);
+  }
+}
 
 type GaslessAuthDesc =
   | { kind: "relayer"; key: string; address: string }
@@ -142,7 +150,7 @@ function asPmAccount(acct: VenueAccount): PmAccount {
 
 export class PolymarketAdapter implements VenueAdapter {
   readonly id = "polymarket" as const;
-  readonly verifiedAgainst = "2026-08-13";
+  readonly verifiedAgainst = "2026-09-06";
   readonly supportsNativeTriggers = false;
 
   private creds?: PmCreds;
@@ -192,6 +200,7 @@ export class PolymarketAdapter implements VenueAdapter {
       ...this.environment,
       signer: privateKey(this.creds.signerPk),
       wallet: this.creds.funder,
+      ...(this.opts.polymarketGaslessAuth ? { apiKey: apiKeyFromDesc(this.opts.polymarketGaslessAuth) } : {}),
       credentials: {
         key: this.creds.l2.apiKey,
         secret: this.creds.l2.secret,
@@ -209,9 +218,12 @@ export class PolymarketAdapter implements VenueAdapter {
     const pk = await ctx.getSecret("master");
     if (!pk) throw new Error("no master key in keystore — run `cassie wallet create <botId>` first");
 
-    ctx.print("Paths: create = new Polymarket account (needs a Builder or Relayer key)");
-    ctx.print("       connect = existing Polymarket account (profile wallet + Relayer key)");
-    const path = (await ctx.ask("Path (create/connect)", { default: "create" })).trim().toLowerCase();
+    const path = ctx.select
+      ? await ctx.select("Polymarket account", [
+        { value: "create", title: "Create account" },
+        { value: "connect", title: "Connect existing account" },
+      ])
+      : (await ctx.ask("Account (create/connect)", { default: "create" })).trim().toLowerCase();
 
     let apiKey: ApiKeyAuthorization | undefined;
     let wallet: string | undefined;
@@ -233,11 +245,11 @@ export class PolymarketAdapter implements VenueAdapter {
     }
     if (gaslessAuth) {
       apiKey = apiKeyFromDesc(gaslessAuth);
-      // Builder/relayer keys stay local to the operator's machine.
+      // Keep service auth outside RuntimeCreds; directional deploy resolves it separately.
       await ctx.putSecret(GASLESS_AUTH_ROLE, JSON.stringify(gaslessAuth), { runtimeEligible: false });
     }
 
-    ctx.print("Creating/deriving Polymarket account and CLOB credentials (gasless)…");
+    ctx.print("Connecting Polymarket…");
     const client = await createSecureClient({
       ...this.environment,
       signer: privateKey(pk),
@@ -247,9 +259,8 @@ export class PolymarketAdapter implements VenueAdapter {
     this.secureClient = client;
 
     const account = client.account;
-    ctx.print(`signer (EOA):     ${account.signer}`);
-    ctx.print(`trading address:  ${account.wallet} [${String(account.walletType)}]`);
-    ctx.print("Polygon pUSD only.");
+    ctx.print("Trading wallet");
+    ctx.print(account.wallet);
 
     // L2 creds (HMAC key/secret/passphrase) — runtime-eligible.
     const l2 = client.credentials;
@@ -266,7 +277,7 @@ export class PolymarketAdapter implements VenueAdapter {
     // The wallet is not ready to trade until every current Polymarket spender
     // is approved. Do this during account setup, even when the operator elects
     // to fund later.
-    ctx.print("Setting up trading approvals (one-time, gasless via relayer)…");
+    ctx.print("Approving trading…");
     await this.ensureTradingApprovals(ctx, client);
 
     // Geoblock: surface the answer during setup, nothing more (§5.1).
@@ -276,8 +287,8 @@ export class PolymarketAdapter implements VenueAdapter {
       const g = (await res.json()) as { blocked?: boolean; country?: string; region?: string };
       ctx.print(
         g.blocked
-          ? `geoblock: ORDER PLACEMENT BLOCKED from your location (${g.country}${g.region ? "/" + g.region : ""}). Reads and funding still work; orders will be rejected.`
-          : `geoblock: order placement permitted from your location (${g.country ?? "unknown"}).`,
+          ? `Trading blocked in ${g.country}${g.region ? "/" + g.region : ""}.`
+          : `Trading permitted in ${g.country ?? "unknown location"}.`,
       );
     } catch (err) {
       ctx.print(`geoblock check skipped (${(err as Error).message})`);
@@ -302,12 +313,9 @@ export class PolymarketAdapter implements VenueAdapter {
         address,
         asset: "USDC",
         minimum,
-        note: chain === "evm" ? "any supported EVM chain; auto-converted to pUSD" : undefined,
+        note: chain === "evm" ? "Use a supported EVM network." : undefined,
       })),
-      summary:
-        `Send USDC to the bridge deposit address shown below. ` +
-        `Auto-wrapped to pUSD. Deposits over $50k: use a third-party bridge (DeBridge/Across/Portal) ` +
-        `direct to the Polygon USDC address instead to limit slippage.`,
+      summary: `Send at least ${minimum} USDC on a supported network.\nOver $50,000: use a third-party bridge to Polygon USDC.`,
     };
   }
 
@@ -388,10 +396,11 @@ export class PolymarketAdapter implements VenueAdapter {
     a = { ...a, bridgeAddresses: bridged };
     const minimum = await this.bridgeMinimum();
     ctx.print("");
-    ctx.print(`Bridge deposit address (EVM, any supported chain): ${bridged.evm}`);
-    ctx.print(`Minimum: ~${minimum} USDC. Incoming USDC is auto-wrapped to pUSD.`);
-    ctx.print(`(Small amounts can also go as USDC directly on Polygon to the same address.)`);
-    ctx.print(`Deposits over $50k: use a third-party bridge direct to Polygon USDC instead.`);
+    ctx.print(`Send at least ${minimum} USDC on a supported EVM network.`);
+    ctx.print("Over $50,000: use a third-party bridge to Polygon USDC.");
+    ctx.print("");
+    ctx.print(bridged.evm!);
+    ctx.print("");
 
     const checkForCredit = async (): Promise<number | null> => {
       const bal = await this.collateralBalance().catch(() => 0);
@@ -404,16 +413,17 @@ export class PolymarketAdapter implements VenueAdapter {
       : await ctx.poll("waiting for bridge credit", checkForCredit);
     if (after === null) {
       const current = await this.collateralBalance().catch(() => before);
-      ctx.print(`Deposit polling skipped. Balance: ${current.toFixed(2)} pUSD; continuing to trading approvals.`);
+      ctx.print("Deposit polling skipped.");
+      ctx.print(`Balance: ${current.toFixed(2)} pUSD.`);
     } else {
       ctx.print(`Deposit credited: ${(after - before).toFixed(2)} pUSD.`);
       ctx.print(`Balance: ${after.toFixed(2)} pUSD.`);
     }
 
     const client = await this.gaslessClient(ctx, a);
-    ctx.print("Setting up trading approvals (one-time, gasless via relayer)…");
+    ctx.print("Approving trading…");
     await this.ensureTradingApprovals(ctx, client);
-    ctx.print("Funding flow complete. L2 credentials derived and stored.");
+    ctx.print("Funding complete.");
     return a;
   }
 
@@ -436,7 +446,7 @@ export class PolymarketAdapter implements VenueAdapter {
     ).contracts;
     let allowance = await this.syncCollateralAllowance(client, negRiskAdapter);
     if (allowance === 0n) {
-      ctx.print("Approving Polymarket Neg Risk Adapter (SDK 0.6.0 compatibility)…");
+      ctx.print("Approving collateral…");
       const handle = await client.approveErc20({
         amount: "max",
         spenderAddress: negRiskAdapter,
@@ -458,7 +468,7 @@ export class PolymarketAdapter implements VenueAdapter {
     // declaring the flow complete.
     const wallet = client.account.wallet;
     if (!(await isApprovedForAllOnChain(conditionalTokens, wallet, negRiskAdapter, this.urls.rpc))) {
-      ctx.print("Approving the exchange as CTF operator (required for sells)…");
+      ctx.print("Approving sells…");
       const handle = await client.approveErc1155ForAll({
         operatorAddress: negRiskAdapter,
         tokenAddress: conditionalTokens,
@@ -478,7 +488,7 @@ export class PolymarketAdapter implements VenueAdapter {
         );
       }
     }
-    ctx.print("CTF operator approval verified on-chain — sells enabled.");
+    ctx.print("Trading approvals verified.");
   }
 
   /** Refresh the CLOB cache and return one spender's collateral allowance. */
@@ -496,30 +506,27 @@ export class PolymarketAdapter implements VenueAdapter {
    */
   private async elicitBuilderAuth(ctx: SetupContext): Promise<GaslessAuthDesc | undefined> {
     const defaultAuth = (await ctx.getOperatorDefault?.("polymarket-builder")) ?? null;
-    ctx.print("");
-    ctx.print("Polymarket needs a Builder or Relayer API key to create your account.");
-    ctx.print("Free, from your own Polymarket account.");
 
     for (;;) {
       const choice = await this.askAuthChoice(ctx, defaultAuth);
       if (choice === "open") {
         const url = "https://polymarket.com/settings";
         if (ctx.openUrl) ctx.openUrl(url);
-        else ctx.print(`→ ${url} (Builders tab)`);
-        ctx.print("Create a Builder key there, then pick 'Paste a Builder key'.");
+        ctx.print("Create a key in the Builders tab");
+        ctx.print(url);
         continue;
       }
       if (choice === "default" && defaultAuth) return JSON.parse(defaultAuth) as GaslessAuthDesc;
       if (choice === "builder") {
         const key = (await ctx.ask("Builder key", { secret: true })).trim();
         if (!key) {
-          ctx.print("no key entered — pick again.");
+          ctx.print("Key required.");
           continue;
         }
         const secret = (await ctx.ask("Builder secret", { secret: true })).trim();
         const passphrase = (await ctx.ask("Builder passphrase", { secret: true })).trim();
         const desc: GaslessAuthDesc = { kind: "builder", key, secret, passphrase };
-        if (ctx.setOperatorDefault && (await ctx.confirm("Make this the default Builder key for future bots?", true))) {
+        if (ctx.setOperatorDefault && (await ctx.confirm("Save as default Builder key?", true))) {
           await ctx.setOperatorDefault("polymarket-builder", JSON.stringify(desc));
         }
         return desc;
@@ -527,7 +534,7 @@ export class PolymarketAdapter implements VenueAdapter {
       if (choice === "relayer") {
         const rKey = (await ctx.ask("Relayer API key", { secret: true })).trim();
         if (!rKey) {
-          ctx.print("no key entered — pick again.");
+          ctx.print("Key required.");
           continue;
         }
         const rAddr = (await ctx.ask("Relayer key's signer address")).trim();
@@ -540,11 +547,11 @@ export class PolymarketAdapter implements VenueAdapter {
   /** The menu, with a text fallback for hosts that implement no `select`. */
   private async askAuthChoice(ctx: SetupContext, defaultAuth: string | null): Promise<string> {
     const choices = [
-      ...(defaultAuth ? [{ value: "default", title: `Use default Builder key (${maskSecret(defaultAuth)})` }] : []),
+      ...(defaultAuth ? [{ value: "default", title: "Use saved Builder key" }] : []),
       { value: "builder", title: defaultAuth ? "Paste a different Builder key" : "Paste a Builder key" },
-      { value: "open", title: "Open polymarket.com to create one" },
+      { value: "open", title: "Create Builder key" },
       { value: "relayer", title: "Use a Relayer key instead" },
-      { value: "skip", title: "Skip (cannot create a Polymarket account without one)" },
+      { value: "skip", title: "Skip account creation" },
     ];
     if (ctx.select) return ctx.select("Authenticate with", choices);
     const menu = choices.map((c, i) => `  ${i + 1}) ${c.title}`).join("\n");
@@ -636,6 +643,21 @@ export class PolymarketAdapter implements VenueAdapter {
     return [{ asset: "pUSD", total: bal, available: bal }];
   }
 
+  /** Authoritative CLOB token balance; resting SELL reservations are not deducted. */
+  async tokenBalance(acct: VenueAccount, tokenId: string): Promise<number> {
+    asPmAccount(acct);
+    if (!tokenId.trim()) throw new Error("polymarket token balance requires a token id");
+    const client = await this.secure();
+    const request = { assetType: CONDITIONAL, tokenId };
+    // Refresh the CLOB's cached chain balance before using it as execution
+    // capacity. Failure cannot fall back to a potentially stale token balance.
+    await updateBalanceAllowance(client, request);
+    const result = await fetchBalanceAllowance(client, request);
+    const balance = Number(result.balance) / 1e6;
+    if (!Number.isFinite(balance) || balance < 0) throw new Error(`invalid Polymarket balance for token ${tokenId}`);
+    return balance;
+  }
+
   private async marketInfoForToken(tokenId: string): Promise<{ conditionId: string; info: MarketInfo }> {
     let conditionId = this.tokenToCondition.get(tokenId);
     if (!conditionId) {
@@ -696,7 +718,7 @@ export class PolymarketAdapter implements VenueAdapter {
   async positions(_acct: VenueAccount): Promise<Position[]> {
     const client = await this.secure();
     const out: Position[] = [];
-    for await (const page of client.listPositions({})) {
+    for await (const page of client.listPositions({ sizeThreshold: 0 })) {
       for (const p of page.items) {
         const size = Number(p.size ?? 0);
         if (!p.tokenId || size <= 0) continue;
@@ -746,6 +768,57 @@ export class PolymarketAdapter implements VenueAdapter {
 
   async tokenBook(tokenId: string): Promise<OrderBook> {
     return this.book(tokenId);
+  }
+
+  /** Read the selected outcome and current constraints together; never mirror the sibling book. */
+  async executionMarket(marketRef: string, outcome: "YES" | "NO"): Promise<PredictionExecutionMarket> {
+    const tokenId = await this.tokenFor(marketRef, outcome);
+    const { conditionId, info } = await this.marketInfoForToken(tokenId);
+    if (this.yesTokenOf(info) !== marketRef ||
+      info.tokens.find((token) => String(token.tokenId) === tokenId)?.outcome.trim().toUpperCase() !== outcome) {
+      throw new Error("Polymarket execution token does not match the requested market and outcome");
+    }
+    const url = new URL("/markets", this.urls.gamma);
+    url.searchParams.set("clob_token_ids", marketRef);
+    const [{ raw, bookObservedAt }, { markets, metadataObservedAt }] = await Promise.all([
+      this.pub().fetchOrderBook({ tokenId }).then(raw => ({ raw, bookObservedAt: Date.now() })),
+      (async () => {
+        const response = await fetch(url, { headers: { accept: "application/json" } });
+        if (!response.ok) throw new Error(`Polymarket execution market metadata unavailable (${response.status})`);
+        const markets = await response.json() as Array<{ acceptingOrders?: boolean; volume24hr?: string | number }>;
+        return { markets, metadataObservedAt: Date.now() };
+      })(),
+    ]);
+    if (!Array.isArray(markets) || markets.length !== 1) throw new Error("Polymarket execution market metadata is ambiguous");
+    if (String(raw.tokenId) !== tokenId || String(raw.conditionId).toLowerCase() !== conditionId.toLowerCase()) {
+      throw new Error("Polymarket execution book identity does not match the selected token");
+    }
+    const tickSize = Number(raw.tickSize);
+    const minOrderSize = Number(raw.minOrderSize);
+    if (!(tickSize > 0 && tickSize < 1) || !Number.isFinite(minOrderSize) || minOrderSize <= 0) {
+      throw new Error("Polymarket execution book has invalid trading constraints");
+    }
+    // A slow metadata request cannot refresh the age of an already-returned book.
+    const observedAt = Math.min(bookObservedAt, metadataObservedAt);
+    const level = (row: { price: string; size: string }) => ({ price: Number(row.price), size: Number(row.size) });
+    const book: OrderBook = {
+      marketRef, bids: raw.bids.map(level).sort((a, b) => b.price - a.price),
+      asks: raw.asks.map(level).sort((a, b) => a.price - b.price), ts: bookObservedAt,
+      ...(raw.timestamp == null ? {} : { venueTs: Number(raw.timestamp) }),
+    };
+    if ([...book.bids, ...book.asks].some((row) => !(row.price > 0 && row.price < 1) || !Number.isFinite(row.size) || row.size < 0)) {
+      throw new Error("Polymarket execution book contains invalid levels");
+    }
+    const bid = book.bids[0]?.price ?? 0;
+    const ask = book.asks[0]?.price ?? 1;
+    const mid = (bid + ask) / 2;
+    const volume24h = Number(markets[0]!.volume24hr ?? 0);
+    return {
+      marketRef, conditionId, tokenId, outcome, tickSize, minOrderSize,
+      acceptingOrders: markets[0]!.acceptingOrders === true, observedAt, book,
+      quote: { marketRef, bid, ask, mid, volume24h: Number.isFinite(volume24h) ? volume24h : 0,
+        spreadBps: mid > 0 ? (ask - bid) / mid * 10_000 : 0, ts: bookObservedAt },
+    };
   }
 
   async subscribeMarketData(tokenIds: string[]): Promise<RealtimeSubscription> {
@@ -825,6 +898,10 @@ export class PolymarketAdapter implements VenueAdapter {
   // Trading
   // -------------------------------------------------------------------------
 
+  normalizeOrderSize(size: number): number {
+    return normalizePolymarketOrderSize(size);
+  }
+
   async placeOrder(_acct: VenueAccount, intent: OrderIntent): Promise<OrderAck> {
     return this.placePrepared(intent);
   }
@@ -839,24 +916,27 @@ export class PolymarketAdapter implements VenueAdapter {
 
   private async placePrepared(intent: OrderIntent, hooks?: OrderLifecycleHooks): Promise<OrderAck> {
     const client = await this.secure();
-    const { tokenId, conditionId, info } = await this.tokenForIntent(intent);
-    const tick = Number(info.tickSize);
-    const price = clampTick(intent.limitPrice, tick);
-    const size = Math.floor(intent.size * 100) / 100; // CLOB sizes: 2dp shares
+    const { tokenId, conditionId } = await this.tokenForIntent(intent);
+    // Cached condition data is for identity only. Tick size can change while
+    // an execution is working, so revalidate against the current token book.
+    const currentBook = await this.pub().fetchOrderBook({ tokenId });
+    if (String(currentBook.tokenId) !== tokenId || String(currentBook.conditionId).toLowerCase() !== conditionId.toLowerCase()) {
+      throw new Error("Polymarket order book identity changed before signing");
+    }
+    const tick = Number(currentBook.tickSize);
+    const price = clampTick(intent.limitPrice, tick, intent.side);
+    const size = this.normalizeOrderSize(intent.size);
     if (size <= 0) throw new Error("order size rounds to zero");
+    const minimumSize = Number(currentBook.minOrderSize);
+    if (!Number.isFinite(minimumSize) || minimumSize <= 0 || size + 1e-9 < minimumSize) {
+      throw new Error("order size is below the current Polymarket minimum");
+    }
 
     // Before the first sell of a token, sync the CONDITIONAL allowance cache (§5.1).
     if (intent.side === "SELL" && !this.conditionalAllowanceSynced.has(tokenId)) {
       await updateBalanceAllowance(client, { assetType: CONDITIONAL, tokenId }).catch(() => {});
       this.conditionalAllowanceSynced.add(tokenId);
     }
-
-    // Builder attribution (§ Ares). SDK 0.6.0 takes `builderCode` per order
-    // request — no separate client and no header override, unlike the older
-    // @polymarket/clob-client where it was a construction-time builderConfig.
-    // Note this makes the fill subject to the builder taker fee.
-    const builderCode = this.opts.builderCode;
-    const attribution = builderCode ? { builderCode: builderCode as `0x${string}` } : {};
 
     const side = intent.side === "BUY" ? PmOrderSide.BUY : PmOrderSide.SELL;
     let signed: PmSignedOrder;
@@ -866,8 +946,8 @@ export class PolymarketAdapter implements VenueAdapter {
         const orderType = intent.tif === "FOK" ? PmOrderType.FOK : PmOrderType.FAK;
         signed =
           intent.side === "BUY"
-            ? await client.createMarketOrder({ tokenId, side: PmOrderSide.BUY, amount: round2(size * price), maxPrice: price, orderType, ...attribution })
-            : await client.createMarketOrder({ tokenId, side: PmOrderSide.SELL, shares: size, minPrice: price, orderType, ...attribution });
+            ? await client.createMarketOrder({ tokenId, side: PmOrderSide.BUY, amount: Math.floor(size * price * 100) / 100, maxPrice: price, orderType })
+            : await client.createMarketOrder({ tokenId, side: PmOrderSide.SELL, shares: size, minPrice: price, orderType });
       } else {
         signed = await client.createLimitOrder({
           tokenId,
@@ -876,7 +956,6 @@ export class PolymarketAdapter implements VenueAdapter {
           side,
           postOnly: intent.postOnly ?? false,
           ...(intent.expiration ? { expiration: intent.expiration } : {}),
-          ...attribution,
         });
       }
     } catch (err) {
@@ -897,8 +976,20 @@ export class PolymarketAdapter implements VenueAdapter {
     // Hash the SDK-created payload in memory. Only this digest crosses the
     // adapter boundary; the signature itself is never persisted or logged.
     const preparedHash = createHash("sha256").update(JSON.stringify(signed)).digest("hex");
-    await hooks?.onPrepared({ preparedHash, tokenId, conditionId, outcome: intent.outcome });
-    const res = await client.postOrder(signed);
+    await hooks?.onPrepared({ preparedHash, tokenId, conditionId, outcome: intent.outcome, limitPrice: price, size });
+    let res: Awaited<ReturnType<PmSecureClient["postOrder"]>>;
+    try {
+      res = await client.postOrder(signed);
+    } catch (error) {
+      // An SDK HTTP rejection carrying an explicit 4xx response is definitive.
+      // Timeout, proxy/server failure and malformed accepted responses are not.
+      const rejection = error as { name?: string; status?: number; code?: string; message?: string };
+      if (rejection.name === "RequestRejectedError" && rejection.status !== undefined &&
+        rejection.status >= 400 && rejection.status < 500 && rejection.status !== 408) {
+        throw new PolymarketOrderRejectedError(`${rejection.code ?? ""} ${rejection.message ?? "order rejected"}`.trim(), { cause: error });
+      }
+      throw error;
+    }
 
     const r = res as {
       ok?: boolean;
@@ -907,10 +998,11 @@ export class PolymarketAdapter implements VenueAdapter {
       makingAmount?: string;
       takingAmount?: string;
       error?: unknown;
+      code?: string;
+      message?: string;
     };
-    if (r.ok === false || !r.orderId) {
-      throw new Error(`order rejected: ${JSON.stringify(r).slice(0, 300)}`);
-    }
+    if (r.ok === false) throw new PolymarketOrderRejectedError(`order rejected: ${r.code ?? ""} ${r.message ?? String(r.error ?? "venue declined the order")}`);
+    if (!r.orderId) throw new Error("Polymarket order submission returned no order identity; acceptance is unknown");
     const making = Number(r.makingAmount ?? 0);
     const taking = Number(r.takingAmount ?? 0);
     const filledSize = intent.side === "BUY" ? taking : making;
@@ -922,23 +1014,68 @@ export class PolymarketAdapter implements VenueAdapter {
       status: matched && filledSize >= size - 0.01 ? "filled" : filledSize > 0 ? "partial" : "open",
       filledSize: filledSize > 0 ? filledSize : undefined,
       avgFillPrice,
-      // The traded token (NO orders trade a token the caller never named) and
-      // the funder — the position card is built from these, not marketRef.
+      // Exact traded token and position-holding wallet for reconciliation.
       tokenId,
       funder: this.creds?.funder,
-      builderCode,
       preparedHash,
     };
   }
 
-  async cancelOrder(_acct: VenueAccount, id: string): Promise<void> {
+  async cancelOrderChecked(_acct: VenueAccount, id: string): Promise<{ status: "canceled" | "not-canceled"; reason?: string }> {
     const client = await this.secure();
-    await client.cancelOrder({ orderId: id });
+    const result = await client.cancelOrder({ orderId: id });
+    const reason = (result.notCanceled as Record<string, string> | undefined)?.[id];
+    if (reason !== undefined) return { status: "not-canceled", reason };
+    return result.canceled?.some((canceledId) => String(canceledId) === id)
+      ? { status: "canceled" }
+      : { status: "not-canceled", reason: "venue returned no cancellation acknowledgment for this order" };
+  }
+
+  async cancelOrder(acct: VenueAccount, id: string): Promise<void> {
+    const result = await this.cancelOrderChecked(acct, id);
+    if (result.status !== "canceled") throw new Error(`Polymarket cancellation unconfirmed for ${id}: ${result.reason}`);
   }
 
   async cancelAll(_acct: VenueAccount): Promise<void> {
     const client = await this.secure();
-    await client.cancelAll();
+    const result = await client.cancelAll();
+    if (!result || Object.keys(result.notCanceled ?? {}).length > 0) {
+      throw new Error("Polymarket could not confirm cancellation of every order; reconcile authenticated order state");
+    }
+  }
+
+  async executionOrder(_acct: VenueAccount, id: string): Promise<PredictionOrderState | null> {
+    const client = await this.secure();
+    let order: Awaited<ReturnType<PmSecureClient["fetchOrder"]>>;
+    try {
+      order = await client.fetchOrder({ orderId: id });
+    } catch (error) {
+      const response = error as { name?: string; status?: number };
+      if (response.name === "RequestRejectedError" && response.status === 404) return null;
+      // Observed live 2026-09-06: a canceled order may return HTTP 200/null.
+      // The pinned SDK rejects it before returning; preserve it as missing data,
+      // never as evidence of a fill or cancellation. Other schema failures propagate.
+      if (error instanceof UnexpectedResponseError) {
+        const issues = (error.cause as { issues?: { code?: string; expected?: string; path?: unknown[]; message?: string }[] } | undefined)?.issues;
+        const issue = issues?.length === 1 ? issues[0] : undefined;
+        if (issue?.code === "invalid_type" && issue.expected === "object" && issue.path?.length === 0 &&
+          issue.message?.endsWith("received null")) return null;
+      }
+      throw error;
+    }
+    if (!order) return null;
+    if (order.id !== id) throw new Error("Polymarket order lookup returned a different order identity");
+    const size = Number(order.originalSize);
+    const matchedSize = Number(order.sizeMatched);
+    if (!Number.isFinite(size) || size < 0 || !Number.isFinite(matchedSize) || matchedSize < 0 || matchedSize > size + 1e-6) {
+      throw new Error("Polymarket order lookup returned invalid cumulative quantities");
+    }
+    const rawStatus = order.status.toUpperCase().replace(/^ORDER_STATUS_/, "");
+    const status: PredictionOrderState["status"] =
+      ["LIVE", "OPEN", "DELAYED", "UNMATCHED"].includes(rawStatus) ? "open" :
+        rawStatus === "MATCHED" ? "matched" :
+          ["CANCELED", "CANCELLED", "CANCELED_MARKET_RESOLVED"].includes(rawStatus) ? "canceled" : rawStatus === "EXPIRED" ? "expired" : "unknown";
+    return { orderId: id, status, size, matchedSize, observedAt: Date.now() };
   }
 
   async openOrders(_acct: VenueAccount): Promise<Order[]> {
@@ -969,38 +1106,95 @@ export class PolymarketAdapter implements VenueAdapter {
     return out;
   }
 
-  async fills(_acct: VenueAccount, sinceTs: number): Promise<Fill[]> {
+  async fills(acct: VenueAccount, sinceTs: number): Promise<Fill[]> {
+    // Generic fill consumers must never book inventory from an unconfirmed or
+    // failed settlement. Status-aware controllers use tradeSettlements below.
+    return (await this.tradeSettlements(acct, sinceTs)).filter((fill) => fill.settlementStatus === "CONFIRMED");
+  }
+
+  async tradeSettlements(acct: VenueAccount, sinceTs: number): Promise<Fill[]> {
+    const account = asPmAccount(acct);
+    if (!Number.isFinite(sinceTs) || sinceTs < 0) throw new Error("Polymarket fill cursor must be non-negative and finite");
     const client = await this.secure();
-    const out: Fill[] = [];
-    for await (const page of client.listAccountTrades({})) {
+    const out = new Map<string, Fill>();
+    const seenTrades = new Map<string, { updatedAt: number; rank: number }>();
+    // The API filters whole Unix seconds; keep an extra second at the boundary
+    // and retain the exact millisecond filter below for deterministic replay.
+    const request = sinceTs > 0 ? { after: String(Math.max(0, Math.floor(sinceTs / 1_000) - 1)) } : {};
+    for await (const page of client.listAccountTrades(request)) {
       for (const t of page.items) {
         const ts = Date.parse(t.matchedAt);
-        if (!Number.isFinite(ts) || ts < sinceTs) continue;
-        const tokenId = String(t.tokenId);
-        const { marketRef, isYes } = await this.yesRefOf(tokenId);
-        const conditionId = String(t.conditionId);
-        const accountMaker = t.traderSide === "MAKER" ? t.makerOrders.find((maker) => String(maker.tokenId) === tokenId) : undefined;
-        const size = Number(accountMaker?.matchedAmount ?? t.size);
-        const price = Number(accountMaker?.price ?? t.price);
-        const feeRateBps = Number(accountMaker?.feeRateBps ?? t.feeRateBps);
-        out.push({
-          id: t.id,
-          orderId: accountMaker?.orderId ?? t.takerOrderId,
-          makerOrderId: accountMaker?.orderId,
-          marketRef,
-          tokenId,
-          conditionId,
-          outcome: isYes ? "YES" : "NO",
-          side: String(accountMaker?.side ?? t.side).toUpperCase() === "SELL" ? "SELL" : "BUY",
-          size,
-          matchedAmountDelta: size,
-          price,
-          ts,
-          fee: feeRateBps ? (feeRateBps / 10_000) * size * price : undefined,
-        });
+        if (!Number.isFinite(ts)) throw new Error(`Polymarket trade ${t.id} has an invalid match timestamp`);
+        if (ts < sinceTs) continue;
+        // A status-aware controller journals MATCHED/MINED/RETRYING as pending,
+        // applies only CONFIRMED, and releases FAILED reservations without
+        // inventing inventory or a reversal of a trade that never settled.
+        // Contract verified 2026-09-04: docs.polymarket.com/concepts/order-lifecycle
+        const status = t.status.toUpperCase().replace(/^TRADE_STATUS_/, "");
+        if (!["MATCHED", "MINED", "CONFIRMED", "RETRYING", "FAILED"].includes(status)) {
+          throw new Error(`Polymarket trade ${t.id} has unsupported settlement status ${t.status}`);
+        }
+        const rank = { MATCHED: 1, MINED: 2, RETRYING: 3, FAILED: 4, CONFIRMED: 5 }[status]!;
+        const parsedUpdate = Date.parse(t.updatedAt);
+        const updatedAt = Number.isFinite(parsedUpdate) ? parsedUpdate : ts;
+        const previous = seenTrades.get(t.id);
+        if (previous && (previous.updatedAt > updatedAt || (previous.updatedAt === updatedAt && previous.rank >= rank))) continue;
+        seenTrades.set(t.id, { updatedAt, rank });
+
+        const makerTrade = t.traderSide === "MAKER";
+        if (!makerTrade && t.traderSide !== "TAKER") throw new Error(`Polymarket trade ${t.id} has an unknown account side`);
+        const ownedMakers = makerTrade
+          ? t.makerOrders.filter((maker) => maker.makerAddress.toLowerCase() === account.funder.toLowerCase())
+          : [];
+        if (makerTrade && ownedMakers.length === 0) {
+          throw new Error(`Polymarket maker trade ${t.id} has no maker leg owned by the account funder`);
+        }
+        const legs = makerTrade ? ownedMakers.map((maker) => ({
+          orderId: maker.orderId, tokenId: String(maker.tokenId), size: Number(maker.matchedAmount),
+          price: Number(maker.price), side: maker.side, feeRateBps: 0,
+        })) : [{
+          orderId: t.takerOrderId, tokenId: String(t.tokenId), size: Number(t.size),
+          price: Number(t.price), side: t.side, feeRateBps: Number(t.feeRateBps),
+        }];
+        const fills = new Map<string, Fill>();
+        for (const leg of legs) {
+          const side = leg.side.toUpperCase();
+          if (!leg.orderId || !(leg.size > 0) || !Number.isFinite(leg.size) || !(leg.price > 0 && leg.price < 1) ||
+            !Number.isFinite(leg.feeRateBps) || leg.feeRateBps < 0 || (side !== "BUY" && side !== "SELL")) {
+            throw new Error(`Polymarket trade ${t.id} has invalid account fill terms`);
+          }
+          const { marketRef, isYes } = await this.yesRefOf(leg.tokenId);
+          const { conditionId } = await this.marketInfoForToken(leg.tokenId);
+          if (conditionId.toLowerCase() !== String(t.conditionId).toLowerCase()) {
+            throw new Error(`Polymarket trade ${t.id} maker token belongs to a different condition`);
+          }
+          const id = makerTrade ? `${t.id}:${leg.orderId}` : t.id;
+          // Makers pay zero. Takers pay C × rate × p × (1-p), rounded to
+          // 5 decimals; never charge the taker's fee to an owned maker leg.
+          // Contract verified 2026-09-04: docs.polymarket.com/trading/fees
+          const fee = Number((leg.size * (leg.feeRateBps / 10_000) * leg.price * (1 - leg.price)).toFixed(5));
+          const existing = fills.get(id);
+          if (existing) {
+            if (existing.tokenId !== leg.tokenId || existing.side !== side) {
+              throw new Error(`Polymarket trade ${t.id} reuses a maker order across conflicting tokens or sides`);
+            }
+            existing.price = (existing.price * existing.size + leg.price * leg.size) / (existing.size + leg.size);
+            existing.size += leg.size;
+            existing.matchedAmountDelta = existing.size;
+            existing.fee = (existing.fee ?? 0) + fee;
+          } else {
+            fills.set(id, {
+              id, orderId: leg.orderId, ...(makerTrade ? { makerOrderId: leg.orderId } : {}),
+              marketRef, tokenId: leg.tokenId, conditionId, outcome: isYes ? "YES" : "NO", side,
+              size: leg.size, matchedAmountDelta: leg.size, price: leg.price, ts, fee,
+              settlementStatus: status as NonNullable<Fill["settlementStatus"]>,
+            });
+          }
+        }
+        for (const fill of fills.values()) out.set(fill.id, fill);
       }
     }
-    return out.sort((a, b) => a.ts - b.ts);
+    return [...out.values()].sort((a, b) => a.ts - b.ts);
   }
 
   // -------------------------------------------------------------------------
@@ -1043,28 +1237,63 @@ export class PolymarketAdapter implements VenueAdapter {
   // Resolution redemption (gasless via SDK position lifecycle)
   // -------------------------------------------------------------------------
 
-  async redeem(_acct: VenueAccount, position: Position): Promise<RedemptionReceipt> {
-    const client = await this.secure();
+  /**
+   * SDK 0.6.0 redeemPositions({ conditionId }) already selects the market-type
+   * collateral adapter and redeems BOTH outcome balances for the condition.
+   * There is no amount parameter. Submit once per condition, not once per token.
+   * Verified 2026-09-06: docs.polymarket.com/trading/positions/manage
+   * Gasless wallets require relayer/builder authorization on the secure client;
+   * CLOB L2 credentials alone do not grant that capability. Deploy supplies the
+   * operator's saved default as a separate service credential for directional bots.
+   * Never retry here: submission/wait failures may follow an accepted transaction.
+   */
+  async redeem(acct: VenueAccount, position: Position, hooks?: RedemptionHooks): Promise<RedemptionReceipt> {
+    asPmAccount(acct);
     const { conditionId } = await this.marketInfoForToken(position.marketRef);
+    if (position.conditionId && position.conditionId.toLowerCase() !== conditionId.toLowerCase()) {
+      throw new Error("Polymarket redemption position condition does not match its market token");
+    }
+    const client = await this.secure();
+    await hooks?.beforeSubmit();
     const handle = await client.redeemPositions({ conditionId });
+    await hooks?.submitted({
+      ...(handle.transactionHash ? { transactionHash: String(handle.transactionHash) } : {}),
+      ...(handle.transactionId ? { transactionId: String(handle.transactionId) } : {}),
+    });
     const outcome = await handle.wait();
     return {
       transactionHash: String(outcome.transactionHash),
       ...(outcome.transactionId === null ? {} : { transactionId: String(outcome.transactionId) }),
     };
   }
+
+  async redemptionStatus(acct: VenueAccount, receipt: RedemptionReceipt): Promise<"pending" | "confirmed" | "failed"> {
+    asPmAccount(acct);
+    if (!receipt.transactionId) return "pending";
+    const transaction = await fetchTransaction(await this.secure(), { transactionId: receipt.transactionId });
+    if (transaction.state === "STATE_CONFIRMED") return "confirmed";
+    if (transaction.state === "STATE_FAILED" || transaction.state === "STATE_INVALID") return "failed";
+    return "pending";
+  }
 }
 
-function clampTick(price: number, tick: number): number {
-  if (!Number.isFinite(tick) || tick <= 0) return price;
-  const dp = Math.max(0, Math.ceil(-Math.log10(tick)));
-  const snapped = Math.round(price / tick) * tick;
-  const bounded = Math.min(1 - tick, Math.max(tick, snapped));
-  return Number(bounded.toFixed(dp));
+/** CLOB limit shares use two decimals. Decimal shifting avoids flooring 1.15 twice to 1.14. */
+export function normalizePolymarketOrderSize(size: number): number {
+  if (!Number.isFinite(size) || size < 0 || size > Number.MAX_SAFE_INTEGER / 100) {
+    throw new Error("invalid Polymarket order size");
+  }
+  const [coefficient, exponent = "0"] = size.toString().split("e");
+  return Math.floor(Number(`${coefficient}e${Number(exponent) + 2}`)) / 100;
 }
 
-function round2(n: number): number {
-  return Math.round(n * 100) / 100;
+function clampTick(price: number, tick: number, side: "BUY" | "SELL"): number {
+  if (!Number.isFinite(tick) || tick <= 0 || tick >= 1 || !Number.isFinite(price) || price <= 0 || price >= 1) {
+    throw new Error("invalid Polymarket order price or tick size");
+  }
+  const scaled = price / tick;
+  const snapped = Number(((side === "BUY" ? Math.floor(scaled + 1e-10) : Math.ceil(scaled - 1e-10)) * tick).toFixed(8));
+  if (snapped < tick - 1e-10 || snapped > 1 - tick + 1e-10) throw new Error("Polymarket price bound has no valid tick");
+  return snapped;
 }
 
 registerAdapter("polymarket", (opts) => new PolymarketAdapter(opts));

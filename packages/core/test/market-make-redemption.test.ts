@@ -1,12 +1,12 @@
 // packages/core/test/market-make-redemption.test.ts
 // Polymarket resolution metadata used by the market-make settlement lifecycle.
 
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import {
-  PolymarketAdapter,
   parseBotConfig,
   type Position,
 } from "@quotient-forecasting/cassie-core";
+import { PolymarketAdapter } from "../src/venues/polymarket.js";
 
 const YES_TOKEN = "7132104519000000000000000000000000000000000000000000000000000001";
 const NO_TOKEN = "7132104519000000000000000000000000000000000000000000000000000002";
@@ -101,5 +101,52 @@ describe("Polymarket market-make redemption metadata", () => {
       transactionHash: "0xabc123",
       transactionId: "relay-123",
     });
+  });
+
+  it.each(["YES", "NO"] as const)("delegates %s inventory to one market-type-aware condition redemption for both outcomes", async (outcome) => {
+    const wait = vi.fn().mockResolvedValue({ transactionHash: "0xredeem", transactionId: null });
+    const redeemPositions = vi.fn().mockResolvedValue({ wait });
+    const adapter = adapterWithSecureClient({ redeemPositions });
+    const position: Position = {
+      marketRef: YES_TOKEN, tokenId: outcome === "YES" ? YES_TOKEN : NO_TOKEN, conditionId: "0xcondition",
+      outcome, side: outcome, size: 2, avgPrice: 0.4, redeemable: true,
+    };
+    await expect(adapter.redeem(account, position)).resolves.toEqual({ transactionHash: "0xredeem" });
+    expect(redeemPositions).toHaveBeenCalledExactlyOnceWith({ conditionId: "0xCONDITION" });
+    expect(wait).toHaveBeenCalledOnce();
+    // Passing a token, amount, adapter address, or index-set implementation
+    // here would bypass the pinned client's market-aware position workflow.
+    expect(Object.keys(redeemPositions.mock.calls[0]![0])).toEqual(["conditionId"]);
+  });
+
+  it("rejects a mismatched condition before submitting a redemption", async () => {
+    const redeemPositions = vi.fn();
+    const adapter = adapterWithSecureClient({ redeemPositions });
+    await expect(adapter.redeem(account, {
+      marketRef: YES_TOKEN, conditionId: "0xWRONG", outcome: "YES", side: "YES", size: 2, avgPrice: 0.4,
+    })).rejects.toThrow(/condition does not match/);
+    expect(redeemPositions).not.toHaveBeenCalled();
+  });
+
+  it("propagates an ambiguous submission failure without automatically resubmitting", async () => {
+    const failure = new Error("submission connection lost");
+    const redeemPositions = vi.fn().mockRejectedValue(failure);
+    const adapter = adapterWithSecureClient({ redeemPositions });
+    await expect(adapter.redeem(account, {
+      marketRef: YES_TOKEN, outcome: "YES", side: "YES", size: 2, avgPrice: 0.4,
+    })).rejects.toBe(failure);
+    expect(redeemPositions).toHaveBeenCalledOnce();
+  });
+
+  it("propagates a confirmation failure without treating it as proof that submission failed", async () => {
+    const failure = new Error("transaction confirmation timed out");
+    const wait = vi.fn().mockRejectedValue(failure);
+    const redeemPositions = vi.fn().mockResolvedValue({ wait });
+    const adapter = adapterWithSecureClient({ redeemPositions });
+    await expect(adapter.redeem(account, {
+      marketRef: YES_TOKEN, outcome: "YES", side: "YES", size: 2, avgPrice: 0.4,
+    })).rejects.toBe(failure);
+    expect(redeemPositions).toHaveBeenCalledOnce();
+    expect(wait).toHaveBeenCalledOnce();
   });
 });

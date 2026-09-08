@@ -1,10 +1,7 @@
 // packages/runtime-node/src/market-make-controller.ts
 
 import { createHash } from "node:crypto";
-import {
-  QUOTIENT_CALL_COST_USD,
-  executableLiquidationValue,
-} from "@quotient-forecasting/cassie-core";
+import { executableLiquidationValue } from "@quotient-forecasting/cassie-core";
 import type {
   Alerter,
   AlertKind,
@@ -16,6 +13,7 @@ import type {
   MarketMakeSignalRow,
   Order,
   OrderAck,
+  OrderBook,
   OrderIntent,
   PolymarketCatalogClient,
   PolymarketMarketCatalog,
@@ -81,13 +79,8 @@ const BOOK_FETCH_CONCURRENCY = 8;
 // discarded every other book in its batch and degraded the controller.
 // Attempts are bounded and backed off, so a real outage still surfaces
 // promptly through the tolerance window rather than stalling the cadence.
-const VENUE_READ_RETRY_ATTEMPTS = 3;
+const VENUE_READ_RETRY_ATTEMPTS = 4;
 const VENUE_READ_RETRY_BASE_DELAY_MS = 250;
-// A decision that changed nothing (no action, same verdict, same reasons as the
-// last one persisted for that market) is re-persisted only as a periodic
-// heartbeat, so the telemetry table records transitions and samples rather
-// than one identical rejection per market per book tick.
-const DECISION_HEARTBEAT_MS = 15 * 60 * 1_000;
 // Every event is durably appended before it is reduced and replayed at startup,
 // so the reducer snapshot is a cache. Serialising it after every one of the
 // hundreds of events in a poll was the runtime’s dominant CPU and disk cost.
@@ -102,7 +95,7 @@ function isTransientVenueReadError(error: unknown): boolean {
     // patterns below. A read that ran out of time is the most transient
     // failure there is; treating it as fatal degraded the bot on one slow book.
     if (candidate.name === "TimeoutError" || candidate.name === "AbortError") return true;
-    if ([429, 502, 503, 504].includes(Number(candidate.status))) return true;
+    if ([429, 500, 502, 503, 504].includes(Number(candidate.status))) return true;
     if (typeof candidate.code === "string" &&
       ["ECONNRESET", "ETIMEDOUT", "ECONNREFUSED", "EAI_AGAIN", "UND_ERR_SOCKET", "UND_ERR_CONNECT_TIMEOUT"].includes(candidate.code)) {
       return true;
@@ -113,8 +106,19 @@ function isTransientVenueReadError(error: unknown): boolean {
     .test(message);
 }
 
+function catalogAcceptsEntries(catalog: MarketCatalogSnapshot): boolean {
+  return catalog.active && !catalog.closed && !catalog.archived && catalog.acceptingOrders && catalog.orderbookEnabled;
+}
+
+function discardDecisionTelemetry(state: MarketMakeState): MarketMakeState {
+  state.decisions = [];
+  for (const market of Object.values(state.markets)) delete market.lastDecision;
+  return state;
+}
+
 type QuotientClient = Pick<MarketMakeQuotientClient, "activeSignals" | "exactForecasts" | "spentUsd">;
-type CatalogClient = Pick<PolymarketCatalogClient, "market"> & Partial<Pick<PolymarketCatalogClient, "recover">>;
+type CatalogClient = Pick<PolymarketCatalogClient, "market"> &
+  Partial<Pick<PolymarketCatalogClient, "recover" | "marketStatus">>;
 type SnapshotStore = Pick<StateStore, "get" | "set" | "appendError">;
 type LoggerLike = Pick<Logger, "debug" | "info" | "warn" | "error">;
 
@@ -248,7 +252,6 @@ export interface MarketMakeControllerStatus {
   lastTickAt?: number;
   lastError?: string;
   quotientSpentUsd: number;
-  quotientDailySpendUsd: number;
   persistence: MarketMakeStateStatus;
 }
 
@@ -259,8 +262,6 @@ interface PersistedReducerSnapshot {
   effectiveBankrollUsd?: number;
   lastEventSeq: number;
   savedAt: number;
-  quotientSpendUtcDay: string;
-  quotientSpendUsd: number;
   lastQuotientPollAt?: number;
   bookHistory: Record<string, Array<{ ts: number; mid: number }>>;
   bookObservations?: Record<string, BookObservation[]>;
@@ -591,7 +592,6 @@ export class MarketMakeController {
    * does: unreadable books eventually degrade even while the account reads fine.
    */
   private lastCompleteTickAt?: number;
-  private readonly lastPersistedDecision = new Map<string, { fingerprint: string; ts: number }>();
   private reducerSnapshotDirtySeq?: number;
   private lastReducerSnapshotWallClockAt = 0;
   private reconcileSequence = 0;
@@ -599,8 +599,6 @@ export class MarketMakeController {
   private lastTickAt?: number;
   private lastError?: string;
   private lastFillCursor = 0;
-  private quotientSpendUtcDay = "";
-  private quotientSpendUsd = 0;
   private lastQuotientPollAt?: number;
   private lastPositions: Position[] = [];
   private catalogCache = new Map<string, CatalogCacheEntry>();
@@ -631,6 +629,7 @@ export class MarketMakeController {
 
   constructor(deps: MarketMakeControllerDeps, options: MarketMakeControllerOptions) {
     this.policyConfig = MarketMakeConfigSchema.parse(deps.config);
+    if (this.policyConfig.two_sided) throw new Error("two-sided policy requires the two-sided controller");
     this.runtimeConfig = this.policyConfig;
     // The immutable policy reference is the conservative fallback. A matching
     // deployment may restore its last proven scale for loss/exit supervision,
@@ -814,7 +813,7 @@ export class MarketMakeController {
     }
     return {
       strategyId: "market-make",
-      schemaVersion: this.config.schema_version,
+      schemaVersion: "q-directed-polymarket-mm/1",
       configHash: this.configHash,
       effectiveConfigHash: marketMakeConfigHash(this.config),
       deploymentId: this.deploymentId,
@@ -846,7 +845,6 @@ export class MarketMakeController {
       ...(this.lastTickAt === undefined ? {} : { lastTickAt: this.lastTickAt }),
       ...(this.lastError === undefined ? {} : { lastError: this.lastError }),
       quotientSpentUsd: this.quotient.spentUsd,
-      quotientDailySpendUsd: this.quotientSpendUsd,
       persistence,
     };
   }
@@ -863,20 +861,13 @@ export class MarketMakeController {
    * Read a fresh venue/Q/Gamma snapshot and reduce it entirely in memory.
    * This intentionally bypasses processEvent: no event, decision, lifecycle,
    * reservation, order, or reducer trading-state change is persisted and no
-   * action is submitted. Paid API calls still advance the durable daily spend
-   * meter. A halted bot is previewed as-if resumed, while loss latches remain
-   * authoritative.
+   * action is submitted. A halted bot is previewed as-if resumed, while loss
+   * latches remain authoritative.
    */
   private async liveDryRun(hydrateInputs = false): Promise<MarketMakeDryRunResult> {
     const at = this.now();
     const venue = await this.readVenueSnapshot();
-    this.resetQuotientBudgetIfNeeded(at);
-    const canCallDiscovery = this.canSpendQuotient(QUOTIENT_CALL_COST_USD.signals);
-    const activeRows = canCallDiscovery ? await this.quotient.activeSignals(500) : [];
-    if (canCallDiscovery) {
-      this.recordQuotientSpend(QUOTIENT_CALL_COST_USD.signals);
-      await this.saveReducerState();
-    }
+    const activeRows = await this.quotient.activeSignals(500);
     const newest = new Map<string, MarketMakeSignalRow>();
     for (const row of activeRows) {
       const existing = newest.get(row.marketKey);
@@ -891,7 +882,11 @@ export class MarketMakeController {
       // inventory keeps its catalog from reducer state below, so skipping here
       // withholds new entry rather than halting the whole strategy.
       try {
-        catalogs.set(row.marketKey, mapCatalog(await this.catalogClient.market(row.marketKey, row.nativeMarketId, row.conditionId)));
+        const fallback = this.catalogCache.get(row.marketKey)?.value ?? this.reducerState.markets[row.marketKey]?.catalog;
+        catalogs.set(
+          row.marketKey,
+          await this.readCatalog(row.marketKey, row.nativeMarketId, row.conditionId, fallback),
+        );
       } catch (error) {
         this.log.warn("market-make skipped an uncatalogable discovery candidate", {
           marketKey: row.marketKey,
@@ -899,9 +894,15 @@ export class MarketMakeController {
         });
       }
     }
-    for (const [key, cached] of this.catalogCache) if (!catalogs.has(key)) catalogs.set(key, cached.value);
+    // If current discovery named a market but its authoritative Gamma lookup
+    // failed, do not resurrect an older cached catalog and stamp it fresh
+    // during startup hydration. Non-discovery catalogs remain available for
+    // held inventory and reconciliation below.
+    for (const [key, cached] of this.catalogCache) {
+      if (!catalogs.has(key) && !newest.has(key)) catalogs.set(key, cached.value);
+    }
     for (const [key, market] of Object.entries(this.reducerState.markets)) {
-      if (market.catalog && !catalogs.has(key)) catalogs.set(key, market.catalog);
+      if (market.catalog && !catalogs.has(key) && !newest.has(key)) catalogs.set(key, market.catalog);
     }
 
     const marketKeyFor = (marketRef: string, tokenId?: string, conditionId?: string): string | undefined => {
@@ -927,10 +928,7 @@ export class MarketMakeController {
     const exactRows: MarketMakeExactForecast[] = [];
     const missingHeld = [...heldKeys].filter((key) => !newest.has(key));
     for (let offset = 0; offset < missingHeld.length; offset += 10) {
-      if (!this.canSpendQuotient(QUOTIENT_CALL_COST_USD.lookup)) break;
       exactRows.push(...await this.quotient.exactForecasts(missingHeld.slice(offset, offset + 10)));
-      this.recordQuotientSpend(QUOTIENT_CALL_COST_USD.lookup);
-      await this.saveReducerState();
     }
 
     let state = structuredClone(this.reducerState);
@@ -940,8 +938,22 @@ export class MarketMakeController {
     const apply = (event: NormalizedMarketMakeEvent): void => {
       const reduced = reduceMarketMake(state, event, this.config);
       this.attachDecisionSizing(reduced.decisions);
-      state = reduced.state;
-      actions.push(...reduced.actions);
+      state = discardDecisionTelemetry(reduced.state);
+      for (const action of reduced.actions) {
+        if (action.kind !== "place") {
+          actions.push(action);
+          continue;
+        }
+        const size = this.venue.normalizeOrderSize?.(action.size) ?? action.size;
+        this.resizePlannedOrder(state, action, size);
+        if (size > EPSILON) {
+          actions.push({ ...action, size });
+        } else {
+          const planned = Object.values(state.markets[action.marketKey]?.orders ?? {})
+            .find((order) => order.clientId === action.clientId);
+          if (planned) planned.status = "REJECTED";
+        }
+      }
       decisions.push(...reduced.decisions);
     };
 
@@ -1033,11 +1045,27 @@ export class MarketMakeController {
     try {
       for (const [marketKey, market] of [...catalogs.entries()].sort(([a], [b]) => a.localeCompare(b))) {
         if (!newest.has(marketKey) && !heldKeys.has(marketKey)) continue;
-        apply({ type: "catalog", ts: at, market });
-        const [yesRaw, noRaw] = await Promise.all([
-          this.venue.tokenBook!(market.yesTokenId),
-          this.venue.tokenBook!(market.noTokenId),
-        ]);
+        // The dry run spans many live requests. Once fresh books have been
+        // observed for an earlier market, replaying a later catalog event at
+        // the dry run's original start time makes those books appear to come
+        // from the future and synthetically cancels valid planned entries.
+        apply({ type: "catalog", ts: this.now(), market });
+        if (!catalogAcceptsEntries(market) && !heldKeys.has(marketKey)) continue;
+        let yesRaw: OrderBook;
+        let noRaw: OrderBook;
+        try {
+          [yesRaw, noRaw] = await Promise.all([
+            this.readWithRetry(`YES book ${marketKey}`, () => this.venue.tokenBook!(market.yesTokenId)),
+            this.readWithRetry(`NO book ${marketKey}`, () => this.venue.tokenBook!(market.noTokenId)),
+          ]);
+        } catch (error) {
+          if (heldKeys.has(marketKey)) throw error;
+          this.log.warn("market-make dry run skipped a flat market whose book could not be read", {
+            marketKey,
+            error: error instanceof Error ? error.message : String(error),
+          });
+          continue;
+        }
         const yesBook: TokenBook = { tokenId: market.yesTokenId, bids: yesRaw.bids, asks: yesRaw.asks, ts: yesRaw.ts };
         const noBook: TokenBook = { tokenId: market.noTokenId, bids: noRaw.bids, asks: noRaw.asks, ts: noRaw.ts };
         // Books are observed after the dry run began; stamping them with its
@@ -1046,17 +1074,19 @@ export class MarketMakeController {
         apply({ type: "book", ts: this.now(), marketKey, outcome: "NO", book: noBook });
         const signal = state.markets[marketKey]?.signal;
         if (!signal) continue;
+        const evaluatedAt = this.now();
         const computed = this.metricsProvider
-          ? await this.metricsProvider.snapshots({ now: at, marketKey, signal, catalog: market, yesBook, noBook })
+          ? await this.metricsProvider.snapshots({ now: evaluatedAt, marketKey, signal, catalog: market, yesBook, noBook })
           : this.calculateMetrics(marketKey, signal, yesBook, noBook);
-        apply({ type: "volatility", ts: at, marketKey, volatility: computed.volatility });
-        apply({ type: "stability", ts: at, marketKey, stability: computed.stability });
+        apply({ type: "volatility", ts: evaluatedAt, marketKey, volatility: computed.volatility });
+        apply({ type: "stability", ts: evaluatedAt, marketKey, stability: computed.stability });
       }
     } finally {
       this.stability = stabilityBefore;
     }
-    apply({ type: "timer", ts: at });
+    apply({ type: "timer", ts: this.now() });
     if (hydrateInputs) {
+      this.lastQuotientPollAt = at;
       for (const [marketKey, catalog] of catalogs) {
         this.catalogCache.set(marketKey, { value: structuredClone(catalog), fetchedAt: at });
       }
@@ -1339,20 +1369,21 @@ export class MarketMakeController {
       if (parsed.schemaVersion !== SNAPSHOT_SCHEMA || !isReducerState(parsed.state)) {
         throw new Error("market-make reducer snapshot is invalid or unsupported");
       }
+      const snapshotIdentityMatches =
+        parsed.configHash === this.configHash && parsed.deploymentId === this.deploymentId;
       // The last proven scale is safe to restore for loss and exit
       // supervision only when both policy and deployment identities match.
       // Live entry authorization is intentionally never restored.
       if (
         runtimeBankrollPolicy(this.policyConfig).mode === "live" &&
-        parsed.configHash === this.configHash &&
-        parsed.deploymentId === this.deploymentId &&
+        snapshotIdentityMatches &&
         typeof parsed.effectiveBankrollUsd === "number" &&
         Number.isFinite(parsed.effectiveBankrollUsd) &&
         parsed.effectiveBankrollUsd > 0
       ) {
         this.applyRuntimeBankroll(parsed.effectiveBankrollUsd);
       }
-      this.reducerState = structuredClone(parsed.state);
+      this.reducerState = discardDecisionTelemetry(structuredClone(parsed.state));
       this.reducerState.consecutiveOrderRejections ??= 0;
       for (const market of Object.values(this.reducerState.markets)) {
         if (!market.redemption && market.redemptionRequested) {
@@ -1364,13 +1395,25 @@ export class MarketMakeController {
           };
         }
       }
+      if (!snapshotIdentityMatches && !Object.keys(this.reducerState.markets).some((marketKey) => this.hasOpenExposure(marketKey))) {
+        // A fully flat bot has no market-specific trading state to protect
+        // across an explicit deployment. Rebuild candidates from current
+        // Quotient/Gamma/CLOB reads instead of carrying stale catalogs, books,
+        // signal rows, decisions, or shock pauses into the new process.
+        this.reducerState.markets = {};
+        this.reducerState.recentShocks = [];
+        this.reducerState.globalEntryPausedUntil = 0;
+      }
       lastEventSeq = Number(parsed.lastEventSeq ?? 0);
-      this.quotientSpendUtcDay = typeof parsed.quotientSpendUtcDay === "string" ? parsed.quotientSpendUtcDay : "";
-      this.quotientSpendUsd = Number(parsed.quotientSpendUsd ?? 0);
-      this.lastQuotientPollAt = parsed.lastQuotientPollAt === undefined
+      this.lastQuotientPollAt = !snapshotIdentityMatches || parsed.lastQuotientPollAt === undefined
         ? undefined
         : Number(parsed.lastQuotientPollAt);
-      if (parsed.bookHistory && typeof parsed.bookHistory === "object") {
+      // Book observations, shock dedupe, and entry-stability trackers are
+      // deployment-local. Comparing a new deployment's first books with the
+      // prior process's baseline can manufacture correlated shocks during the
+      // restart itself. Durable orders, inventory, fills, loss history, and
+      // reconciliation state still restore below for uninterrupted exits.
+      if (snapshotIdentityMatches && parsed.bookHistory && typeof parsed.bookHistory === "object") {
         const cutoff = this.now() - 7 * 24 * 60 * 60 * 1_000;
         for (const [marketKey, rawPoints] of Object.entries(parsed.bookHistory)) {
           if (!Array.isArray(rawPoints)) continue;
@@ -1381,7 +1424,7 @@ export class MarketMakeController {
           if (points.length) this.bookHistory.set(marketKey, points);
         }
       }
-      if (parsed.bookObservations && typeof parsed.bookObservations === "object") {
+      if (snapshotIdentityMatches && parsed.bookObservations && typeof parsed.bookObservations === "object") {
         const cutoff = this.now() - 20 * 60 * 1_000;
         for (const [marketKey, rawPoints] of Object.entries(parsed.bookObservations)) {
           if (!Array.isArray(rawPoints)) continue;
@@ -1391,7 +1434,7 @@ export class MarketMakeController {
           if (points.length) this.bookObservations.set(marketKey, points);
         }
       }
-      if (parsed.lastShocks && typeof parsed.lastShocks === "object") {
+      if (snapshotIdentityMatches && parsed.lastShocks && typeof parsed.lastShocks === "object") {
         for (const [marketKey, shock] of Object.entries(parsed.lastShocks)) {
           if (shock && Number.isFinite(shock.ts) && typeof shock.fingerprint === "string") {
             this.lastShocks.set(marketKey, { ...shock });
@@ -1449,13 +1492,13 @@ export class MarketMakeController {
           if (suppressed === true) this.suppressedAuthoritativeFillIds.add(fillId);
         }
       }
-      if (this.validStreamRecoveryGate(parsed.marketStreamRecovery)) {
+      if (snapshotIdentityMatches && this.validStreamRecoveryGate(parsed.marketStreamRecovery)) {
         this.marketStreamRecovery = { ...parsed.marketStreamRecovery };
       }
-      if (this.validStreamRecoveryGate(parsed.userStreamRecovery)) {
+      if (snapshotIdentityMatches && this.validStreamRecoveryGate(parsed.userStreamRecovery)) {
         this.userStreamRecovery = { ...parsed.userStreamRecovery };
       }
-      if (parsed.stability && typeof parsed.stability === "object") {
+      if (snapshotIdentityMatches && parsed.stability && typeof parsed.stability === "object") {
         for (const [marketKey, tracker] of Object.entries(parsed.stability)) {
           if (
             tracker &&
@@ -1479,7 +1522,7 @@ export class MarketMakeController {
       const parsed = NormalizedMarketMakeEventSchema.safeParse(row.payload);
       if (!parsed.success) throw new Error(`persisted market-make event ${row.eventId} is invalid`);
       const event = parsed.data as NormalizedMarketMakeEvent;
-      this.reducerState = reduceMarketMake(this.reducerState, event, this.config).state;
+      this.reducerState = discardDecisionTelemetry(reduceMarketMake(this.reducerState, event, this.config).state);
       this.rememberEvent(event);
       lastEventSeq = seq;
     }
@@ -1493,25 +1536,6 @@ export class MarketMakeController {
       if (market.catalog) this.catalogCache.set(marketKey, { value: market.catalog, fetchedAt: 0 });
       if (market.yesBook) this.rememberBook(marketKey, market.yesBook);
     }
-  }
-
-  private shouldPersistDecision(decision: DecisionRecord): boolean {
-    if (decision.actions > 0) return true;
-    const key = decision.marketKey ?? `portfolio:${decision.decision}`;
-    // The sizing identity is part of the verdict: a deposit that rescales limits
-    // must leave a persisted row even when the reasons did not change.
-    const sizing = decision.sizing;
-    const fingerprint = [
-      decision.decision,
-      [...decision.reasons].sort().join(","),
-      sizing?.effectiveConfigHash ?? "",
-      sizing?.effectiveBankrollUsd ?? "",
-      sizing?.bankrollEntryReady ?? "",
-    ].join("|");
-    const previous = this.lastPersistedDecision.get(key);
-    if (previous && previous.fingerprint === fingerprint && decision.ts - previous.ts < DECISION_HEARTBEAT_MS) return false;
-    this.lastPersistedDecision.set(key, { fingerprint, ts: decision.ts });
-    return true;
   }
 
   /** Mark the snapshot stale after an event and write it at most every few seconds. */
@@ -1538,8 +1562,6 @@ export class MarketMakeController {
       effectiveBankrollUsd: this.effectiveBankrollUsd,
       lastEventSeq: latest,
       savedAt: this.now(),
-      quotientSpendUtcDay: this.quotientSpendUtcDay,
-      quotientSpendUsd: this.quotientSpendUsd,
       ...(this.lastQuotientPollAt === undefined ? {} : { lastQuotientPollAt: this.lastQuotientPollAt }),
       bookHistory: Object.fromEntries(
         [...this.bookHistory].map(([marketKey, points]) => [marketKey, this.compactBookHistory(points)]),
@@ -1563,6 +1585,7 @@ export class MarketMakeController {
       state: this.reducerState,
     };
     await this.snapshotStore.set(REDUCER_SNAPSHOT_KEY, JSON.stringify(snapshot));
+    this.stateStore.compactEventsThrough(latest);
   }
 
   private attachDecisionSizing(decisions: DecisionRecord[]): void {
@@ -1617,7 +1640,7 @@ export class MarketMakeController {
     const pauseBefore = this.reducerState.globalEntryPausedUntil;
     const reduced = reduceMarketMake(this.reducerState, event, this.config);
     this.attachDecisionSizing(reduced.decisions);
-    this.reducerState = reduced.state;
+    this.reducerState = discardDecisionTelemetry(reduced.state);
     const terminalExit = reduced.decisions.find((decision) => decision.decision === "exit-blocked");
     const postFillHardCap = reduced.decisions.find((decision) => decision.decision === "post-fill-hard-cap-breach");
     let forcedBlockedCancels: Array<Extract<MarketMakeAction, { kind: "cancel" }>> = [];
@@ -1650,19 +1673,6 @@ export class MarketMakeController {
     }
     this.rememberEvent(event);
     const seq = this.stateStore.readEvents(1)[0]?.seq ?? 0;
-    for (let index = 0; index < reduced.decisions.length; index += 1) {
-      const decision = reduced.decisions[index]!;
-      if (!this.shouldPersistDecision(decision)) continue;
-      this.stateStore.appendDecision({
-        decisionId: `${eventId}:${index}`,
-        ts: decision.ts,
-        kind: decision.decision,
-        decision,
-        marketKey: decision.marketKey,
-        configHash: this.configHash,
-        rationale: decision.reasons.join("; "),
-      });
-    }
     await this.persistReducerStateThrottled(seq);
     if (
       rejectionsBefore < 3 &&
@@ -1965,6 +1975,23 @@ export class MarketMakeController {
     this.log.info("market-make redemption confirmed by zero venue position", { marketKey, tokenId, outcome });
   }
 
+  private resizePlannedOrder(
+    state: MarketMakeState,
+    action: Extract<MarketMakeAction, { kind: "place" }>,
+    size: number,
+  ): void {
+    const market = state.markets[action.marketKey];
+    const planned = Object.values(market?.orders ?? {}).find((order) => order.clientId === action.clientId);
+    if (!planned || planned.status !== "PLANNED") return;
+    if (action.side === "SELL" && market?.inventory?.tokenId === action.tokenId) {
+      market.inventory.reservedSellQuantity = Math.max(
+        0,
+        market.inventory.reservedSellQuantity - Math.max(0, planned.size - size),
+      );
+    }
+    planned.size = size;
+  }
+
   private async executePlace(action: Extract<MarketMakeAction, { kind: "place" }>, now: number): Promise<void> {
     if (action.purpose === "entry" && !this.stateStore.status().activationCurrent) {
       await this.emitRejectedAction(action, "entry blocked while activation is not current", now);
@@ -1979,7 +2006,13 @@ export class MarketMakeController {
     const maxSize = action.side === "BUY"
       ? Math.max(0, available.collateralFreeUsd - reserveFloor) / action.limitPrice
       : available.tokens.find((token) => token.tokenId === action.tokenId)?.freeQuantity ?? 0;
-    const size = Math.min(action.size, maxSize);
+    const clippedSize = Math.min(action.size, maxSize);
+    // The durable reservation and reducer must track exactly the shares the
+    // adapter signs. Otherwise venue precision looks like an unrecorded fill
+    // on the first reconciliation and unnecessarily halts all quoting.
+    const size = this.venue.normalizeOrderSize?.(clippedSize) ?? clippedSize;
+    this.resizePlannedOrder(this.reducerState, action, size);
+    action = { ...action, size };
     if (!(size > EPSILON)) {
       await this.emitRejectedAction(action, `no free ${action.side === "BUY" ? "collateral" : "inventory"}`, now);
       return;
@@ -2049,6 +2082,18 @@ export class MarketMakeController {
         );
       } else {
         this.stateStore.acknowledgeOrder(action.clientId, ack.orderId, this.now());
+      }
+      if (ack.status !== "rejected") {
+        this.log.info("market-make order acknowledged", {
+          clientId: action.clientId,
+          orderId: ack.orderId,
+          marketKey: action.marketKey,
+          outcome: action.outcome,
+          side: action.side,
+          size,
+          limitPrice: action.limitPrice,
+          status: ack.status,
+        });
       }
       const placement = this.reducerPlacement(action.marketKey, action.clientId, ack.orderId);
       await this.processEvent({
@@ -2270,6 +2315,11 @@ export class MarketMakeController {
     const stored = this.findStoredOrder(action.orderId);
     if (stored && ["CANCELED", "FILLED", "REJECTED"].includes(stored.status)) return;
     const venueId = stored?.venueOrderId ?? (action.orderId.startsWith("mm:") ? undefined : action.orderId);
+    this.log.info("market-make cancellation requested", {
+      orderId: venueId ?? action.orderId,
+      marketKey: action.marketKey,
+      reason: action.reason,
+    });
     const ambiguous = stored !== undefined && (
       ["SIGNED", "SUBMITTING", "UNKNOWN"].includes(stored.status) ||
       this.orderAbsences.has(stored.clientOrderId)
@@ -3441,19 +3491,12 @@ export class MarketMakeController {
 
   private async pollMarketInputs(positions: Position[], refreshForecasts = true): Promise<PollResult> {
     const now = this.now();
-    this.resetQuotientBudgetIfNeeded(now);
     let discoveryQueried = false;
-    let budgetExhausted = false;
     let activeRows: MarketMakeSignalRow[] = [];
     if (refreshForecasts) {
       this.lastQuotientPollAt = now;
-      if (this.canSpendQuotient(QUOTIENT_CALL_COST_USD.signals)) {
-        activeRows = await this.quotient.activeSignals(500);
-        this.recordQuotientSpend(QUOTIENT_CALL_COST_USD.signals);
-        discoveryQueried = true;
-      } else {
-        budgetExhausted = true;
-      }
+      activeRows = await this.quotient.activeSignals(500);
+      discoveryQueried = true;
     }
     const newest = new Map<string, MarketMakeSignalRow>();
     for (const row of activeRows) {
@@ -3505,15 +3548,14 @@ export class MarketMakeController {
 
     const missingHeld = [...forecastLookupKeys].filter((key) => !newest.has(key));
     const exactRows: MarketMakeExactForecast[] = [];
-    if (refreshForecasts) {
-      for (let offset = 0; offset < missingHeld.length; offset += 10) {
-        if (!this.canSpendQuotient(QUOTIENT_CALL_COST_USD.lookup)) {
-          budgetExhausted = true;
-          break;
-        }
-        exactRows.push(...await this.quotient.exactForecasts(missingHeld.slice(offset, offset + 10)));
-        this.recordQuotientSpend(QUOTIENT_CALL_COST_USD.lookup);
-      }
+    // A held/resting market recovered between discovery polls needs one Q
+    // immediately for exit supervision. Once hydrated, exact lookups return to
+    // the configured Quotient cadence.
+    const exactLookupKeys = refreshForecasts
+      ? missingHeld
+      : missingHeld.filter((key) => !this.reducerState.markets[key]?.signal);
+    for (let offset = 0; offset < exactLookupKeys.length; offset += 10) {
+      exactRows.push(...await this.quotient.exactForecasts(exactLookupKeys.slice(offset, offset + 10)));
     }
 
     for (const row of newest.values()) {
@@ -3522,7 +3564,7 @@ export class MarketMakeController {
       decisions += result.decisions;
     }
     for (const [marketKey, market] of Object.entries(this.reducerState.markets)) {
-      if (!market.signal || newest.has(marketKey) || (!discoveryQueried && !budgetExhausted) || heldKeys.has(marketKey)) continue;
+      if (!market.signal || newest.has(marketKey) || !discoveryQueried || heldKeys.has(marketKey)) continue;
       const result = await this.processEvent({
         type: "signal",
         ts: now,
@@ -3530,18 +3572,6 @@ export class MarketMakeController {
       });
       actions += result.actions;
       decisions += result.decisions;
-    }
-    if (budgetExhausted) {
-      for (const [marketKey, market] of Object.entries(this.reducerState.markets)) {
-        if (!market.signal || !market.signal.active) continue;
-        const result = await this.processEvent({
-          type: "signal",
-          ts: now,
-          signal: { ...market.signal, active: false, livePriced: false },
-        });
-        actions += result.actions;
-        decisions += result.decisions;
-      }
     }
     for (const exact of exactRows) {
       const market = this.reducerState.markets[exact.marketKey];
@@ -3583,8 +3613,10 @@ export class MarketMakeController {
       decisions += result.decisions;
     }
 
+    this.pruneFlatInactiveMarkets(heldKeys);
+
     const knownKeys = Object.entries(this.reducerState.markets)
-      .filter(([, market]) => market.signal && market.catalog)
+      .filter(([, market]) => market.signal?.active && market.catalog)
       .map(([marketKey]) => marketKey);
     const bookResult = await this.fetchAndReduceBooks(new Set([...newest.keys(), ...heldKeys, ...knownKeys]));
     actions += bookResult.actions;
@@ -3622,23 +3654,7 @@ export class MarketMakeController {
     };
   }
 
-  private resetQuotientBudgetIfNeeded(now: number): void {
-    const day = new Date(now).toISOString().slice(0, 10);
-    if (this.quotientSpendUtcDay === day) return;
-    this.quotientSpendUtcDay = day;
-    this.quotientSpendUsd = 0;
-  }
-
-  private canSpendQuotient(cost: number): boolean {
-    return this.quotientSpendUsd + cost <= this.config.quotient_feed.daily_api_cost_cap_usd + EPSILON;
-  }
-
-  private recordQuotientSpend(cost: number): void {
-    this.quotientSpendUsd += cost;
-  }
-
   private quotientPollDue(now: number): boolean {
-    this.resetQuotientBudgetIfNeeded(now);
     if (this.lastQuotientPollAt === undefined) return true;
     const active = Object.values(this.reducerState.markets).some((market) =>
       Boolean(market.inventory) || Object.values(market.orders).some((order) =>
@@ -3653,7 +3669,7 @@ export class MarketMakeController {
   private async refreshCatalog(marketKey: string, nativeMarketId: string, conditionId: string, now: number): Promise<boolean> {
     const cached = this.catalogCache.get(marketKey);
     if (cached && now - cached.fetchedAt < this.config.market_catalog.gamma_refresh_seconds * 1_000) return false;
-    const catalog = mapCatalog(await this.catalogClient.market(marketKey, nativeMarketId, conditionId));
+    const catalog = await this.readCatalog(marketKey, nativeMarketId, conditionId, cached?.value);
     this.catalogCache.set(marketKey, { value: catalog, fetchedAt: now });
     this.stateStore.upsertMarket({
       marketKey,
@@ -3667,6 +3683,21 @@ export class MarketMakeController {
       updatedAt: now,
     });
     return true;
+  }
+
+  private async readCatalog(
+    marketKey: string,
+    nativeMarketId: string,
+    conditionId: string,
+    fallback?: MarketCatalogSnapshot,
+  ): Promise<MarketCatalogSnapshot> {
+    try {
+      return mapCatalog(await this.catalogClient.market(marketKey, nativeMarketId, conditionId));
+    } catch (error) {
+      if (!fallback || !this.catalogClient.marketStatus) throw error;
+      const status = await this.catalogClient.marketStatus(nativeMarketId, conditionId);
+      return { ...fallback, ...status };
+    }
   }
 
   /**
@@ -3685,6 +3716,23 @@ export class MarketMakeController {
     );
   }
 
+  private pruneFlatInactiveMarkets(protectedMarketKeys: Set<string>): void {
+    for (const [marketKey, market] of Object.entries(this.reducerState.markets)) {
+      if (
+        protectedMarketKeys.has(marketKey) ||
+        market.signal?.active !== false ||
+        this.hasOpenExposure(marketKey) ||
+        market.redemption
+      ) continue;
+      delete this.reducerState.markets[marketKey];
+      this.catalogCache.delete(marketKey);
+      this.bookHistory.delete(marketKey);
+      this.bookObservations.delete(marketKey);
+      this.lastShocks.delete(marketKey);
+      this.stability.delete(marketKey);
+    }
+  }
+
   private async fetchAndReduceBooks(keys: Set<string>): Promise<{ books: number; actions: number; decisions: number }> {
     let books = 0;
     let actions = 0;
@@ -3694,7 +3742,9 @@ export class MarketMakeController {
     // 57-market tick take minutes; the reducer still sees a deterministic order.
     const ordered = [...keys].sort().flatMap((marketKey) => {
       const catalog = this.catalogCache.get(marketKey)?.value ?? this.reducerState.markets[marketKey]?.catalog;
-      return catalog ? [{ marketKey, catalog }] : [];
+      return catalog && (catalogAcceptsEntries(catalog) || this.hasOpenExposure(marketKey))
+        ? [{ marketKey, catalog }]
+        : [];
     });
     // Each batch is reduced as soon as it lands, so a book is never more than
     // one batch’s round trip old when its freshness gate is evaluated.
@@ -3780,7 +3830,11 @@ export class MarketMakeController {
       yes.mid === undefined || no.mid === undefined ||
       !Number.isFinite(yes.spreadPp) || !Number.isFinite(no.spreadPp)
     ) {
-      return this.emitShockOnce(marketKey, at, true, ["book-corrupt-or-gap"]);
+      // A flat market with an unusable book is already ineligible for entry.
+      // Several unrelated junk books must not freeze every healthy candidate.
+      return this.hasOpenExposure(marketKey)
+        ? this.emitShockOnce(marketKey, at, true, ["book-corrupt-or-gap"])
+        : { applied: false, actions: 0, decisions: 0 };
     }
     const current: BookObservation = {
       ts: at,

@@ -34,7 +34,7 @@
 // dead man's switch (no heartbeat) — the engine's TTL cancels are the only
 // order safety net.
 
-import { constants as cryptoConstants, createPrivateKey, sign as cryptoSign, type KeyObject } from "node:crypto";
+import { constants as cryptoConstants, createHash, createPrivateKey, sign as cryptoSign, type KeyObject } from "node:crypto";
 import { readFileSync, existsSync } from "node:fs";
 import type {
   AwaitFundingOpts,
@@ -46,6 +46,10 @@ import type {
   OrderAck,
   OrderBook,
   OrderIntent,
+  OrderLifecycleHooks,
+  PredictionCancellationResult,
+  PredictionExecutionMarket,
+  PredictionOrderState,
   OrderStatus,
   Position,
   Quote,
@@ -186,6 +190,7 @@ export function mapKalshiPosition(row: KalshiMarketPosition): Position | null {
         : undefined;
   return {
     marketRef: row.ticker,
+    ...outcomeIdentity(row.ticker, side),
     side,
     size,
     avgPrice: size > 0 && exposureUsd > 0 ? Number((exposureUsd / size).toFixed(6)) : 0,
@@ -210,20 +215,81 @@ export function toBookOrder(
   return { bookSide: buysYesExposure ? "bid" : "ask", yesPrice };
 }
 
-function mapOrderStatus(status: string | undefined, remaining: number, initial: number): OrderStatus {
-  if (status === "canceled") return "canceled";
-  if (status === "executed") return "filled";
-  if (remaining <= 0 && initial > 0) return "filled";
-  if (remaining < initial) return "partial";
-  return "open";
+type Direction = { side: "BUY" | "SELL"; outcome: "YES" | "NO" };
+type KalshiOrderRow = {
+  order_id: string; client_order_id?: string; ticker: string;
+  book_side?: string; outcome_side?: string; action?: string; side?: string;
+  yes_price_dollars?: string | number; yes_price?: number;
+  initial_count_fp?: string | number; initial_count?: number;
+  remaining_count_fp?: string | number; remaining_count?: number;
+  fill_count_fp?: string | number; fill_count?: number;
+  status?: string; created_time?: string; expiration_time?: string;
+};
+type KalshiMarket = {
+  ticker?: string; event_ticker?: string; status?: string; close_time?: string; open_time?: string;
+  market_type?: string; fractional_trading_enabled?: boolean; volume_24h_fp?: string | number;
+  price_level_structure?: string;
+  price_ranges?: Array<{ start: string; end: string; step: string }>;
+};
+
+function outcomeIdentity(marketRef: string, outcome: "YES" | "NO") {
+  return { conditionId: `kalshi:${marketRef}`, tokenId: `kalshi:${marketRef}:${outcome}`, outcome };
 }
 
-/** BUY/SELL on the YES book from the new canonical fields, legacy action as fallback. */
-function bookSideToOrderSide(row: { book_side?: string; outcome_side?: string; action?: string; side?: string }): "BUY" | "SELL" {
-  if (row.book_side) return row.book_side === "bid" ? "BUY" : "SELL";
-  if (row.outcome_side) return row.outcome_side === "yes" ? "BUY" : "SELL";
-  if (row.action === "sell") return "SELL";
-  return "BUY";
+/** A UUID preserves direction through V2's collapse of BUY NO and SELL YES.
+ * The remaining 90 hash bits keep client-order ids deterministic and distinct.
+ * No key material is involved: this is an idempotency tag, not a signature. */
+function executionClientId(intent: OrderIntent): string {
+  const code = (intent.side === "SELL" ? 2 : 0) + (intent.outcome === "NO" ? 1 : 0);
+  const h = createHash("sha256").update(JSON.stringify([intent.marketRef, intent.clientId, code])).digest("hex");
+  return `ca551e0${code}-${h.slice(8, 12)}-5${h.slice(13, 16)}-a${h.slice(17, 20)}-${h.slice(20, 32)}`;
+}
+
+function taggedDirection(clientId?: string): Direction | undefined {
+  const match = /^ca551e0([0-3])-[a-f0-9]{4}-5[a-f0-9]{3}-a[a-f0-9]{3}-[a-f0-9]{12}$/i.exec(clientId ?? "");
+  if (!match) return undefined;
+  const code = Number(match[1]);
+  return { side: code >= 2 ? "SELL" : "BUY", outcome: code % 2 ? "NO" : "YES" };
+}
+
+function direction(row: { book_side?: string; outcome_side?: string; action?: string; side?: string; client_order_id?: string }, saved?: Direction): Direction {
+  const selected = saved ?? taggedDirection(row.client_order_id)
+    ?? ((row.action === "buy" || row.action === "sell") && (row.side === "yes" || row.side === "no")
+      ? { side: row.action === "buy" ? "BUY" as const : "SELL" as const, outcome: row.side === "yes" ? "YES" as const : "NO" as const } : undefined);
+  const bookSide = row.book_side ?? (row.outcome_side === "yes" ? "bid" : row.outcome_side === "no" ? "ask" : undefined);
+  if (bookSide !== undefined && bookSide !== "bid" && bookSide !== "ask") throw new Error("unknown Kalshi book direction");
+  if (row.outcome_side !== undefined && row.outcome_side !== "yes" && row.outcome_side !== "no") throw new Error("unknown Kalshi outcome direction");
+  if (row.book_side && row.outcome_side && (row.book_side === "bid") !== (row.outcome_side === "yes")) throw new Error("conflicting Kalshi direction fields");
+  if (selected) {
+    if (bookSide && toBookOrder(selected.side, selected.outcome, .5).bookSide !== bookSide) throw new Error("Kalshi direction disagrees with submitted outcome");
+    return selected;
+  }
+  // Unmanaged canonical-only activity retains the legacy YES-book representation.
+  if (bookSide) return { side: bookSide === "bid" ? "BUY" : "SELL", outcome: "YES" };
+  throw new Error("Kalshi order has no recoverable direction");
+}
+
+function requiredNumber(value: unknown, label: string): number {
+  if (value === null || value === undefined || value === "" || (typeof value !== "number" && typeof value !== "string")) throw new Error(`missing Kalshi ${label}`);
+  const n = Number(value);
+  if (!Number.isFinite(n)) throw new Error(`invalid Kalshi ${label}`);
+  return n;
+}
+
+function orderCounts(row: KalshiOrderRow) {
+  const size = requiredNumber(row.initial_count_fp ?? row.initial_count, "initial order count");
+  const remaining = requiredNumber(row.remaining_count_fp ?? row.remaining_count, "remaining order count");
+  // initial-minus-remaining includes canceled contracts; never infer matches from it.
+  const matched = requiredNumber(row.fill_count_fp ?? row.fill_count, "filled order count");
+  if (size <= 0 || remaining < 0 || matched < 0 || remaining + matched > size + 1e-8) throw new Error("inconsistent Kalshi order counts");
+  return { size, remaining, matched };
+}
+
+function mapOrderStatus(status: string | undefined, remaining: number, initial: number): OrderStatus {
+  if (status === "canceled" || status === "expired") return "canceled";
+  if (status === "executed") return "filled";
+  if (status !== "resting") throw new Error(`unknown Kalshi order status: ${status}`);
+  return remaining < initial ? "partial" : "open";
 }
 
 // ---------------------------------------------------------------------------
@@ -232,7 +298,7 @@ function bookSideToOrderSide(row: { book_side?: string; outcome_side?: string; a
 
 export class KalshiAdapter implements VenueAdapter {
   readonly id = "kalshi" as const;
-  readonly verifiedAgainst = "2026-08-23";
+  readonly verifiedAgainst = "2026-09-04";
   readonly supportsNativeTriggers = false;
 
   private readonly opts: AdapterOpts;
@@ -241,6 +307,8 @@ export class KalshiAdapter implements VenueAdapter {
   private actionChain: Promise<unknown> = Promise.resolve();
   private lastActionAt = 0;
   private readonly eventRefCache = new Map<string, string>();
+  private readonly orderDirections = new Map<string, Direction & { marketRef: string }>();
+  private readonly marketTerms = new Map<string, { tickSize: number; minOrderSize: number; observedAt: number }>();
 
   constructor(opts: AdapterOpts, fetchImpl?: typeof fetch) {
     this.opts = opts;
@@ -314,7 +382,8 @@ export class KalshiAdapter implements VenueAdapter {
       }
       if (!res.ok) {
         const detail = await res.text().catch(() => "");
-        throw new Error(`kalshi ${method} ${url.pathname} → ${res.status}${detail ? `: ${detail.slice(0, 300)}` : ""}`);
+        throw Object.assign(new Error(`kalshi ${method} ${url.pathname} → ${res.status}${detail ? `: ${detail.slice(0, 300)}` : ""}`), { status: res.status,
+          submissionRejected: method === "POST" && res.status >= 400 && res.status < 500 && ![408, 409, 429].includes(res.status) });
       }
       return (await res.json()) as T;
     }
@@ -327,15 +396,16 @@ export class KalshiAdapter implements VenueAdapter {
   async setup(ctx: SetupContext): Promise<VenueAccount> {
     const demo = this.opts.urls.kalshi.demo;
     const site = demo ? "https://demo.kalshi.co" : "https://kalshi.com";
-    ctx.print(`Kalshi environment: ${demo ? "demo (paper funds, separate keys)" : "production"}.`);
-    ctx.print(`Create an API key under Account → API Keys on ${site}; download the RSA private key when prompted — Kalshi shows it once.`);
+    ctx.print(`Kalshi: ${demo ? "demo" : "production"}`);
+    ctx.print("Create an API key and download its private key");
+    ctx.print(`${site}/account/api-keys`);
     ctx.openUrl?.(`${site}/account/api-keys`);
 
-    const keyId = (await ctx.ask("Kalshi API key id (UUID from the API Keys page)")).trim();
+    const keyId = (await ctx.ask("Kalshi API key ID")).trim();
     if (!keyId) throw new Error("a Kalshi API key id is required");
 
     const keyInput = await ctx.ask(
-      "Path to the downloaded private key file (or paste a single-line base64 key)",
+      "Private key file path or base64 key",
       { secret: true },
     );
     const material = existsSync(keyInput.trim()) ? readFileSync(keyInput.trim(), "utf8") : keyInput;
@@ -367,15 +437,15 @@ export class KalshiAdapter implements VenueAdapter {
       addresses: [
         {
           chain: "kalshi.com",
-          address: demo ? "demo.kalshi.co (pre-funded)" : "kalshi.com → Account → Deposit",
+          address: demo ? "https://demo.kalshi.co" : "https://kalshi.com",
           asset: "USD",
           minimum: 0,
-          note: "Kalshi is funded by ACH, debit, or wire on the website — there is no crypto deposit address.",
+          note: "USD only. No crypto deposits.",
         },
       ],
       summary: demo
-        ? "Demo accounts come pre-funded with paper money; nothing to send."
-        : "Deposit USD on kalshi.com (Account → Deposit: ACH, debit, or wire). Cassie polls your API balance until it arrives.",
+        ? "Demo balance is pre-funded."
+        : "Deposit USD under Account → Deposit.",
     };
   }
 
@@ -387,7 +457,7 @@ export class KalshiAdapter implements VenueAdapter {
       const [balance] = await this.balances(_acct);
       if (balance && balance.available > 0) return balance;
       if (Date.now() - start > timeout) throw new Error("timed out waiting for a Kalshi balance");
-      opts?.onPoll?.("no Kalshi balance yet — deposits land on kalshi.com, not on-chain");
+      opts?.onPoll?.("Waiting for USD…");
       await new Promise((r) => setTimeout(r, interval));
     }
   }
@@ -414,7 +484,7 @@ export class KalshiAdapter implements VenueAdapter {
       const res = await this.request<{ market_positions?: KalshiMarketPosition[]; cursor?: string }>(
         "GET",
         "/portfolio/positions",
-        { auth: true, query: { limit: 200, cursor, count_filter: "position" } },
+        { auth: true, query: { limit: 200, cursor, count_filter: "position", subaccount: 0 } },
       );
       for (const row of res.market_positions ?? []) {
         const p = mapKalshiPosition(row);
@@ -492,45 +562,89 @@ export class KalshiAdapter implements VenueAdapter {
     }
   }
 
+  /** The durable executor consumes a selected-outcome book, including NO prices. */
+  async executionMarket(marketRef: string, outcome: "YES" | "NO"): Promise<PredictionExecutionMarket> {
+    const [res, yesBook] = await Promise.all([
+      this.request<{ market?: KalshiMarket }>("GET", `/markets/${encodeURIComponent(marketRef)}`), this.book(marketRef),
+    ]);
+    const m = res.market;
+    if (!m || m.ticker !== marketRef || m.market_type !== "binary") throw new Error("invalid Kalshi execution market identity");
+    const ranges = m.price_ranges;
+    // A single conservative grid must be valid in every price band. Unknown grids
+    // fail closed instead of silently changing a submitted price.
+    const steps = ranges?.map(r => requiredNumber(r.step, "price step"));
+    const tickSize = steps?.length ? Math.max(...steps) : m.price_level_structure === "linear_cent" ? .01 : NaN;
+    if (!(tickSize > 0 && tickSize < 1) || (ranges && ranges.some((r, i) => {
+      const start = requiredNumber(r.start, "price range start"), end = requiredNumber(r.end, "price range end"), step = steps![i]!;
+      return step <= 0 || start < 0 || end > 1 || end <= start || Math.abs(tickSize / step - Math.round(tickSize / step)) > 1e-6 || Math.abs(start / step - Math.round(start / step)) > 1e-6;
+    }))) throw new Error("unsupported Kalshi price grid");
+    const observedAt = Date.now(), minOrderSize = m.fractional_trading_enabled === true ? .01 : 1;
+    this.marketTerms.set(marketRef, { tickSize, minOrderSize, observedAt });
+    if (m.event_ticker) this.eventRefCache.set(marketRef, `kalshi:${m.event_ticker}`);
+    const mirror = (levels: BookLevel[]) => levels.map(l => ({ price: Number((1 - l.price).toFixed(6)), size: l.size }));
+    const book = outcome === "YES" ? yesBook : { marketRef, ts: yesBook.ts,
+      bids: mirror(yesBook.asks).sort((a, b) => b.price - a.price), asks: mirror(yesBook.bids).sort((a, b) => a.price - b.price) };
+    const bid = book.bids[0]?.price ?? 0, ask = book.asks[0]?.price ?? 1, mid = (bid + ask) / 2;
+    const closeAt = Date.parse(m.close_time ?? ""), openAt = Date.parse(m.open_time ?? "");
+    return { marketRef, ...outcomeIdentity(marketRef, outcome), tickSize, minOrderSize,
+      acceptingOrders: m.status === "active" && Number.isFinite(closeAt) && closeAt > observedAt && (!m.open_time || (Number.isFinite(openAt) && openAt <= observedAt)), observedAt, book,
+      quote: { marketRef, bid, ask, mid, ts: book.ts, spreadBps: mid > 0 ? (ask - bid) / mid * 10_000 : 0, volume24h: parseFp(m.volume_24h_fp) * mid } };
+  }
+
+  normalizeOrderSize(size: number): number {
+    return Number.isFinite(size) && size > 0 ? Math.floor(size * 100 + 1e-9) / 100 : 0;
+  }
+
+  async tokenBalance(acct: VenueAccount, tokenId: string): Promise<number> {
+    const match = /^kalshi:(.+):(YES|NO)$/.exec(tokenId);
+    if (!match) throw new Error("invalid Kalshi outcome token identity");
+    const positions = await this.positions(acct);
+    return positions.filter(p => p.tokenId === tokenId).reduce((sum, p) => sum + p.size, 0);
+  }
+
+  private rememberOrder(row: KalshiOrderRow): Direction {
+    const d = direction(row, this.orderDirections.get(row.order_id));
+    this.orderDirections.set(row.order_id, { ...d, marketRef: row.ticker });
+    return d;
+  }
+
+  private async readOrder(id: string): Promise<KalshiOrderRow | null> {
+    try {
+      const res = await this.request<{ order?: KalshiOrderRow }>("GET", `/portfolio/orders/${encodeURIComponent(id)}`, { auth: true, query: { subaccount: 0 } });
+      if (!res.order || res.order.order_id !== id || !res.order.ticker) throw new Error("invalid Kalshi order lookup identity");
+      this.rememberOrder(res.order);
+      return res.order;
+    } catch (error) {
+      if ((error as { status?: number }).status === 404) return null;
+      throw error;
+    }
+  }
+
+  async executionOrder(_acct: VenueAccount, orderId: string): Promise<PredictionOrderState | null> {
+    const row = await this.readOrder(orderId);
+    if (!row) return null;
+    const { size, remaining, matched } = orderCounts(row);
+    const status: PredictionOrderState["status"] = row.status === "resting" && remaining > 0 ? "open"
+      : row.status === "executed" && remaining === 0 && Math.abs(matched - size) < 1e-8 ? "matched"
+      : row.status === "canceled" && remaining === 0 ? "canceled"
+      : row.status === "expired" && remaining === 0 ? "expired" : "unknown";
+    return { orderId, status, size, matchedSize: matched, observedAt: Date.now() };
+  }
+
   async openOrders(_acct: VenueAccount): Promise<Order[]> {
     const out: Order[] = [];
     let cursor: string | undefined;
     do {
-      const res = await this.request<{
-        orders?: Array<{
-          order_id: string;
-          client_order_id?: string;
-          ticker: string;
-          book_side?: string;
-          outcome_side?: string;
-          action?: string;
-          side?: string;
-          yes_price_dollars?: string | number;
-          initial_count_fp?: string | number;
-          remaining_count_fp?: string | number;
-          fill_count_fp?: string | number;
-          status?: string;
-          created_time?: string;
-        }>;
-        cursor?: string;
-      }>("GET", "/portfolio/orders", { auth: true, query: { status: "resting", limit: 200, cursor } });
-      for (const o of res.orders ?? []) {
-        const initial = parseFp(o.initial_count_fp);
-        const remaining = o.remaining_count_fp !== undefined ? parseFp(o.remaining_count_fp) : initial;
-        // Prices are reported in YES space — the same space placeOrder converts
-        // into, so what the engine reads back matches what it sent.
-        out.push({
-          id: o.order_id,
-          clientId: o.client_order_id,
-          marketRef: o.ticker,
-          side: bookSideToOrderSide(o),
-          size: initial,
-          filledSize: o.fill_count_fp !== undefined ? parseFp(o.fill_count_fp) : Math.max(0, initial - remaining),
-          price: parseFp(o.yes_price_dollars),
-          tif: "GTC",
-          status: mapOrderStatus(o.status, remaining, initial),
-          createdAt: o.created_time ? Date.parse(o.created_time) : undefined,
-        });
+      const res = await this.request<{ orders?: KalshiOrderRow[]; cursor?: string }>("GET", "/portfolio/orders", {
+        auth: true, query: { status: "resting", limit: 200, cursor, subaccount: 0 },
+      });
+      for (const row of res.orders ?? []) {
+        const d = this.rememberOrder(row), { size, remaining, matched } = orderCounts(row);
+        const yesPrice = row.yes_price_dollars !== undefined ? requiredNumber(row.yes_price_dollars, "order price") : requiredNumber(row.yes_price, "order price") / 100;
+        out.push({ id: row.order_id, clientId: row.client_order_id, marketRef: row.ticker,
+          ...outcomeIdentity(row.ticker, d.outcome), side: d.side, size, filledSize: matched,
+          price: d.outcome === "NO" ? Number((1 - yesPrice).toFixed(6)) : yesPrice,
+          tif: "GTC", status: mapOrderStatus(row.status, remaining, size), createdAt: row.created_time ? Date.parse(row.created_time) : undefined });
       }
       cursor = res.cursor || undefined;
     } while (cursor);
@@ -541,120 +655,149 @@ export class KalshiAdapter implements VenueAdapter {
     const out: Fill[] = [];
     let cursor: string | undefined;
     do {
-      const res = await this.request<{
-        fills?: Array<{
-          fill_id?: string;
-          trade_id?: string;
-          order_id?: string;
-          ticker?: string;
-          market_ticker?: string;
-          book_side?: string;
-          outcome_side?: string;
-          action?: string;
-          side?: string;
-          count_fp?: string | number;
-          count?: number;
-          yes_price_dollars?: string | number;
-          yes_price?: number;
-          created_time?: string;
-          ts?: number;
-        }>;
-        cursor?: string;
-      }>("GET", "/portfolio/fills", {
-        auth: true,
-        // Kalshi's min_ts is in seconds.
-        query: { min_ts: Math.max(0, Math.floor(sinceTs / 1000)), limit: 200, cursor },
-      });
+      const res = await this.request<{ fills?: Array<{
+        fill_id?: string; trade_id?: string; order_id?: string; client_order_id?: string;
+        ticker?: string; market_ticker?: string; book_side?: string; outcome_side?: string; action?: string; side?: string;
+        count_fp?: string | number; count?: number; yes_price_dollars?: string | number; yes_price?: number;
+        fee_cost?: string | number; created_time?: string; ts?: number;
+      }>; cursor?: string }>("GET", "/portfolio/fills", { auth: true,
+        query: { min_ts: Math.max(0, Math.floor(sinceTs / 1000)), limit: 200, cursor, subaccount: 0 } });
       for (const f of res.fills ?? []) {
-        const ts = f.created_time ? Date.parse(f.created_time) : f.ts !== undefined ? f.ts * 1000 : 0;
+        const ts = f.created_time ? Date.parse(f.created_time) : f.ts !== undefined ? f.ts * 1000 : NaN;
+        if (!Number.isFinite(ts)) throw new Error("invalid Kalshi fill timestamp");
         if (ts < sinceTs) continue;
-        const marketRef = f.ticker ?? f.market_ticker;
-        const id = f.fill_id ?? f.trade_id;
-        if (!marketRef || !id) continue;
-        out.push({
-          id,
-          orderId: f.order_id,
-          marketRef,
-          side: bookSideToOrderSide(f),
-          size: f.count_fp !== undefined ? parseFp(f.count_fp) : (f.count ?? 0),
-          // YES-space fill price, matching the YES-space orders above.
-          price: f.yes_price_dollars !== undefined ? parseFp(f.yes_price_dollars) : (f.yes_price ?? 0) / 100,
-          ts,
-        });
+        const marketRef = f.ticker ?? f.market_ticker, id = f.fill_id ?? f.trade_id;
+        if (!marketRef || !id) throw new Error("missing Kalshi fill identity");
+        // The Fill API need not return client_order_id. Fetch the original order
+        // to recover our UUID-tagged outcome after process restart.
+        let saved = f.order_id ? this.orderDirections.get(f.order_id) : undefined;
+        if (!saved && f.order_id && f.fee_cost !== undefined && !taggedDirection(f.client_order_id)) {
+          const row = await this.readOrder(f.order_id);
+          if (!row) throw new Error(`Kalshi fill order ${f.order_id} is unavailable for reconciliation`);
+          saved = this.orderDirections.get(f.order_id);
+        }
+        if (saved && saved.marketRef !== marketRef) throw new Error("Kalshi fill market differs from its order");
+        const d = direction(f, saved);
+        const yesPrice = f.yes_price_dollars !== undefined ? requiredNumber(f.yes_price_dollars, "fill price") : requiredNumber(f.yes_price, "fill price") / 100;
+        const size = requiredNumber(f.count_fp ?? f.count, "fill count"), fee = f.fee_cost === undefined ? undefined : requiredNumber(f.fee_cost, "fill fee");
+        if (!(yesPrice > 0 && yesPrice < 1 && size > 0) || (fee !== undefined && fee < 0)) throw new Error("invalid Kalshi fill terms");
+        out.push({ id, orderId: f.order_id, marketRef, ...outcomeIdentity(marketRef, d.outcome), side: d.side, size,
+          price: d.outcome === "NO" ? Number((1 - yesPrice).toFixed(6)) : yesPrice, ts, fee, settlementStatus: "CONFIRMED" });
       }
       cursor = res.cursor || undefined;
     } while (cursor);
     return out.sort((a, b) => a.ts - b.ts);
   }
 
+  /** Kalshi matches update cash/inventory immediately; there is no chain settlement. */
+  async tradeSettlements(acct: VenueAccount, sinceTs: number): Promise<Fill[]> {
+    const fills = await this.fills(acct, sinceTs);
+    if (fills.some(f => f.fee === undefined)) throw new Error("Kalshi fill fee missing; execution accounting cannot reconcile");
+    return fills;
+  }
+
   // -------------------------------------------------------------------------
   // Trading
   // -------------------------------------------------------------------------
 
-  async placeOrder(_acct: VenueAccount, intent: OrderIntent): Promise<OrderAck> {
-    const outcome = intent.outcome ?? "YES";
-    const count = countToFp(intent.size);
-    if (count === null) {
-      return { orderId: "", clientId: intent.clientId, status: "rejected" };
-    }
-    const { bookSide, yesPrice } = toBookOrder(intent.side, outcome, intent.limitPrice);
-    const timeInForce =
-      intent.tif === "IOC" ? "immediate_or_cancel" : intent.tif === "FOK" ? "fill_or_kill" : "good_till_canceled";
+  async placeOrder(acct: VenueAccount, intent: OrderIntent): Promise<OrderAck> {
+    return this.submitOrder(acct, intent);
+  }
+
+  async placeOrderWithLifecycle(acct: VenueAccount, intent: OrderIntent, hooks: OrderLifecycleHooks): Promise<OrderAck> {
+    return this.submitOrder(acct, intent, hooks);
+  }
+
+  private async submitOrder(_acct: VenueAccount, intent: OrderIntent, hooks?: OrderLifecycleHooks): Promise<OrderAck> {
+    const outcome = intent.outcome ?? "YES", identity = outcomeIdentity(intent.marketRef, outcome);
+    if ((intent.tokenId && intent.tokenId !== identity.tokenId) || (intent.conditionId && intent.conditionId !== identity.conditionId)) throw new Error("Kalshi order outcome identity mismatch");
+    if (!Number.isFinite(intent.limitPrice) || !(intent.limitPrice > 0 && intent.limitPrice < 1)) throw new Error("invalid Kalshi limit price");
+    if (intent.postOnly && intent.tif !== "GTC") throw new Error("Kalshi post-only requires GTC");
+    if (intent.expiration !== undefined && (intent.tif !== "GTC" || !Number.isInteger(intent.expiration) || intent.expiration <= Date.now() / 1000)) throw new Error("Kalshi expiry requires GTC and a future Unix timestamp in seconds");
+    const terms = this.marketTerms.get(intent.marketRef);
+    if (hooks && (!terms || Date.now() - terms.observedAt > 10_000)) throw new Error("Kalshi execution terms require a fresh executionMarket read");
+    const size = terms?.minOrderSize === 1 ? Math.floor(intent.size) : this.normalizeOrderSize(intent.size);
+    const count = Number.isFinite(size) && size >= (terms?.minOrderSize ?? .01) ? size.toFixed(2) : null;
+    if (count === null) return { orderId: "", clientId: intent.clientId, status: "rejected" };
+    const tick = terms?.tickSize ?? .01;
+    // Round toward the authorized limit in outcome space, never through it.
+    const ticks = intent.limitPrice / tick;
+    const price = Number(((intent.side === "BUY" ? Math.floor(ticks + 1e-9) : Math.ceil(ticks - 1e-9)) * tick).toFixed(6));
+    if (!(price > 0 && price < 1)) throw new Error("Kalshi price rounds outside the executable grid");
+    const { bookSide, yesPrice } = toBookOrder(intent.side, outcome, price);
+    const timeInForce = intent.tif === "IOC" || intent.tif === "FAK" ? "immediate_or_cancel"
+      : intent.tif === "FOK" ? "fill_or_kill" : intent.tif === "GTC" ? "good_till_canceled" : undefined;
+    if (!timeInForce) throw new Error("unsupported Kalshi time in force");
     const body: Record<string, unknown> = {
       ticker: intent.marketRef,
-      client_order_id: intent.clientId,
-      side: bookSide,
-      count,
-      price: priceToDollars(yesPrice),
-      time_in_force: timeInForce,
-      self_trade_prevention_type: "taker_at_cross",
-      ...(intent.reduceOnly ? { reduce_only: true } : {}),
+      // Legacy callers retain their client id; durable execution always uses a
+      // UUID carrying side/outcome so authenticated reads can reconstruct it.
+      client_order_id: hooks ? executionClientId({ ...intent, outcome }) : intent.clientId,
+      side: bookSide, count, price: Number(yesPrice.toFixed(6)).toFixed(Math.max(2, (Number(yesPrice.toFixed(6)).toString().split(".")[1] ?? "").length)),
+      time_in_force: timeInForce, self_trade_prevention_type: "taker_at_cross", subaccount: 0,
+      ...(intent.postOnly !== undefined ? { post_only: intent.postOnly } : {}),
+      ...(intent.expiration !== undefined ? { expiration_time: intent.expiration } : {}),
+      ...(hooks ? { cancel_order_on_pause: true } : {}),
+      ...(intent.reduceOnly || (hooks && intent.side === "SELL") ? { reduce_only: true } : {}),
     };
-
-    const res = await this.throttled(() =>
-      this.request<{
-        order_id: string;
-        client_order_id?: string;
-        fill_count?: string | number;
-        remaining_count?: string | number;
-        average_fill_price?: string | number;
-      }>("POST", "/portfolio/events/orders", { auth: true, body }),
-    );
+    const preparedHash = createHash("sha256").update(JSON.stringify(body)).digest("hex");
+    const res = await this.throttled(async () => {
+      // This hook is inside the write throttle, immediately before request signing
+      // and POST. If it fails, nothing has been submitted to the venue.
+      await hooks?.onPrepared({ preparedHash, ...identity, limitPrice: price, size });
+      return this.request<{ order_id: string; client_order_id?: string; fill_count?: string | number;
+        remaining_count?: string | number; average_fill_price?: string | number }>("POST", "/portfolio/events/orders", { auth: true, body });
+    });
     if (!res.order_id) throw new Error("kalshi order returned no order_id");
-    const filled = parseFp(res.fill_count);
-    const remaining = parseFp(res.remaining_count);
-    const status: OrderStatus =
-      remaining <= 0 && filled > 0
-        ? "filled"
-        : filled > 0
-          ? "partial"
-          : remaining > 0
-            ? "open"
-            : "canceled"; // IOC/FOK with nothing crossed
-    const avgYes = res.average_fill_price !== undefined ? parseFp(res.average_fill_price) : undefined;
-    return {
-      orderId: res.order_id,
-      clientId: intent.clientId,
-      status,
-      filledSize: filled > 0 ? filled : undefined,
-      // Report the fill in the outcome space the engine ordered in.
-      avgFillPrice:
-        filled > 0 && avgYes !== undefined ? (outcome === "NO" ? Number((1 - avgYes).toFixed(6)) : avgYes) : undefined,
-    };
+    this.orderDirections.set(res.order_id, { side: intent.side, outcome, marketRef: intent.marketRef });
+    const filled = requiredNumber(res.fill_count, "acknowledged fill count"), remaining = requiredNumber(res.remaining_count, "acknowledged remaining count");
+    if (filled < 0 || remaining < 0 || filled + remaining > size + 1e-8) throw new Error("inconsistent Kalshi order acknowledgement counts");
+    // An IOC can partially fill and cancel the remainder; zero remaining is
+    // not evidence that the original requested quantity completely filled.
+    const status: OrderStatus = filled + 1e-8 >= size ? "filled" : remaining === 0 ? "canceled" : filled > 0 ? "partial" : "open";
+    const avgYes = res.average_fill_price !== undefined ? requiredNumber(res.average_fill_price, "average fill price") : undefined;
+    if (filled > 0 && (avgYes === undefined || avgYes <= 0 || avgYes >= 1)) throw new Error("Kalshi fill acknowledgement has no valid average price");
+    return { orderId: res.order_id, clientId: intent.clientId, status, filledSize: filled > 0 ? filled : undefined,
+      avgFillPrice: filled > 0 && avgYes !== undefined ? (outcome === "NO" ? Number((1 - avgYes).toFixed(6)) : avgYes) : undefined,
+      tokenId: identity.tokenId, ...(hooks ? { preparedHash } : {}) };
   }
 
-  async cancelOrder(_acct: VenueAccount, id: string): Promise<void> {
-    await this.throttled(() =>
-      this.request("DELETE", `/portfolio/events/orders/${encodeURIComponent(id)}`, { auth: true }),
-    );
-  }
-
-  /** Per-order cancels: the batch endpoint is advanced-tier only; this works on every tier. */
-  async cancelAll(acct: VenueAccount): Promise<void> {
-    const open = await this.openOrders(acct);
-    for (const o of open) {
-      await this.cancelOrder(acct, o.id).catch(() => {});
+  async cancelOrderChecked(_acct: VenueAccount, id: string): Promise<PredictionCancellationResult> {
+    const cached = this.orderDirections.get(id);
+    const marketRef = cached?.marketRef ?? (await this.readOrder(id))?.ticker;
+    if (!marketRef) return { status: "not-canceled", reason: "order unavailable for authoritative cancellation" };
+    try {
+      const res = await this.throttled(() => this.request<{ order_id?: string; reduced_by?: string | number }>("DELETE", `/portfolio/events/orders/${encodeURIComponent(id)}`, {
+        auth: true, query: { market_ticker: marketRef, subaccount: 0 },
+      }));
+      const reduced = Number(res.reduced_by);
+      return res.order_id === id && res.reduced_by !== undefined && Number.isFinite(reduced) && reduced >= 0
+        ? { status: "canceled" } : { status: "not-canceled", reason: "venue returned no matching cancellation acknowledgement" };
+    } catch (error) {
+      if ((error as { status?: number }).status === 404) return { status: "not-canceled", reason: "venue reports order not found; reconcile order state" };
+      throw error;
     }
+  }
+
+  async cancelOrder(acct: VenueAccount, id: string): Promise<void> {
+    if (this.orderDirections.has(id)) {
+      const result = await this.cancelOrderChecked(acct, id);
+      if (result.status !== "canceled") throw new Error(`Kalshi cancellation unconfirmed: ${result.reason}`);
+      return;
+    }
+    // Legacy callers address the default exchange shard directly. The durable
+    // executor uses cancelOrderChecked, which resolves the market for routing.
+    const res = await this.throttled(() => this.request<{ order_id?: string; reduced_by?: string | number }>("DELETE", `/portfolio/events/orders/${encodeURIComponent(id)}`, { auth: true }));
+    if (res.order_id !== id || res.reduced_by === undefined || !Number.isFinite(Number(res.reduced_by)) || Number(res.reduced_by) < 0) throw new Error("Kalshi cancellation unconfirmed");
+  }
+
+  /** Attempt every cancellation, then report failures so stop cannot claim success. */
+  async cancelAll(acct: VenueAccount): Promise<void> {
+    const open = await this.openOrders(acct), errors: unknown[] = [];
+    for (const o of open) {
+      try { await this.cancelOrder(acct, o.id); } catch (error) { errors.push(error); }
+    }
+    if (errors.length) throw new AggregateError(errors, "Kalshi account cancellation incomplete");
   }
 }
 

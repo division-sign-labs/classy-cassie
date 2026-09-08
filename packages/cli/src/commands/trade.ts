@@ -11,7 +11,6 @@ import {
   ConsoleAlerter,
   KeyRoles,
   LiveSignalSource,
-  captionFromThesis,
   consoleLogger,
   isPredictionVenue,
   isSignalFresh,
@@ -24,7 +23,6 @@ import { SqliteStateStore } from "@quotient-forecasting/cassie-runtime-node";
 import { adapterFor, confirm, controlFetch, getKeystoreSecret, isDeployed, requireAccount } from "../context.js";
 import { loadBotConfig, statePath } from "../paths.js";
 import { resolveQuotientToken } from "../quotient-token.js";
-import { latestForecastThesis } from "../forecast-note.js";
 import { approvalLoop, elicitTicket, loadMappings, predictionSizeFor, saveThesis, snapshotFor } from "./ticket.js";
 
 /**
@@ -63,7 +61,7 @@ export interface TradeOpts {
   fromThesis?: string;
   mappings?: string;
   yes?: boolean;
-  /** Human rationale; the feed caption when the bot publishes (§Ares). */
+  /** Operator rationale included in the order alert. */
   note?: string;
   /** Per-order slippage tolerance as a percentage from the touch. */
   slippage?: string;
@@ -91,9 +89,10 @@ async function localEngine(botId: string): Promise<{ engine: Engine; close: () =
 
 async function placeManual(botId: string, params: ManualOrderParams): Promise<ManualOrderResult> {
   const cfg = loadBotConfig(botId);
+  if (cfg.strategy.id === "quotient-swing") throw new Error("manual orders bypass protected swing reservations; use a separate bot id");
   if (cfg.strategy.id === "market-make") {
     throw new Error(
-      "manual orders are disabled for a market-make bot because they bypass its inventory reservations; use a separate bot id",
+      "Manual orders bypass market-make reservations. Use a separate bot ID.",
     );
   }
   if (isDeployed(cfg)) {
@@ -109,9 +108,10 @@ async function placeManual(botId: string, params: ManualOrderParams): Promise<Ma
 
 export async function runTrade(botId: string, sideArg: string | undefined, marketRef: string | undefined, opts: TradeOpts): Promise<void> {
   const configuredBot = loadBotConfig(botId);
+  if (configuredBot.strategy.id === "quotient-swing") throw new Error("manual orders bypass protected swing reservations; use a separate bot id");
   if (configuredBot.strategy.id === "market-make") {
     throw new Error(
-      "manual orders are disabled for a market-make bot because they bypass its inventory reservations; use a separate bot id",
+      "Manual orders bypass market-make reservations. Use a separate bot ID.",
     );
   }
   if (opts.thesis) {
@@ -155,28 +155,10 @@ export async function runTrade(botId: string, sideArg: string | undefined, marke
   if (params.stopPx !== undefined || params.tpPx !== undefined || params.trailBps !== undefined) {
     console.log(`  triggers: stop=${params.stopPx ?? "-"} tp=${params.tpPx ?? "-"} trail=${params.trailBps ?? "-"}bps`);
     if (isPredictionVenue(cfg.venue)) {
-      console.log(pc.yellow(`  note: ${cfg.venue} stops are synthetic, checked on a timer.`));
+      console.log(pc.yellow(`  ${cfg.venue} stops are synthetic and checked on a timer.`));
     }
   }
   if (!opts.yes && !(await confirm("place this order?", false))) return;
-
-  // A widget-only manual post makes Ares invent generic copy such as
-  // "manually adding YES". Prefer Q's actual latest published-signal thesis.
-  // This is deliberately best-effort and happens only after order
-  // confirmation; a read failure never blocks the trade.
-  if (params.note === undefined && cfg.venue === "polymarket" && cfg.reporting?.post) {
-    try {
-      const token = (await resolveQuotientToken(botId))?.token;
-      if (token) params.note = await latestForecastThesis(cfg, marketRef, token);
-    } catch (error) {
-      console.log(pc.dim(`latest forecast thesis unavailable: ${(error as Error).message}`));
-    }
-    console.log(
-      params.note
-        ? pc.dim("Ares caption: latest Quotient published-signal thesis")
-        : pc.dim("no active published-signal thesis found; skipping the manual Ares post"),
-    );
-  }
 
   const result = await placeManual(botId, params);
   printResult(result);
@@ -218,7 +200,7 @@ async function tradeFromThesis(botId: string, raw: ThesisTicket, opts: TradeOpts
       outcome: raw.side === "NO" ? "NO" : "YES",
       side: "BUY",
       size: sized.size,
-      note: opts.note ?? captionFromThesis(raw),
+      note: opts.note ?? raw.reasoningSummary ?? raw.notes,
     });
     printResult(result);
     return;
@@ -227,7 +209,7 @@ async function tradeFromThesis(botId: string, raw: ThesisTicket, opts: TradeOpts
   const snap = await snapshotFor(adapter, cfg, raw, mappings);
   const filled = await approvalLoop(raw, snap, mappings);
   if (!filled) {
-    console.log("rejected — nothing placed");
+    console.log("Rejected. No order placed.");
     return;
   }
   const result = await placeManual(botId, {
@@ -237,7 +219,7 @@ async function tradeFromThesis(botId: string, raw: ThesisTicket, opts: TradeOpts
     stopPx: filled.stopPx,
     tpPx: filled.tpPx,
     trailBps: filled.trailBps,
-    note: opts.note ?? captionFromThesis(raw, filled),
+    note: opts.note ?? raw.reasoningSummary ?? raw.notes,
   });
   printResult(result);
 }

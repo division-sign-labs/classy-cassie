@@ -4,7 +4,6 @@
 // is verified against the gateway before it is stored — a deploy that installs
 // a dead key only shows up later, as a 401 loop on the droplet.
 
-import pc from "picocolors";
 import { KeyRoles, checkLiveSignalAccess, parseBotConfig } from "@quotient-forecasting/cassie-core";
 import { ask, getPassphrase, keystore } from "../context.js";
 import { loadBotConfig, saveBotConfig } from "../paths.js";
@@ -21,14 +20,9 @@ export async function configureSignalsKey(botId: string, key: string | undefined
   if (opts.auto) {
     saveBotConfig(parseBotConfig({ ...cfg, signals: { ...cfg.signals, keySource: "auto" } }));
     const discovered = discoverQuotientToken();
-    console.log(pc.green(`${botId}: signals key unpinned`));
-    console.log(
-      pc.dim(
-        discovered
-          ? `next deploy would use ${discovered.origin}`
-          : "no key found in the nearest .local.env, the environment, or the quotient CLI — the stored keystore entry would be used",
-      ),
-    );
+    console.log(`${botId}: automatic Quotient key selection`);
+    console.log(discovered ? "Next deployment key source:" : "Next deployment uses the stored keystore key.");
+    if (discovered) console.log(discovered.origin);
     return;
   }
 
@@ -36,10 +30,11 @@ export async function configureSignalsKey(botId: string, key: string | undefined
   if (!token) throw new Error("no key given");
 
   const { count } = await checkLiveSignalAccess(cfg.signals, token);
-  console.log(pc.green(`key verified against ${cfg.signals.baseUrl} (${count} published signals)`));
+  console.log(`Key verified: ${count} published signals`);
+  console.log(cfg.signals.baseUrl);
 
   keystore().putEntry(botId, KeyRoles.quotientToken, token, await getPassphrase(botId), { runtimeEligible: true });
   saveBotConfig(parseBotConfig({ ...cfg, signals: { ...cfg.signals, keySource: "keystore" } }));
-  console.log(pc.green(`${botId}: signals key stored and pinned to this bot's keystore`));
-  console.log(pc.dim(`run \`cassie deploy ${botId}\` to install it on the droplet`));
+  console.log(`${botId}: Quotient key saved`);
+  console.log(`cassie deploy ${botId}`);
 }

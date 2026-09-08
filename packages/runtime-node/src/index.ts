@@ -4,6 +4,10 @@
 export { BotService, buildAlerter, buildSignalSource, buildStrategy } from "./service.js";
 export type { BotRuntimeOptions, RuntimeIdentity } from "./service.js";
 export { SqliteStateStore } from "./state.js";
+export { CommodityDataSource } from "./commodity-data.js";
+export { CommodityRecordingStore } from "./commodity-recordings.js";
+export { SwingController } from "./swing-controller.js";
+export { SwingRecordingStore, swingResearchHash } from "./swing-recordings.js";
 export { MarketMakeStateStore, marketMakeActivationHash } from "./market-make-state.js";
 export type {
   MarketMakeLifecycle,

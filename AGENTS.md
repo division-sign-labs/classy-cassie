@@ -29,6 +29,12 @@ confirm every live order, confirm funding transfers, read `cassie status` and
   engine executes through the risk module. Don't add adapter calls to strategy code.
 - Master/L1 private keys are local-keystore-only. Anything pushed to a runtime must be a
   trade-scoped credential (`RuntimeCreds`). Don't widen that set.
+  Polymarket directional auto-redemption additionally uses the operator's saved
+  Builder/Relayer service credential. Resolve
+  the shared default, then the bot's saved gasless key; deliver it only through the
+  private runtime environment over SSH stdin. Keep it separate from `RuntimeCreds`,
+  bot config, source, logs, and user-data. This does not authorize deploying other
+  local keystore roles or sharing the default credential publicly.
 - Nothing secret goes into droplet user-data (`packages/cli/src/cloud-init.ts`) or into a
   command line. Credentials reach a droplet over SSH on stdin. `cloud-init.test.ts`
   enforces the first half of that.

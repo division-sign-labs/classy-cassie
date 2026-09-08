@@ -107,36 +107,6 @@ async function fetchGatewayRows(
   return GatewayResponseSchema.parse(await res.json()).signals;
 }
 
-/** Latest active published-signal thesis for one Polymarket condition. */
-export async function latestPublishedSignalThesis(
-  cfg: Pick<SignalsConfig, "baseUrl" | "path">,
-  conditionId: string,
-  token: string,
-  fetchImpl?: typeof fetch,
-  signal?: AbortSignal,
-): Promise<string | undefined> {
-  const rows = await fetchGatewayRows(cfg, token, boundFetch(fetchImpl), signal);
-  const matches = rows
-    .map((row) => GatewaySignalSchema.safeParse(row))
-    .filter((result) => result.success)
-    .map((result) => result.data)
-    .filter(
-      (row) =>
-        row.is_active !== false &&
-        row.market?.venue?.startsWith("polymarket") === true &&
-        row.market.condition_id?.toLowerCase() === conditionId.toLowerCase(),
-    )
-    .sort((a, b) => signalTimestamp(b) - signalTimestamp(a));
-
-  const thesis = matches[0]?.thesis;
-  return typeof thesis === "string" && thesis.trim() ? thesis.trim() : undefined;
-}
-
-function signalTimestamp(row: z.output<typeof GatewaySignalSchema>): number {
-  const value = Date.parse(row.forecast_updated_at ?? row.published_at ?? "");
-  return Number.isNaN(value) ? 0 : value;
-}
-
 /** Read-only credential preflight: authenticate and validate the feed envelope. */
 export async function checkLiveSignalAccess(
   cfg: Pick<SignalsConfig, "baseUrl" | "path">,
