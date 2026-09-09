@@ -52,7 +52,7 @@ export function configureSwing(botId: string, opts: { config?: string }): void {
   saveBotConfig(parseBotConfig({ ...cfg, tickIntervalMin: config.tickIntervalMin, strategy: { id: "quotient-swing", config } }));
   console.log("Quotient swing configured.");
   console.log(`Planned stop risk: ${config.riskBasePct}–${config.riskMaxPct}% of NAV.`);
-  console.log(`Isolated margin per position: ${config.singleMarginPct}% of NAV (${config.totalMarginPct}% total); gross exposure limit ${config.grossNotionalNav}× NAV.`);
+  console.log(`Isolated margin: new entries share the unused ${config.totalMarginPct}% of NAV budget, at most ${config.singleMarginPct}% each; gross exposure limit ${config.grossNotionalNav}× NAV.`);
   if (config.reservedAssets.length) console.log(`Reserved slots: ${config.reservedAssets.join(", ")}.`);
   console.log("Running or deploying starts live trading.");
 }

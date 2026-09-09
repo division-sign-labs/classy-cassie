@@ -47,15 +47,15 @@ For each eligible outlook the entry is a crossing IOC order bounded by `maxSlipp
 
 ## Risk
 
-NAV determines sizing. Every position is isolated-margin. The margin posted per position is `singleMarginPct` (5%) of NAV, `totalMarginPct` (20%) across the book, and the leverage is the largest integer whose liquidation distance still clears the stop (`liquidationStopMultiple` 1.0 × stop distance plus `emergencyGapFraction` 1% plus the funding reserve). With a 3σ stop that is roughly 5–9× isolated leverage and 0.3–0.5× NAV notional per position. The stop-loss budget (`riskBasePct` 5% to `riskMaxPct` 10% of NAV as net edge grows from `riskBaseEdge` 0.5% to `riskMaxEdge` 2%) and the limits below can reduce that size further:
+NAV determines sizing. Every position is isolated-margin, and size is a margin figure: the book may post `totalMarginPct` (80%) of NAV in total, and each tick's new entries share the unused part of that budget equally across the underlyings still to place plus any open reserved slot, capped at `singleMarginPct` (20%) of NAV each. Three eligible outlooks against an empty book therefore post about 20% each; a lone outlook posts 20%; once the budget is in use, a new entry takes what remains. Leverage is derived, not configured: the largest integer whose liquidation distance still clears the stop (`liquidationStopMultiple` 1.0 × stop distance plus `emergencyGapFraction` 1% plus the funding reserve), so notional is margin × that leverage. With a 3σ stop that is roughly 5–12× isolated leverage. The stop-loss budget (`riskBasePct` 10% to `riskMaxPct` 15% of NAV as net edge grows from `riskBaseEdge` 0.5% to `riskMaxEdge` 2%) and the limits below can reduce that size further; keep it at or above the margin share when margin should be the only binding rule:
 
 | Limit | Default |
 | --- | --- |
-| Single / total isolated margin | 5% / 20% of NAV |
+| Single / total isolated margin | 20% / 80% of NAV, new entries sharing the unused budget |
 | Single position notional | 2 × NAV |
-| Total notional | 4 × NAV |
-| Positions | 4 (one slot reserved for `commodity:wti`) |
-| Total planned stop loss | 15% of NAV |
+| Total notional | 10 × NAV |
+| Positions | 9 (one slot reserved for `commodity:wti`) |
+| Total planned stop loss | 90% of NAV |
 | Leverage | Largest integer clearing the liquidation buffer, maximum 20× |
 
 Venue risk checks remain authoritative; stop execution can incur gaps and slippage. At 15% drawdown, new position budgets are halved. At 25%, additions halt pending review and pending entries are canceled. Existing positions continue under their stop, target, forecast and time exit rules. External transfers adjust the NAV high-water mark. Clearing a loss stop requires the reviewed loss-reset command.

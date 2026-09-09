@@ -133,7 +133,7 @@ export function reduceSwing(snapshot: SwingSnapshot, previous: SwingState, cfg: 
     else candidates.push(result);
   }
   candidates.sort((a, b) => b.rank - a.rank || a.outlook.anchorAt - b.outlook.anchorAt || a.marketRef.localeCompare(b.marketRef));
-  for (const candidate of candidates) {
+  for (const [index, candidate] of candidates.entries()) {
     const entries = Object.values(state.entries);
     // A reserved asset always keeps a slot; other candidates leave one free for each reserved asset not yet held.
     const reservedOpen = cfg.reservedAssets.filter(k => k !== candidate.assetKey && !entries.some(e => e.assetKey === k)).length;
@@ -141,7 +141,11 @@ export function reduceSwing(snapshot: SwingSnapshot, previous: SwingState, cfg: 
     // An asset may have more than one exact venue instrument: the underlying owns the slot.
     if (entries.some(e => e.assetKey === candidate.assetKey)) continue;
     const market = snapshot.markets.find(m => m.marketRef === candidate.marketRef)!;
-    const allocation = allocateSwing(candidate, market, snapshot, entries, cfg, drawdown);
+    // The underlyings still to place this tick and the open reserved slots share the unused margin budget
+    // equally, bounded by the slots left; an absent reserved asset keeps its share for when it appears.
+    const pending = new Set(candidates.slice(index).filter(o => !entries.some(e => e.assetKey === o.assetKey)).map(o => o.assetKey)).size;
+    const slots = Math.max(1, Math.min(pending + reservedOpen, cfg.maxPositions - entries.length));
+    const allocation = allocateSwing(candidate, market, snapshot, entries, cfg, drawdown, slots);
     if (typeof allocation === "string") { rejected.push({ marketRef: candidate.marketRef, reason: allocation }); continue; }
     const clientId = `qs-${candidate.marketRef}-${candidate.outlook.id}-${snapshot.now}`;
     const record: SwingEntryRecord = { marketRef: candidate.marketRef, assetKey: candidate.assetKey, assetClass: candidate.assetClass,

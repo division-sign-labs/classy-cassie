@@ -21,8 +21,9 @@ const LiveSwingConfigSchema = z.object({
   maxHoldHours: z.number().positive().max(120).default(48),
   /** Adverse funding reserve as a multiple of the current hourly rate over the remaining horizon. */
   fundingReserveMultiple: z.number().min(1).default(1.5),
-  riskBasePct: z.number().positive().max(10).default(5),
-  riskMaxPct: z.number().positive().max(10).default(10),
+  /** Planned loss at the stop as a share of NAV; set at or above the margin share so margin stays the binding rule. */
+  riskBasePct: z.number().positive().max(25).default(10),
+  riskMaxPct: z.number().positive().max(25).default(15),
   /** Net edge (log return to the median after costs) where the risk ramp starts and saturates. */
   riskBaseEdge: z.number().positive().default(0.005),
   riskMaxEdge: z.number().positive().default(0.02),
@@ -37,9 +38,9 @@ const LiveSwingConfigSchema = z.object({
   /** Engine-side theme caps; kept equal to the portfolio caps so they never bind below them. */
   themeNotionalNav: z.number().positive().max(10).default(10),
   themeStopRiskPct: z.number().positive().max(100).default(90),
-  /** Isolated margin posted per position and in total, as a share of NAV. */
-  singleMarginPct: z.number().positive().max(25).default(10),
-  totalMarginPct: z.number().positive().max(90).default(90),
+  /** Isolated margin as a share of NAV: each tick's new entries share the unused total budget equally, capped at the single limit. */
+  singleMarginPct: z.number().positive().max(25).default(20),
+  totalMarginPct: z.number().positive().max(90).default(80),
   maxLeverage: z.number().int().positive().max(20).default(20),
   liquidationStopMultiple: z.number().min(1).default(1),
   emergencyGapFraction: z.number().min(0.01).default(0.01),

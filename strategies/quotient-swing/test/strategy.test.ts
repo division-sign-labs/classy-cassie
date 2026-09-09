@@ -148,9 +148,9 @@ describe("risk and execution budgets", () => {
     const c = candidate(), s = snapshot(), result = allocateSwing(c, s.markets[0]!, s, [], cfg, 0);
     expect(typeof result).toBe("object");
     if (typeof result === "string") return;
-    expect(result.marginUsd).toBeLessThanOrEqual(100 + 1e-8);
+    expect(result.marginUsd).toBeLessThanOrEqual(200 + 1e-8);
     expect(result.notional).toBeLessThanOrEqual(2000);
-    expect(result.stopRiskUsd).toBeLessThanOrEqual(100 + 1e-8);
+    expect(result.stopRiskUsd).toBeLessThanOrEqual(150 + 1e-8);
     expect(result.leverage).toBeLessThanOrEqual(20);
     expect(result.leverage).toBeGreaterThanOrEqual(2);
     expect(1 - result.liquidationPrice / c.entryPrice).toBeGreaterThanOrEqual(cfg.liquidationStopMultiple * c.stopFraction + cfg.emergencyGapFraction);
@@ -167,7 +167,26 @@ describe("risk and execution budgets", () => {
     const low = allocateSwing({ ...c, netEdge: 0.005 }, s.markets[0]!, s, [], roomy, 0), high = allocateSwing(c, s.markets[0]!, s, [], roomy, 0);
     if (typeof low === "string" || typeof high === "string") throw new Error("allocation failed");
     expect(low.stopRiskUsd).toBeLessThan(high.stopRiskUsd);
-    expect(low.stopRiskUsd).toBeLessThanOrEqual(50 + 1e-8);
+    expect(low.stopRiskUsd).toBeLessThanOrEqual(100 + 1e-8);
+  });
+  it("shares the unused margin budget across the underlyings still to place in a tick", () => {
+    const share = QuotientSwingConfigSchema.parse({ singleMarginPct: 25, totalMarginPct: 40, riskBasePct: 25, riskMaxPct: 25, reservedAssets: [] });
+    const margins = (r: ReturnType<typeof reduceSwing>) => r.decisions.flatMap(d => d.kind === "enter" ? [d.marginUsd] : []);
+    const two = margins(reduceSwing(snapshot({ markets: [market(), goldMarket()] }), createSwingState(1000), share));
+    expect(two).toHaveLength(2);
+    // The second entry takes what the first left after size rounding, so the pair lands on the budget within one size step.
+    for (const m of two) { expect(m).toBeLessThanOrEqual(201); expect(m).toBeGreaterThan(199); }
+    const one = margins(reduceSwing(snapshot(), createSwingState(1000), share));
+    expect(one).toHaveLength(1);
+    expect(one[0]).toBeLessThanOrEqual(250 + 1e-6);
+    expect(one[0]).toBeGreaterThan(240);
+  });
+  it("keeps a budget share for an absent reserved asset", () => {
+    const share = QuotientSwingConfigSchema.parse({ singleMarginPct: 25, totalMarginPct: 60, riskBasePct: 25, riskMaxPct: 25 });
+    const r = reduceSwing(snapshot({ markets: [market(), goldMarket()] }), createSwingState(1000), share);
+    const margins = r.decisions.flatMap(d => d.kind === "enter" ? [d.marginUsd] : []);
+    expect(margins).toHaveLength(2);
+    for (const m of margins) { expect(m).toBeLessThanOrEqual(201); expect(m).toBeGreaterThan(199); }
   });
   it("never counts favorable funding as entry alpha", () => {
     expect(fundingReserve(-0.001, "LONG", 72, 1.5)).toBe(0);

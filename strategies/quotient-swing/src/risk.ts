@@ -6,7 +6,12 @@ import { clamp, floorSize, liquidationDistance, signOf } from "./math.js";
 
 export interface SwingAllocation { notional: number; size: number; leverage: number; marginUsd: number; liquidationPrice: number; stopRiskUsd: number }
 
-export function allocateSwing(c: SwingCandidate, m: SwingMarketSnapshot, s: SwingSnapshot, entries: SwingEntryRecord[], cfg: QuotientSwingConfig, drawdown: number): SwingAllocation | string {
+/**
+ * `slots` counts the positions the unused margin budget still has to cover this tick, this one included.
+ * Each takes an equal share, so utilization approaches `totalMarginPct` whatever the candidate count,
+ * and `singleMarginPct` caps any one of them.
+ */
+export function allocateSwing(c: SwingCandidate, m: SwingMarketSnapshot, s: SwingSnapshot, entries: SwingEntryRecord[], cfg: QuotientSwingConfig, drawdown: number, slots = 1): SwingAllocation | string {
   const riskFraction = (cfg.riskBasePct + (cfg.riskMaxPct - cfg.riskBasePct)
     * clamp((c.netEdge - cfg.riskBaseEdge) / (cfg.riskMaxEdge - cfg.riskBaseEdge), 0, 1)) / 100;
   const drawdownMultiplier = drawdown >= cfg.drawdownReduceFraction ? 0.5 : 1;
@@ -22,7 +27,8 @@ export function allocateSwing(c: SwingCandidate, m: SwingMarketSnapshot, s: Swin
   const depth = exitBest === undefined ? 0 : exitLevels.filter(l => Math.abs(l.price / exitBest - 1) <= cfg.exitDepthBps / 10_000)
     .reduce((sum, l) => sum + l.price * l.size, 0);
   maximum = Math.min(maximum, depth / cfg.minDepthMultiple);
-  const marginCap = Math.min(s.nav * cfg.singleMarginPct / 100, s.nav * cfg.totalMarginPct / 100 - marginUsed,
+  const share = (s.nav * cfg.totalMarginPct / 100 - marginUsed) / Math.max(1, Math.floor(slots));
+  const marginCap = Math.min(s.nav * cfg.singleMarginPct / 100, share,
     Math.max(0, s.availableMarginUsd - entries.filter(e => e.status !== "held").reduce((sum, e) => sum + e.marginUsd, 0)));
   if (maximum <= 0 || marginCap <= 0) return "portfolio_capacity";
   let best: SwingAllocation | undefined;

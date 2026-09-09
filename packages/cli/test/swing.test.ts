@@ -97,7 +97,7 @@ describe("swing configuration boundaries", () => {
     expect(harness.save.mock.calls[0]?.[0]).toMatchObject({
       id: "swing-test", venue: "hyperliquid", tickIntervalMin: 1,
       strategy: { id: "quotient-swing", config: { mode: "live",
-        riskBasePct: 5, riskMaxPct: 10 } },
+        riskBasePct: 10, riskMaxPct: 15 } },
     });
     const saved = harness.save.mock.calls[0]?.[0] as BotConfig;
     expect(Object.keys(saved.strategy.config).some(key => /calendar|earnings|closure|macro/i.test(key))).toBe(false);
@@ -125,7 +125,7 @@ describe("swing configuration boundaries", () => {
     const saved = harness.save.mock.calls[0]?.[0] as BotConfig;
     for (const key of Object.keys(retired)) expect(saved.strategy.config).not.toHaveProperty(key);
     expect(saved.strategy.config).toMatchObject({ minGapSigma: 0.3, maxGapSigma: 1, stopSigmaMultiple: 3, maxHoldHours: 48,
-      singleMarginPct: 10, totalMarginPct: 90, maxPositions: 9, reservedAssets: ["commodity:wti"] });
+      singleMarginPct: 20, totalMarginPct: 80, maxPositions: 9, reservedAssets: ["commodity:wti"] });
     expect(saved.strategy.config).not.toHaveProperty("classShare");
   });
 
@@ -156,7 +156,7 @@ describe("swing configuration boundaries", () => {
   });
 
   it.each([
-    { riskMaxPct: 11 }, { unknownSetting: true }, { calendarUrl: "https://example.com/calendar.json" },
+    { riskMaxPct: 26 }, { unknownSetting: true }, { calendarUrl: "https://example.com/calendar.json" },
     { calendarFile: "/reviewed/calendar.json" },
   ])("validates the complete config before saving: %j", value => {
     harness.configText = JSON.stringify(value);
