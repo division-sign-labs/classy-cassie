@@ -107,8 +107,9 @@ export function reduceSwing(snapshot: SwingSnapshot, previous: SwingState, cfg: 
       entry.lastForecastId = latest.id;
       const latestSide = outlookSide(latest);
       if (latestSide && latestSide !== entry.side && Math.abs(latest.spotGapSigma) >= cfg.minGapSigma) { exit("forecast_reversal", false); continue; }
-      if (d * (latest.medianPrice - entry.entryPrice) <= 0) { exit("median_crossed_entry", false); continue; }
+      // The executable target is the median rounded toward the entry, so a median inside one tick of the entry leaves no favorable target.
       const next = quotePrice(latest.medianPrice, m.priceTick, entry.side, true);
+      if (d * (next - entry.entryPrice) < m.priceTick / 2) { exit("median_crossed_entry", false); continue; }
       if (Math.abs(next - entry.targetPrice) > 1e-12) {
         decisions.push({ kind: "target", marketRef, targetPrice: next, reason: "forecast_revision" });
         entry.targetPrice = next;

@@ -252,6 +252,12 @@ describe("position exits", () => {
     const faint = market({ outlooks: [outlook({ directionalSide: "bearish", medianPrice: 101, spotGapSigma: -0.05 })] });
     expect(reduceSwing(snapshot({ markets: [faint], positions: [position] }), heldState(), cfg).decisions.some(d => d.kind === "exit")).toBe(false);
   });
+  it("exits instead of resting a target on the entry price when the median sits inside one tick of it", () => {
+    const flat = market({ outlooks: [outlook({ medianPrice: 99.995 })] });
+    const r = reduceSwing(snapshot({ markets: [flat], positions: [position] }), heldState(), cfg);
+    expect(r.decisions.map(d => d.kind === "exit" ? d.reason : d.kind)).toEqual(["median_crossed_entry"]);
+    expect(r.state.entries["xyz:NVDA"]?.status).toBe("exiting");
+  });
   it("exits when the latest median crosses the entry price", () => {
     const crossed = market({ outlooks: [outlook({ medianPrice: 99, spotGapSigma: 0.2 })] });
     const r = reduceSwing(snapshot({ markets: [crossed], positions: [position] }), heldState(), cfg);
