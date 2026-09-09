@@ -3,9 +3,9 @@ import { describe, expect, it, vi } from "vitest";
 import type { ExchangeClient, InfoClient } from "@nktkas/hyperliquid";
 import { ApiRequestError } from "@nktkas/hyperliquid/api/exchange";
 import { VenueUrlsSchema } from "../src/config.js";
-import { HyperliquidAdapter, formatSize, toCloid } from "../src/venues/hyperliquid.js";
+import { HyperliquidAdapter, HyperliquidOrderNotSubmittedError, HyperliquidOrderRejectedError, formatSize, toCloid } from "../src/venues/hyperliquid.js";
 import { formatBoundedHlPrice, hyperliquidAssetId, hyperliquidDexCashFlow, hyperliquidFeeRates } from "../src/venues/hyperliquid-perps.js";
-import { hyperliquidInfoSchedulerStats, wrapHyperliquidInfoClient } from "../src/venues/hyperliquid-info-scheduler.js";
+import { HyperliquidInfoDeferredError, hyperliquidInfoSchedulerStats, wrapHyperliquidInfoClient } from "../src/venues/hyperliquid-info-scheduler.js";
 import type { OrderIntent, VenueAccount } from "../src/types.js";
 
 const NOW = Date.UTC(2026, 8, 4, 12, 30);
@@ -65,6 +65,63 @@ function fixture(options: { scoped?: boolean } = {}) {
   return { adapter, info, exchange, setTime: (ts: number) => { now = ts; } };
 }
 const intent: OrderIntent = { marketRef: "xyz:AAPL", side: "BUY", size: 2.12349, limitPrice: 100.129, tif: "GTC", clientId: "entry-one", postOnly: true };
+
+describe("Hyperliquid order rejection receipts", () => {
+  const reason = "Post only order would have immediately matched, bbo was 4395.5@4395.6. asset=110003";
+  const receipt = (statuses: unknown[]) => ({ status: "ok", response: { type: "order", data: { statuses } } });
+
+  it.each(["sdk-error", "raw-response"])("recognizes a definite post-only rejection from %s", async (source) => {
+    const { adapter, exchange } = fixture();
+    const response = receipt([{ error: reason }]);
+    if (source === "sdk-error") exchange.order.mockRejectedValueOnce(new ApiRequestError(response, `order 0: ${reason}`));
+    else exchange.order.mockResolvedValueOnce(response);
+    await expect(adapter.placeOrder(ACCOUNT, { ...intent, reduceOnly: true })).rejects.toBeInstanceOf(HyperliquidOrderRejectedError);
+    expect(exchange.order).toHaveBeenCalledTimes(1);
+  });
+
+  it.each([
+    new Error(reason),
+    new ApiRequestError({ status: "err", response: "nonce already used" }),
+    new ApiRequestError(receipt([{ error: reason }, { resting: { oid: 7 } }])),
+    new ApiRequestError(receipt([{ error: reason, filled: { oid: 7, totalSz: "1", avgPx: "100" } }])),
+    new ApiRequestError({ status: "ok", response: { type: "cancel", data: { statuses: [{ error: reason }] } } }),
+    new ApiRequestError(receipt([{ error: "" }])),
+  ])("preserves ambiguous or mismatched failures %#", async (error) => {
+    const { adapter, exchange } = fixture();
+    exchange.order.mockRejectedValueOnce(error);
+    await expect(adapter.placeOrder(ACCOUNT, intent)).rejects.toBe(error);
+  });
+
+  it("does not classify a failed trigger as a rejected entry after the entry was accepted", async () => {
+    const { adapter, exchange } = fixture();
+    const error = new ApiRequestError(receipt([{ error: "Invalid TP/SL price." }]));
+    exchange.order.mockResolvedValueOnce(receipt([{ resting: { oid: 42 } }])).mockRejectedValueOnce(error);
+    await expect(adapter.placeOrder(ACCOUNT, { ...intent, triggers: { stopPx: 90 } })).rejects.toBe(error);
+    expect(exchange.order).toHaveBeenCalledTimes(2);
+  });
+
+  it("refuses an unexpected response count instead of accepting the first status", async () => {
+    const { adapter, exchange } = fixture();
+    exchange.order.mockResolvedValueOnce(receipt([{ resting: { oid: 42 } }, { resting: { oid: 43 } }]));
+    await expect(adapter.placeOrder(ACCOUNT, intent)).rejects.toThrow("status count mismatch");
+  });
+
+  it("certifies a local read-budget deferral before submission and allows a later attempt", async () => {
+    const { adapter, exchange, info } = fixture();
+    info.userAbstraction.mockRejectedValueOnce(new HyperliquidInfoDeferredError("rate-budget", 1000));
+    await expect(adapter.placeOrder(ACCOUNT, intent)).rejects.toBeInstanceOf(HyperliquidOrderNotSubmittedError);
+    expect(exchange.order).not.toHaveBeenCalled();
+    await expect(adapter.placeOrder(ACCOUNT, intent)).resolves.toMatchObject({ status: "open" });
+    expect(exchange.order).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not infer non-submission from a deferred read thrown after the exchange call starts", async () => {
+    const { adapter, exchange } = fixture();
+    const error = new HyperliquidInfoDeferredError("rate-budget", 1000);
+    exchange.order.mockRejectedValueOnce(error);
+    await expect(adapter.placeOrder(ACCOUNT, intent)).rejects.toBe(error);
+  });
+});
 
 describe("Hyperliquid HIP-3 contracts", () => {
   it("resolves DEX indices rather than treating a HIP-3 asset like a native perp", async () => {

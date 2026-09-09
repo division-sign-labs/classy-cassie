@@ -4,6 +4,12 @@
 
 import type { Balance, Order, PerpPortfolioScope, Position, VenueAccount, VenueAdapter, VenueId } from "./types.js";
 
+/** Held-outcome market value, including zero-dollar resolved losses. */
+export function positionMarketValue(position: Position): number {
+  if (position.currentPrice !== undefined && Number.isFinite(position.currentPrice)) return position.size * position.currentPrice;
+  return position.size * position.avgPrice + (position.unrealizedPnl ?? 0);
+}
+
 export interface BotPortfolio {
   botId: string;
   venue: VenueId;
@@ -45,7 +51,7 @@ export async function computePortfolio(
           (p.side === "SHORT" ? (p.avgPrice - q.mid) * p.size : (bullishMark - p.avgPrice) * p.size);
         return { ...p, markPrice: bullishMark, value, unrealizedPnl: upnl };
       } catch {
-        return { ...p, value: p.size * p.avgPrice };
+        return { ...p, value: positionMarketValue(p) };
       }
     }),
   );

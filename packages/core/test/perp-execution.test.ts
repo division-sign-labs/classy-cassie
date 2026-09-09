@@ -2,7 +2,7 @@
 import { describe, expect, it, vi } from "vitest";
 import { PerpExecutor, PERP_EXECUTION_KEY, isProtectiveOrder } from "../src/engine/perp-execution.js";
 import { MemoryStateStore } from "../src/state.js";
-import { toCloid } from "../src/venues/hyperliquid.js";
+import { HyperliquidOrderNotSubmittedError, HyperliquidOrderRejectedError, toCloid } from "../src/venues/hyperliquid.js";
 import { formatBoundedHlPrice } from "../src/venues/hyperliquid-perps.js";
 import type { Action, Fill, Order, OrderAck, OrderIntent, Position, VenueAdapter } from "../src/types.js";
 import type { PerpAccountSnapshot, PerpCashFlow, PerpMarketSnapshot, PerpStopRequest } from "../src/perps.js";
@@ -424,6 +424,53 @@ describe("protected perp executor", () => {
     await expect(restarted.resume()).rejects.toThrow("unresolved");
   });
 
+  it.each(["typed-error", "rejected-ack", "preflight-deferral"])("releases a definitely unplaced entry without halting (%s)", async (source) => {
+    const h = harness(); await h.executor.resume();
+    if (source === "typed-error") h.mock.placeOrder.mockRejectedValueOnce(new HyperliquidOrderRejectedError("Post only order would have immediately matched"));
+    else if (source === "preflight-deferral") h.mock.placeOrder.mockRejectedValueOnce(new HyperliquidOrderNotSubmittedError("Hyperliquid info deferred: rate-budget"));
+    else h.mock.placeOrder.mockResolvedValueOnce({ orderId: "refused", clientId: "entry-a", status: "rejected", filledSize: 0 });
+    expect(await h.executor.execute(entry())).toMatchObject({ placed: false, status: "rejected", placedNotional: 0, placedSize: 0 });
+    expect(await h.executor.status()).toMatchObject({ halted: false, cycles: [{ status: "closed" }] });
+    const stored = JSON.parse((await h.store.get(PERP_EXECUTION_KEY))!);
+    expect(stored.submissions["entry-a"]).toMatchObject({ status: "terminal", ack: { status: "rejected" } });
+    expect(h.alerts.send.mock.calls.some(([a]) => a.kind === "skipped-order")).toBe(true);
+    expect(h.alerts.send.mock.calls.some(([a]) => a.kind === "entry")).toBe(false);
+    const restarted = h.restart(); await restarted.start();
+    expect(await restarted.execute(entry())).toMatchObject({ placed: false });
+    expect(h.mock.placeOrder).toHaveBeenCalledTimes(1);
+    expect(await restarted.execute(entry({ clientId: "entry-b" }))).toMatchObject({ placed: true });
+  });
+
+  it("retries a rejected gold-style post-only exit with a bounded order while keeping native protection", async () => {
+    const h = harness({ emergencyGapFraction: .01 }); await h.executor.resume(); await h.executor.execute(entry());
+    h.fillEntry("entry-a", 3); await h.executor.reconcile();
+    const stop = [...h.orders.values()].find(isProtectiveOrder)!;
+    h.mock.placeOrder.mockRejectedValueOnce(new HyperliquidOrderRejectedError("Post only order would have immediately matched"));
+    expect(await h.executor.execute({ kind: "exit", marketRef: "xyz:AAPL", fraction: 1, postOnly: true, reason: "median_crossed_entry" }))
+      .toMatchObject({ placed: false, status: "rejected" });
+    expect(await h.executor.status()).toMatchObject({ halted: false });
+    expect(h.orders.has(stop.id)).toBe(true);
+    h.advance(5_000); await h.executor.reconcile();
+    const exits = h.mock.placeOrder.mock.calls.map(([, i]) => i).filter(i => i.purpose?.endsWith("exit"));
+    expect(exits).toHaveLength(2);
+    expect(exits[1]).toMatchObject({ reduceOnly: true, postOnly: false, tif: "IOC" });
+    expect(exits[1]!.limitPrice).toBeGreaterThanOrEqual(99);
+    expect(h.orders.has(stop.id)).toBe(true);
+    expect(h.alerts.send.mock.calls.filter(([a]) => a.kind === "exit")).toHaveLength(1);
+  });
+
+  it("keeps an ambiguous exit reserved across restart and never submits a second exit", async () => {
+    const h = harness(); await h.executor.resume(); await h.executor.execute(entry());
+    h.fillEntry("entry-a", 3); await h.executor.reconcile();
+    h.mock.placeOrder.mockRejectedValueOnce(new Error("transport timed out after submission"));
+    await expect(h.executor.execute({ kind: "exit", marketRef: "xyz:AAPL", fraction: 1, postOnly: true, reason: "median_crossed_entry" })).rejects.toThrow("timed out");
+    h.advance(600_000); const restarted = h.restart(); await restarted.reconcile();
+    expect(await restarted.status()).toMatchObject({ halted: true, haltReason: "submission-unknown" });
+    await expect(restarted.resume()).rejects.toThrow("unresolved");
+    expect(h.mock.placeOrder.mock.calls.filter(([, i]) => i.purpose?.endsWith("exit"))).toHaveLength(1);
+    expect([...h.orders.values()].some(isProtectiveOrder)).toBe(true);
+  });
+
   it("recovers a late acknowledged entry with a venue-hashed CLOID before ownership checks", async () => {
     const h = harness(); await h.executor.resume();
     h.mock.placeOrder.mockImplementationOnce(async (_account, intent) => { h.addOrder(intent); throw new Error("lost ack"); });
@@ -719,6 +766,21 @@ describe("protected perp executor", () => {
 });
 
 describe("executor-owned take-profit", () => {
+  it.each(["typed-rejection", "rejected-ack", "preflight-deferral"])("retries a definitely unplaced take-profit after backoff without losing the stop (%s)", async (source) => {
+    const h = harness(); await h.executor.resume(); await h.executor.execute(entry()); h.fillEntry("entry-a", 3);
+    if (source === "typed-rejection") h.mock.placeOrder.mockRejectedValueOnce(new HyperliquidOrderRejectedError("Order price too far from oracle"));
+    else if (source === "preflight-deferral") h.mock.placeOrder.mockRejectedValueOnce(new HyperliquidOrderNotSubmittedError("Hyperliquid info deferred: rate-budget"));
+    else h.mock.placeOrder.mockResolvedValueOnce({ orderId: "refused-target", status: "rejected", filledSize: 0 });
+    await h.executor.reconcile();
+    expect([...h.orders.values()].some(isProtectiveOrder)).toBe(true);
+    expect(h.targets()).toHaveLength(0);
+    expect(JSON.parse((await h.store.get(PERP_EXECUTION_KEY))!).cycles[0]).not.toHaveProperty("pendingTargetClientId");
+    h.advance(59_999); await h.executor.reconcile(); expect(h.targetPlacements()).toHaveLength(1);
+    h.advance(1); await h.executor.reconcile();
+    expect(h.targetPlacements()).toHaveLength(2); expect(h.targets()).toHaveLength(1);
+    expect([...h.orders.values()].some(isProtectiveOrder)).toBe(true);
+    expect(await h.executor.status()).toMatchObject({ halted: false });
+  });
   async function opened(config: Record<string, unknown> = {}) {
     const h = harness(config); await h.executor.resume(); await h.executor.execute(entry());
     h.fillEntry("entry-a", 3); h.advance(); await h.executor.reconcile();

@@ -51,6 +51,8 @@ export class SwingController {
   private stopped = false;
   private lastReport?: SwingReduction;
   private execution?: PerpExecutionState;
+  private lastExecutionHaltReason?: string;
+  private lastExecutionHaltLogAt = 0;
 
   constructor(private readonly d: SwingControllerDeps) {
     if (d.config.venue !== "hyperliquid") throw new Error("quotient-swing requires Hyperliquid");
@@ -203,6 +205,20 @@ export class SwingController {
   }
   async supervise(): Promise<void> {
     await this.engine.supervisePerps(); this.execution = await this.engine.perpStatus();
+    this.reportExecutionHalt();
+  }
+  private reportExecutionHalt(): void {
+    if (this.execution?.halted) {
+      const reason = this.execution.haltReason ?? "execution_halted";
+      if (reason !== this.lastExecutionHaltReason || this.now() - this.lastExecutionHaltLogAt >= 5 * 60_000) {
+        this.d.log.warn(`swing entries halted: ${reason}`);
+        this.lastExecutionHaltLogAt = this.now();
+      }
+      this.lastExecutionHaltReason = reason;
+    } else if (this.execution && this.lastExecutionHaltReason !== undefined) {
+      this.d.log.info("swing entries resumed");
+      this.lastExecutionHaltReason = undefined;
+    }
   }
   private startupDataReady(): boolean {
     const now = this.now();
@@ -231,6 +247,7 @@ export class SwingController {
     // Startup refusal must not block reconciliation, protective stops or exits.
     const result = await this.engine.tick(tickId === undefined ? {} : { tickId });
     this.execution = await this.engine.perpStatus();
+    this.reportExecutionHalt();
     const raw = await this.d.state.get(`strategy:${SWING_REPORT_KEY}`);
     this.lastReport = raw ? JSON.parse(raw) as SwingReduction : undefined;
     const ctx = await this.engine.strategyContext();

@@ -599,6 +599,8 @@ export interface PredictionOrderState {
 export interface PredictionCancellationResult {
   status: "canceled" | "not-canceled";
   reason?: string;
+  /** Venue says the order is no longer open; fills still require reconciliation. */
+  notOpen?: boolean;
 }
 
 export interface VenueAdapter {

@@ -3,13 +3,13 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { parseBotConfig, type PerpAccountSnapshot, type PerpMarketSnapshot, type VenueAdapter } from "@quotient-forecasting/cassie-core";
+import { parseBotConfig, type PerpAccountSnapshot, type PerpExecutionState, type PerpMarketSnapshot, type VenueAdapter } from "@quotient-forecasting/cassie-core";
 import type { SwingQuotientDataClient, SwingQuotientSnapshot } from "../src/swing-data.js";
 import { SqliteStateStore } from "../src/state.js";
 import { SwingController } from "../src/swing-controller.js";
 
 const engine = vi.hoisted(() => ({ constructed: vi.fn(), start: vi.fn(), tick: vi.fn(), context: vi.fn(), resume: vi.fn(), supervise: vi.fn(), halt: vi.fn(), cancel: vi.fn(),
-  status: vi.fn(async () => ({ cycles: [], halted: true, highWaterEquity: 1000, drawdownPct: 0, cashFlowsComplete: true })) }));
+  status: vi.fn(async (): Promise<PerpExecutionState> => ({ cycles: [], halted: true, highWaterEquity: 1000, drawdownPct: 0, cashFlowsComplete: true })) }));
 vi.mock("@quotient-forecasting/cassie-core", async importOriginal => ({ ...await importOriginal<object>(), Engine: class {
   constructor() { engine.constructed(); }
   startPerps = engine.start; tick = engine.tick; strategyContext = engine.context;
@@ -20,6 +20,7 @@ const NOW = Date.parse("2026-09-04T15:00:00Z");
 let directory: string, state: SqliteStateStore, controller: SwingController | undefined;
 beforeEach(() => {
   vi.clearAllMocks(); engine.start.mockReset(); engine.resume.mockReset();
+  engine.status.mockResolvedValue({ cycles: [], halted: true, highWaterEquity: 1000, drawdownPct: 0, cashFlowsComplete: true });
   engine.tick.mockResolvedValue({ seq: 1, skipped: false, actions: 0, ordersPlaced: 0, errors: 0 });
   directory = mkdtempSync(join(tmpdir(), "cassie-swing-controller-")); state = new SqliteStateStore(join(directory, "state.sqlite"));
 });
@@ -42,15 +43,31 @@ function setup(refresh?: () => Promise<SwingQuotientSnapshot>) {
   const account = { equity: 375, availableCollateral: 375, marginUsed: 0, grossNotional: 0, abstraction: "disabled", collateral: "USDC", dex: "xyz", ts: NOW,
     positions: [], openOrders: [] } as PerpAccountSnapshot;
   const data = { refresh: vi.fn(refresh ?? (async () => q)), cached: vi.fn(() => q) };
+  const log = { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() };
   engine.context.mockResolvedValue({ perpAccount: account, config: {}, memory: { get: async () => null } });
   controller = new SwingController({ config: parseBotConfig({ id: "swing-test", venue: "hyperliquid", strategy: { id: "quotient-swing", config: {} } }),
     adapter: adapter as unknown as VenueAdapter, account: { venue: "hyperliquid", masterAddress: "0x0000000000000000000000000000000000000001" },
     state, statePath: join(directory, "state.sqlite"), quotientToken: "test-not-a-secret", now: () => now,
-    data: data as unknown as SwingQuotientDataClient, alerter: { send: async () => {} }, log: { info() {}, warn() {}, error() {}, debug() {} } });
-  return { controller, adapter, data, q, market, advance: (ms: number) => { now += ms; } };
+    data: data as unknown as SwingQuotientDataClient, alerter: { send: async () => {} }, log });
+  return { controller, adapter, data, q, market, log, advance: (ms: number) => { now += ms; } };
 }
 
 describe("swing live startup and read-only isolation", () => {
+  it("keeps the actual halt visible in the journal without logging it every tick", async () => {
+    const { controller, log, advance } = setup();
+    const status = { cycles: [], halted: true, haltReason: "submission-unknown", highWaterEquity: 1000, drawdownPct: 0, cashFlowsComplete: true };
+    engine.status.mockResolvedValue(status);
+    await controller.tick(); await controller.supervise(); await controller.tick();
+    expect(log.warn).toHaveBeenCalledExactlyOnceWith("swing entries halted: submission-unknown");
+    advance(5 * 60_000); await controller.supervise(); expect(log.warn).toHaveBeenCalledTimes(2);
+    engine.status.mockResolvedValue({ ...status, halted: false });
+    await controller.supervise(); await controller.supervise();
+    expect(log.info).toHaveBeenCalledExactlyOnceWith("swing entries resumed");
+    engine.status.mockResolvedValue({ ...status, haltReason: "funding-unavailable" });
+    await controller.supervise();
+    expect(log.warn).toHaveBeenLastCalledWith("swing entries halted: funding-unavailable");
+    expect(engine.resume).not.toHaveBeenCalled();
+  });
   it("constructs live execution and starts automatically once run and data are ready", async () => {
     const { controller } = setup();
     controller.start(); await controller.refreshResearch(); await controller.tick();

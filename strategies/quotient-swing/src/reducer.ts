@@ -23,12 +23,13 @@ export function reduceSwing(snapshot: SwingSnapshot, previous: SwingState, cfg: 
   // Unitize the high-water mark through external cash flows, so deposits cannot repair a drawdown.
   if (snapshot.netCashFlow !== 0 && previous.lastNav > 0) {
     const flowFactor = 1 + snapshot.netCashFlow / previous.lastNav;
-    if (flowFactor <= 0) state.halted = true;
+    if (flowFactor <= 0) { state.halted = true; state.haltReason = "invalid_cash_flow"; }
     else state.highWaterNav *= flowFactor;
   }
   state.highWaterNav = Math.max(state.highWaterNav, snapshot.nav);
   const drawdown = Math.max(0, 1 - snapshot.nav / state.highWaterNav);
-  if (drawdown >= cfg.drawdownHaltFraction) state.halted = true;
+  if (drawdown >= cfg.drawdownHaltFraction) { state.halted = true; state.haltReason = "drawdown_halt"; }
+  const haltReason = state.haltReason ?? "execution_halted";
   state.lastNav = snapshot.nav;
   state.lastAt = snapshot.now;
   const accountFresh = snapshot.accountReconciled && snapshot.accountObservedAt <= snapshot.now
@@ -52,7 +53,7 @@ export function reduceSwing(snapshot: SwingSnapshot, previous: SwingState, cfg: 
     for (const order of orders) {
       if (snapshot.now - order.createdAt >= cfg.entryTtlMin * 60_000 || state.halted || entryInvalidated) {
         decisions.push({ kind: "cancel", marketRef, orderId: order.id,
-          reason: state.halted ? "drawdown_halt" : entryInvalidated ? "entry_invalidated" : "entry_ttl" });
+          reason: state.halted ? haltReason : entryInvalidated ? "entry_invalidated" : "entry_ttl" });
       }
     }
     if (!position) {
@@ -121,7 +122,7 @@ export function reduceSwing(snapshot: SwingSnapshot, previous: SwingState, cfg: 
 
   const candidates: SwingReduction["candidates"] = [];
   if (!accountFresh || state.halted || untrackedExposure) {
-    rejected.push({ marketRef: "*", reason: !accountFresh ? "account_unreconciled" : state.halted ? "drawdown_halt" : "untracked_exposure" });
+    rejected.push({ marketRef: "*", reason: !accountFresh ? "account_unreconciled" : state.halted ? haltReason : "untracked_exposure" });
     return { state, decisions, candidates, rejected, drawdown };
   }
   for (const market of snapshot.markets) {

@@ -35,6 +35,7 @@ import { mirrorBookForNo, mirrorQuoteForNo } from "./mirror.js";
 import { StateKeys, getJson, setJson } from "../state.js";
 import { PerpExecutor, isProtectiveOrder } from "./perp-execution.js";
 import { PredictionExecutor, assertPredictionExecutionSettled } from "./prediction-execution.js";
+import { positionMarketValue } from "../portfolio.js";
 
 export interface ArmedTrigger {
   marketRef: string;
@@ -203,6 +204,8 @@ export class Engine {
   private predictionExitDecisions?: Record<string, "hold" | "normal" | "urgent">;
   private predictionExitsEvaluatedAt?: number;
   private triggerCheck?: Promise<void>;
+  private readonly redemptions = new Map<string, Promise<number>>();
+  private redemptionsStopping = false;
 
   constructor(deps: EngineDeps) {
     this.d = deps;
@@ -246,6 +249,7 @@ export class Engine {
     let ordersPlaced = 0;
     let errors = 0;
     let predictionReconciliationFailed = false;
+    let redemptionWork = Promise.resolve(0);
 
     try {
       if (this.perps) {
@@ -276,7 +280,24 @@ export class Engine {
 
       try {
         const ctx = await this.buildStrategyContext();
-        const actions = await this.d.strategy.tick(ctx);
+        // Settlement belongs to account maintenance, independent of signal or
+        // strategy failures. Slow relayer confirmations run outside trading.
+        if (this.d.adapter.redeem && !this.redemptionsStopping) {
+          const resolved = [...new Map(ctx.positions.filter(p => p.redeemable && p.size > 0)
+            .map(p => [(p.conditionId ?? p.marketRef).toLowerCase(), p])).entries()];
+          actionsCount += resolved.length;
+          const tasks = resolved.map(([key, position]) => {
+            const running = this.redemptions.get(key);
+            if (running) return running;
+            const task = this.executeAction({ kind: "redeem", marketRef: position.marketRef, reason: "market resolved" }, ctx)
+              .then(() => 0, async error => { await this.recordError(seq, "action-redeem", error, { marketRef: position.marketRef }); return 1; })
+              .finally(() => this.redemptions.delete(key));
+            this.redemptions.set(key, task);
+            return task;
+          });
+          redemptionWork = Promise.all(tasks).then(results => results.reduce((sum, errors) => sum + errors, 0));
+        }
+        const actions = (await this.d.strategy.tick(ctx)).filter(action => !this.d.adapter.redeem || action.kind !== "redeem");
         if (this.predictions) {
           // Quotient reads already retried inside the signal source. A final
           // failure must not abandon the tick: entries stop (no fresh signals)
@@ -297,7 +318,7 @@ export class Engine {
             await this.recordError(seq, "prediction-reconcile", err);
           });
         }
-        actionsCount = actions.length;
+        actionsCount += actions.length;
         for (const action of actions) {
           if (predictionReconciliationFailed && action.kind !== "redeem" && action.kind !== "cancel") continue;
           try {
@@ -317,6 +338,15 @@ export class Engine {
         errors += 1;
         await this.recordError(seq, "strategy-tick", err);
       }
+
+      // Fast settlements are reflected in this tick's result. A slow relayer
+      // keeps its durable receipt and in-flight task without blocking orders.
+      let redemptionTimer: ReturnType<typeof setTimeout> | undefined;
+      try {
+        errors += await Promise.race([redemptionWork, new Promise<number>(resolve => {
+          redemptionTimer = setTimeout(() => resolve(0), 100);
+        })]);
+      } finally { if (redemptionTimer) clearTimeout(redemptionTimer); }
 
       await this.maintainDeadMansSwitch().catch(async (err) => {
         errors += 1;
@@ -386,7 +416,7 @@ export class Engine {
       adapter.balances(account),
     ]);
     const collateral = balances.reduce((s, b) => s + b.total, 0);
-    const posValue = positions.reduce((s, p) => s + p.size * p.avgPrice + (p.unrealizedPnl ?? 0), 0);
+    const posValue = positions.reduce((s, p) => s + positionMarketValue(p), 0);
     return {
       botId,
       venueId: adapter.id,
@@ -969,7 +999,15 @@ export class Engine {
     else await assertPredictionExecutionSettled(this.d.state);
   }
   async resumePredictions(): Promise<void> { await this.predictions?.resume(); }
-  beginPredictionShutdown(): Promise<void> { return this.predictions?.beginShutdown() ?? Promise.resolve(); }
+  beginPredictionShutdown(): Promise<void> {
+    this.redemptionsStopping = true;
+    return this.predictions?.beginShutdown() ?? Promise.resolve();
+  }
+  /** The runtime keeps the store open until every submitted receipt is journaled. */
+  async drainRedemptions(): Promise<void> {
+    this.redemptionsStopping = true;
+    await Promise.allSettled([...this.redemptions.values()]);
+  }
   async predictionStatus() { return this.predictions?.snapshot(); }
   async supervisePredictions(): Promise<void> {
     await this.predictions?.supervise({

@@ -23,6 +23,8 @@
 // - Standard DEX balances are independent. Unified-account NAV requires spot
 //   accounting and is deliberately rejected by the swing strategy snapshot.
 // - scheduleCancel cancels protective orders too. Swing disables it explicitly.
+// - Single-order rejection receipts verified 2026-09-08 against:
+//   https://hyperliquid.gitbook.io/hyperliquid-docs/for-developers/api/error-responses
 
 import {
   ExchangeClient,
@@ -53,7 +55,7 @@ import type {
 import { registerAdapter, type AdapterOpts } from "./registry.js";
 import { KeyRoles } from "../wallet/keystore.js";
 import { prepareHyperliquidPerpFunding } from "./hyperliquid-funding.js";
-import { wrapHyperliquidInfoClient } from "./hyperliquid-info-scheduler.js";
+import { HyperliquidInfoDeferredError, wrapHyperliquidInfoClient } from "./hyperliquid-info-scheduler.js";
 import type {
   PerpAccountSnapshot,
   PerpCashFlowResult,
@@ -73,6 +75,26 @@ import {
   nonnegativeNumber,
   positiveNumber,
 } from "./hyperliquid-perps.js";
+
+/** The adapter proves that no exchange order was submitted. */
+export class HyperliquidOrderNotSubmittedError extends Error {
+  override name = "HyperliquidOrderNotSubmittedError";
+}
+
+/** A definite single-order refusal also proves that no order was placed. */
+export class HyperliquidOrderRejectedError extends HyperliquidOrderNotSubmittedError {
+  override name = "HyperliquidOrderRejectedError";
+}
+
+function singleOrderRejection(value: unknown): string | undefined {
+  const r = value as { status?: unknown; response?: { type?: unknown; data?: { statuses?: unknown } } } | null;
+  const statuses = r?.response?.data?.statuses;
+  if (r?.status !== "ok" || r.response?.type !== "order" || !Array.isArray(statuses) || statuses.length !== 1) return undefined;
+  const status: unknown = statuses[0];
+  if (!status || typeof status !== "object" || Object.keys(status).length !== 1 || !("error" in status)
+    || typeof status.error !== "string" || !status.error.trim()) return undefined;
+  return status.error;
+}
 
 const BRIDGE_MAINNET = "0x2df1c51e09aecf9cacb7bc98cb1742757f163df7" as const;
 const BRIDGE_TESTNET = "0x08cfc1B6b2dCF36A1480b99353A354AA8AC56f89" as const;
@@ -125,7 +147,7 @@ export function classifyHyperliquidAgent(
 
 export class HyperliquidAdapter implements VenueAdapter {
   readonly id = "hyperliquid" as const;
-  readonly verifiedAgainst = "2026-09-05";
+  readonly verifiedAgainst = "2026-09-08";
   readonly supportsNativeTriggers = true;
 
   private readonly opts: AdapterOpts;
@@ -958,8 +980,15 @@ export class HyperliquidAdapter implements VenueAdapter {
 
   async placeOrder(_acct: VenueAccount, intent: OrderIntent): Promise<OrderAck> {
     this.assertScope(intent.marketRef);
-    if (this.opts.perpDex !== undefined && !intent.reduceOnly) await this.assertStandard(_acct);
-    const meta = await this.assetMeta(intent.marketRef);
+    const meta = await (async () => {
+      if (this.opts.perpDex !== undefined && !intent.reduceOnly) await this.assertStandard(_acct);
+      return this.assetMeta(intent.marketRef);
+    })().catch((error: unknown) => {
+      // These reads precede signing and exchange submission. A local budget
+      // deferral may be retried on a later tick without reserving a phantom order.
+      if (error instanceof HyperliquidInfoDeferredError) throw new HyperliquidOrderNotSubmittedError(error.message, { cause: error });
+      throw error;
+    });
     if (!intent.reduceOnly && meta.isDelisted) throw new Error("cannot add exposure to a delisted Hyperliquid instrument");
     const ex = this.agentExchange();
     const isBuy = intent.side === "BUY";
@@ -986,7 +1015,18 @@ export class HyperliquidAdapter implements VenueAdapter {
         ],
         grouping: "na",
       }),
-    );
+    ).catch((error: unknown) => {
+      // The pinned SDK throws even for a definite per-order rejection. Only
+      // this single-order exchange call can certify that nothing was placed;
+      // errors from later trigger placement must keep the accepted entry live.
+      const rejection = error instanceof ApiRequestError ? singleOrderRejection(error.response) : undefined;
+      if (rejection !== undefined) throw new HyperliquidOrderRejectedError(rejection, { cause: error });
+      throw error;
+    });
+
+    const rejection = singleOrderRejection(res);
+    if (rejection !== undefined) throw new HyperliquidOrderRejectedError(rejection);
+    if (res.response.data.statuses.length !== 1) throw new Error("Hyperliquid order status count mismatch");
 
     const ack = this.orderAck(res.response.data.statuses[0], intent.clientId);
 

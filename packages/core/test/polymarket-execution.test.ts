@@ -176,6 +176,22 @@ describe("Polymarket submission bounds and certainty", () => {
 });
 
 describe("Polymarket authenticated reconciliation", () => {
+  it("reads resolved holdings and redeems using position identity when closed-market metadata is unavailable", async () => {
+    const redeemPositions = vi.fn(async () => ({ transactionId: "relay", wait: async () => ({ transactionHash: "hash", transactionId: "relay" }) }));
+    const adapter = adapterWith({
+      listPositions: async function* () { yield { items: [{ tokenId: "no", oppositeTokenId: "yes", conditionId: "condition",
+        outcome: "No", oppositeOutcome: "Yes", size: ".75", avgPrice: ".8", curPrice: "0", redeemable: true }] }; },
+      redeemPositions,
+    });
+    const metadata = vi.fn(async () => { throw new Error("resolved market unavailable"); });
+    (adapter as unknown as { marketInfoForToken: typeof metadata }).marketInfoForToken = metadata;
+    const positions = await adapter.positions(account);
+    expect(positions).toEqual([expect.objectContaining({ marketRef: "yes", tokenId: "no", conditionId: "condition", redeemable: true, currentPrice: 0 })]);
+    await adapter.redeem(account, positions[0]!);
+    expect(redeemPositions).toHaveBeenCalledExactlyOnceWith({ conditionId: "condition" });
+    expect(metadata).not.toHaveBeenCalled();
+  });
+
   it("recognizes the pinned SDK's 200/null response without swallowing other invalid payloads", async () => {
     const schema = z.object({ id: z.string() });
     for (const payload of [null, [], "unavailable", { id: 1 }]) {
@@ -199,9 +215,17 @@ describe("Polymarket authenticated reconciliation", () => {
       .rejects.toThrow("quantities");
   });
 
+  it.each(["order can't be found - already canceled or matched", "Order not found or already canceled"])("classifies %s as no longer open without inventing cancellation", async reason => {
+    expect(await adapterWith({ cancelOrder: async () => ({ canceled: [], notCanceled: { order: reason } }) }).cancelOrderChecked(account, "order"))
+      .toEqual({ status: "not-canceled", reason, notOpen: true });
+  });
+  it("does not classify arbitrary refusal reasons as terminal", async () => {
+    expect(await adapterWith({ cancelOrder: async () => ({ canceled: [], notCanceled: { order: "still matching" } }) }).cancelOrderChecked(account, "order"))
+      .toEqual({ status: "not-canceled", reason: "still matching" });
+  });
   it("does not promote already-matched or unacknowledged cancellation to success", async () => {
     const adapter = adapterWith({ cancelOrder: async () => ({ canceled: [], notCanceled: { order: "order already matched" } }) });
-    expect(await adapter.cancelOrderChecked(account, "order")).toEqual({ status: "not-canceled", reason: "order already matched" });
+    expect(await adapter.cancelOrderChecked(account, "order")).toEqual({ status: "not-canceled", reason: "order already matched", notOpen: true });
     await expect(adapter.cancelOrder(account, "order")).rejects.toThrow("unconfirmed");
     expect(await adapterWith({ cancelOrder: async () => ({ canceled: ["order"], notCanceled: {} }) }).cancelOrderChecked(account, "order"))
       .toEqual({ status: "canceled" });

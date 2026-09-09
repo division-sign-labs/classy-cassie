@@ -650,6 +650,7 @@ export class BotService {
         primaryFailure = error;
         throw error;
       } finally {
+        const closeStores = () => {
         const closeFailures: unknown[] = [];
         try {
           this.marketMakeState?.close();
@@ -672,6 +673,21 @@ export class BotService {
             throw new AggregateError(closeFailures, `shutdown state close failed: ${message}`);
           }
         }
+        };
+        // A relayer may still be confirming a submitted redemption after the
+        // trading tick ends. Preserve SQLite until its receipt/error callbacks
+        // finish; bounded shutdown does not close the store underneath them.
+        const closing = (this.engine?.drainRedemptions?.() ?? Promise.resolve()).then(closeStores);
+        void closing.catch(error => this.log.error(`deferred shutdown state close failed: ${(error as Error).message}`));
+        let timer: ReturnType<typeof setTimeout> | undefined;
+        try {
+          await Promise.race([closing, new Promise<void>(resolve => {
+            timer = setTimeout(() => {
+              this.log.info("redemption confirmation pending; state stays open until receipt writes finish");
+              resolve();
+            }, 5000);
+          })]);
+        } finally { if (timer) clearTimeout(timer); }
       }
     })();
     // Keep the exact promise, including rejection, so a concurrent or later

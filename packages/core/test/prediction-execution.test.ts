@@ -114,6 +114,81 @@ function harness(strategy: Record<string, unknown> = {}) {
 
 describe("adaptive prediction execution", () => {
   afterEach(() => { vi.useRealTimers(); });
+  it("finishes fully settled orders after their detail disappears without canceling them", async () => {
+    const h = harness(); await h.ready(); await h.executor.admit(enter(), []);
+    h.fill("order-1", 100); h.hideStatus();
+    await h.executor.supervise(); h.advance(5000); await h.restart().recover();
+    expect((await h.executor.snapshot()).parents[0]).toMatchObject({ status: "completed", filledSize: 100, reservedNotionalUsd: 0 });
+    expect(h.adapter.cancelOrderChecked).not.toHaveBeenCalled();
+    expect((await h.executor.snapshot()).blocked).toBe(false);
+  });
+
+  it("reconciles not-open responses using settlements, matching token inventory and repeated absence across restart", async () => {
+    const h = harness(); await h.ready(); await h.executor.admit(enter(), []);
+    h.orders.clear(); h.hideStatus();
+    h.adapter.cancelOrderChecked.mockResolvedValue({ status: "not-canceled", reason: "already canceled or matched", notOpen: true } as never);
+    await h.executor.cancelMarket("yes", "entry deadline");
+    await h.restart().recover(); h.advance(299_000); await h.executor.supervise();
+    expect((await h.executor.snapshot()).parents[0]!.reservedNotionalUsd).toBe(60);
+    h.advance(1001); await h.executor.supervise();
+    expect((await h.executor.snapshot()).parents[0]).toMatchObject({ status: "canceled", reservedNotionalUsd: 0 });
+    expect(h.adapter.cancelOrderChecked).toHaveBeenCalledOnce();
+    expect(h.adapter.tokenBalance).toHaveBeenCalled();
+    expect((await h.executor.snapshot()).blocked).toBe(false);
+  });
+
+  it("does not release a not-open order with unseen inventory or unsettled fills", async () => {
+    const h = harness(); await h.ready(); await h.executor.admit(enter(), []);
+    h.orders.clear(); h.hideStatus();
+    h.adapter.cancelOrderChecked.mockResolvedValue({ status: "not-canceled", notOpen: true } as never);
+    await h.executor.cancelMarket("yes", "entry deadline");
+    await h.executor.supervise(); h.setHeld(5); h.advance(301_000); await h.executor.supervise();
+    expect((await h.executor.snapshot()).parents[0]!.reservedNotionalUsd).toBe(60);
+    h.setHeld(0); h.fill("order-1", 5, "MATCHED", "late");
+    await h.executor.supervise(); h.advance(301_000); await h.executor.supervise();
+    expect((await h.executor.snapshot()).parents[0]!.reservedNotionalUsd).toBe(60);
+    h.fill("order-1", 5, "CONFIRMED", "late"); h.advance(5000); await h.executor.supervise();
+    expect((await h.executor.snapshot()).parents[0]).toMatchObject({ status: "canceled", filledSize: 5 });
+  });
+
+  it("keeps a failing order read and cancellation local while an unrelated position exits", async () => {
+    const h = harness(); await h.ready(); await h.executor.admit(enter(), []);
+    h.refuseCancel();
+    h.adapter.executionOrder.mockImplementation(async (_account, id) => {
+      if (id === "order-1") throw new Error("temporary detail outage");
+      return { ...h.history.get(id)!, observedAt: h.now() };
+    });
+    await h.executor.supervise(); h.advance(5000); await h.executor.supervise();
+    h.advance(10_000); await h.executor.supervise();
+    expect((await h.executor.snapshot()).blocked).toBe(false);
+    expect((await h.executor.snapshot()).parents[0]!.reservedNotionalUsd).toBe(60);
+    const original = h.adapter.executionMarket.getMockImplementation()!;
+    h.adapter.executionMarket.mockImplementation(async (ref, side) => {
+      const market = await original(ref, side);
+      return ref === "other" ? { ...market, marketRef: ref, tokenId: "other", conditionId: "other-condition" } : market;
+    });
+    h.setHeld(10, "other");
+    const position: Position = { marketRef: "other", tokenId: "other", conditionId: "other-condition", side: "YES", size: 10, avgPrice: .4 };
+    await h.executor.admit({ kind: "exit", marketRef: "other", urgent: true }, [position]);
+    expect(h.submissions.at(-1)).toMatchObject({ marketRef: "other", side: "SELL" });
+    expect((await h.executor.snapshot()).blocked).toBe(false);
+    expect(h.adapter.cancelAll).toHaveBeenCalledOnce();
+  });
+
+  it("automatically recovers a temporary heartbeat outage but preserves an operator pause", async () => {
+    const h = harness(); await h.ready(); await h.executor.admit(enter(), []);
+    h.adapter.heartbeat.mockRejectedValueOnce(new Error("temporary outage"));
+    await expect(h.executor.heartbeat()).rejects.toThrow();
+    await h.settleCancel();
+    expect((await h.executor.snapshot()).blocked).toBe(false);
+    h.advance(300_000); await h.ready(); await h.executor.admit(enter(), []);
+    expect(h.submissions).toHaveLength(2);
+    h.adapter.heartbeat.mockRejectedValueOnce(new Error("temporary outage"));
+    await expect(h.executor.heartbeat()).rejects.toThrow();
+    await h.executor.supervise({ paused: true }); await h.settleCancel();
+    expect((await h.executor.snapshot()).blocked).toBe(true);
+  });
+
   it("reconciles a canceled order whose detail is missing only after the late-fill window, including restart", async () => {
     const h = harness(); await h.ready(); await h.executor.admit(enter(), []);
     await h.executor.cancelMarket("yes", "resolution"); h.hideStatus();
@@ -414,8 +489,8 @@ describe("adaptive prediction execution", () => {
     const outcome = h.executor.supervise().then(() => undefined, error => error as Error);
     await vi.advanceTimersByTimeAsync(0); h.advance(4000); await vi.advanceTimersByTimeAsync(4000);
     const error = await outcome;
-    if (resource === "order") expect(error?.message).toMatch(/order state exceeded four seconds/);
-    else expect(error).toBeUndefined();
+    expect(error).toBeUndefined();
+    if (resource === "order") expect(h.log.warn).toHaveBeenCalledWith("prediction order reconciliation pending", expect.objectContaining({ error: expect.stringContaining("order state exceeded four seconds") }));
     expect(h.orders.size).toBe(0);
     expect(h.submissions).toHaveLength(1);
     expect((await h.executor.snapshot()).parents[0]).toMatchObject({ status: "canceling", filledSize: 0, reservedNotionalUsd: 60 });

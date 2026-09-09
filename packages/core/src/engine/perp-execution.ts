@@ -6,7 +6,7 @@ import type { PerpAccountSnapshot, PerpCycle, PerpExecutionState, PerpMarketSnap
 import { getJson, setJson } from "../state.js";
 import { checkCapacity } from "../risk/capacity.js";
 import { formatBoundedHlPrice } from "../venues/hyperliquid-perps.js";
-import { toCloid } from "../venues/hyperliquid.js";
+import { HyperliquidOrderNotSubmittedError, HyperliquidOrderRejectedError, toCloid } from "../venues/hyperliquid.js";
 
 export const PERP_EXECUTION_KEY = "perp:execution:v1";
 const OVERLAP_MS = 5 * 60_000;
@@ -18,6 +18,7 @@ interface Submission {
   status: "prepared" | "unknown" | "accepted" | "terminal";
   orderId?: string;
   ack?: OrderAck;
+  rejectionReason?: string;
 }
 interface Cycle extends PerpCycle {
   seenPositionAt?: number;
@@ -170,9 +171,9 @@ export class PerpExecutor {
   private rememberTarget(c: Cycle, id: string): void {
     c.targetOrderIds = [...new Set([...(c.targetOrderIds ?? []), ...(c.targetOrderId ? [c.targetOrderId] : []), id])];
   }
-  private async alert(kind: "entry" | "exit" | "error" | "fill", message: string, data?: Record<string, unknown>): Promise<void> {
+  private async alert(kind: "entry" | "exit" | "error" | "fill" | "skipped-order", message: string, data?: Record<string, unknown>): Promise<void> {
     // The journal carries the reason even when alert delivery is misconfigured.
-    if (kind === "error") this.d.log.warn(`${message}${data?.detail !== undefined ? `: ${String(data.detail)}` : ""}`);
+    if (kind === "error" || kind === "skipped-order") this.d.log.warn(`${message}${data?.detail !== undefined ? `: ${String(data.detail)}` : ""}`);
     await this.d.alerter.send({ kind, botId: this.d.botId, message, data }).catch(e => this.d.log.warn(`alert failed: ${String(e)}`));
   }
   async status(): Promise<PerpExecutionState> {
@@ -585,7 +586,7 @@ export class PerpExecutor {
       await this.save(s);
       const ack = await adapter.placeOrder(account, { marketRef: c.marketRef, side: c.side === "LONG" ? "SELL" : "BUY", size: pos.size,
         limitPrice: c.targetPx!, tif: "GTC", postOnly: false, reduceOnly: true, purpose: "target", clientId: c.targetClientId });
-      if (ack.status === "rejected") throw new Error("take-profit order rejected");
+      if (ack.status === "rejected") throw new HyperliquidOrderRejectedError("take-profit order rejected");
       this.rememberTarget(c, ack.orderId);
       if (ack.status === "filled" || ack.status === "canceled") {
         // The target was already through the book; the fill closes the cycle on the next flat snapshot.
@@ -600,6 +601,9 @@ export class PerpExecutor {
       if (!actual || !this.validTarget(c, pos, actual)) throw new Error("take-profit not confirmed in venue open orders");
       await confirm(actual, visible);
     } catch (error) {
+      // A definite refusal has no live order to look up. Release this generation
+      // and retry after the backoff; ambiguous acknowledgements retain it.
+      if (error instanceof HyperliquidOrderNotSubmittedError) delete c.pendingTargetClientId;
       c.targetRetryAt = this.now() + 60_000;
       await this.save(s);
       this.d.log.warn(`take-profit for ${c.marketRef} not confirmed: ${String(error)}`);
@@ -816,6 +820,7 @@ export class PerpExecutor {
     await this.save(s);
     try {
       const ack = await this.d.adapter.placeOrder(this.d.account, intent);
+      if (ack.status === "rejected") return this.rejectSubmission(s, c, sub, "venue rejected the order", ack);
       sub.ack = ack; sub.orderId = ack.orderId; sub.status = ["open", "partial"].includes(ack.status) ? "accepted" : "terminal";
       if (!intent.reduceOnly) {
         c.entryOrderIds.push(ack.orderId);
@@ -824,12 +829,25 @@ export class PerpExecutor {
       await this.save(s);
       await this.alert(intent.reduceOnly ? "exit" : "entry", `${intent.side} ${intent.size} ${intent.marketRef} @ ${intent.limitPrice}`, {
         orderId: ack.orderId, status: ack.status, stop: c.stopPx, stopRiskUsd: c.initialRiskUsd, leverage: c.leverage, reason: c.exitReason ?? c.provenance?.reason });
-      return { placed: ack.status !== "rejected", placedNotional: intent.size * intent.limitPrice, placedSize: intent.size,
+      return { placed: true, placedNotional: intent.size * intent.limitPrice, placedSize: intent.size,
         limitPrice: intent.limitPrice, orderId: ack.orderId, clientId: intent.clientId, status: ack.status, filledSize: ack.filledSize, avgFillPrice: ack.avgFillPrice, placedAt: sub.createdAt };
     } catch (error) {
+      if (error instanceof HyperliquidOrderNotSubmittedError) return this.rejectSubmission(s, c, sub, error.message);
       sub.status = "unknown"; s.halted = true; s.haltReason = "submission-unknown"; await this.save(s);
       await this.alert("error", `Order acknowledgement unknown for ${intent.marketRef}; reservation retained`, { clientId: intent.clientId });
       throw error;
     }
+  }
+
+  private async rejectSubmission(s: Ledger, c: Cycle, sub: Submission, reason: string, ack?: OrderAck): Promise<StrategyActionResult> {
+    sub.status = "terminal";
+    sub.rejectionReason = reason;
+    sub.ack = ack ?? { orderId: toCloid(sub.intent.clientId), clientId: sub.intent.clientId, status: "rejected", filledSize: 0 };
+    if (!sub.intent.reduceOnly && !c.openedAt && c.filledSize === 0) {
+      c.status = "closed"; c.closedAt = this.now();
+    }
+    await this.save(s);
+    await this.alert("skipped-order", `Order not placed for ${c.marketRef}: ${reason}`, { clientId: sub.intent.clientId, purpose: sub.intent.purpose });
+    return { placed: false, status: "rejected", clientId: sub.intent.clientId, placedNotional: 0, placedSize: 0, filledSize: 0 };
   }
 }

@@ -326,6 +326,18 @@ describe("engine actions", () => {
     expect((values.get(SWING_STATE_KEY) as SwingState).halted).toBe(false);
     expect((values.get(SWING_STATE_KEY) as SwingState).highWaterNav).toBe(2250);
   });
+  it("reports the execution halt reason at low drawdown and clears it after resume", async () => {
+    const values = new Map<string, unknown>(), s = snapshot();
+    const ctx = baseContext(values, s);
+    ctx.perpExecution!.halted = true;
+    ctx.perpExecution!.haltReason = "submission-unknown";
+    const strategy = new QuotientSwingStrategy({ snapshot: async () => s });
+    expect(await strategy.tick(ctx)).toEqual([]);
+    expect(values.get(SWING_REPORT_KEY)).toMatchObject({ drawdown: 0, rejected: [{ marketRef: "*", reason: "submission-unknown" }] });
+    ctx.perpExecution!.halted = false; delete ctx.perpExecution!.haltReason;
+    expect((await strategy.tick(ctx)).some(a => a.kind === "enter")).toBe(true);
+    expect(values.get(SWING_STATE_KEY)).not.toHaveProperty("haltReason");
+  });
 });
 
 describe("paper accounting", () => {

@@ -29,6 +29,7 @@ describe("adaptive execution runtime lanes", () => {
       recoverPredictions: vi.fn().mockResolvedValue(undefined),
       resumePredictions: vi.fn().mockResolvedValue(undefined),
       beginPredictionShutdown: vi.fn().mockResolvedValue(undefined),
+      drainRedemptions: vi.fn().mockResolvedValue(undefined),
       predictionStatus: vi.fn().mockResolvedValue({ parents: [], blocked: false, dailySpentUsd: {}, entryCooldowns: {} }),
       supervisePredictions: vi.fn().mockResolvedValue(undefined),
       checkTriggers: vi.fn().mockResolvedValue(undefined),
@@ -91,6 +92,21 @@ describe("adaptive execution runtime lanes", () => {
     expect(engine.supervisePredictions).toHaveBeenCalledOnce();
     expect(engine.heartbeatIfResting).toHaveBeenCalledTimes(3);
     finishSupervision();
+  });
+
+  it("keeps SQLite open for late redemption receipts after bounded shutdown", async () => {
+    const state = (service as unknown as { state: { close(): void; set(key: string, value: string): Promise<void>; get(key: string): Promise<string | null> } }).state;
+    const close = vi.spyOn(state, "close");
+    let finishRedemption!: () => void;
+    engine.drainRedemptions.mockImplementation(() => new Promise<void>(resolve => { finishRedemption = resolve; }));
+    const shutdown = service!.shutdown();
+    await vi.advanceTimersByTimeAsync(5000);
+    await expect(shutdown).resolves.toMatchObject({ stopped: true });
+    expect(close).not.toHaveBeenCalled();
+    await state.set("engine:redemption:condition", JSON.stringify({ status: "confirmed", receipt: { transactionId: "late-receipt" } }));
+    expect(await state.get("engine:redemption:condition")).toContain("late-receipt");
+    finishRedemption(); await vi.advanceTimersByTimeAsync(0);
+    expect(close).toHaveBeenCalledOnce();
   });
 
   it("latches shutdown before waiting for a delayed strategy tick", async () => {

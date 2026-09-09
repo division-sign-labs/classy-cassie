@@ -194,7 +194,7 @@ function asPmAccount(acct: VenueAccount): PmAccount {
 
 export class PolymarketAdapter implements VenueAdapter {
   readonly id = "polymarket" as const;
-  readonly verifiedAgainst = "2026-09-06";
+  readonly verifiedAgainst = "2026-09-08";
   readonly supportsNativeTriggers = false;
 
   private creds?: PmCreds;
@@ -700,11 +700,25 @@ export class PolymarketAdapter implements VenueAdapter {
         const size = Number(p.size ?? 0);
         if (!p.tokenId || size <= 0) continue;
         const tokenId = String(p.tokenId);
-        const { conditionId, info } = await this.marketInfoForToken(tokenId);
-        const explicit = info.tokens.find((token) => String(token.tokenId) === tokenId)?.outcome.trim().toUpperCase();
+        // The SDK position record carries the condition, explicit outcome and
+        // sibling token. Closed books must not make the whole account unreadable.
+        let conditionId = String(p.conditionId ?? "");
+        let explicit = p.outcome?.trim().toUpperCase();
+        let marketRef = explicit === "YES" ? tokenId :
+          explicit === "NO" && p.oppositeOutcome?.trim().toUpperCase() === "YES" && p.oppositeTokenId ? String(p.oppositeTokenId) : undefined;
+        if (!conditionId || !marketRef) {
+          const resolved = await this.marketInfoForToken(tokenId);
+          conditionId = resolved.conditionId;
+          explicit = resolved.info.tokens.find((token) => String(token.tokenId) === tokenId)?.outcome.trim().toUpperCase();
+          marketRef = this.yesTokenOf(resolved.info);
+        }
         if (explicit !== "YES" && explicit !== "NO") continue;
         const outcome = explicit;
-        const marketRef = this.yesTokenOf(info);
+        for (const ref of [tokenId, marketRef]) {
+          const known = this.tokenToCondition.get(ref);
+          if (known && known !== conditionId) throw new Error("Polymarket position condition changed for a known token");
+          this.tokenToCondition.set(ref, conditionId);
+        }
         const reportedCurrentPrice = p.curPrice == null ? undefined : Number(p.curPrice);
         const currentPrice = reportedCurrentPrice !== undefined && Number.isFinite(reportedCurrentPrice)
           ? reportedCurrentPrice
@@ -1010,7 +1024,12 @@ export class PolymarketAdapter implements VenueAdapter {
     const client = await this.secure();
     const result = await client.cancelOrder({ orderId: id });
     const reason = (result.notCanceled as Record<string, string> | undefined)?.[id];
-    if (reason !== undefined) return { status: "not-canceled", reason };
+    if (reason !== undefined) {
+      // Documented not-found/already-canceled responses and the live CLOB wording
+      // observed 2026-09-08. This is not a cancellation or a fill acknowledgment.
+      const notOpen = /^(?:order can't be found - already canceled or matched|order not found or already canceled|order already (?:matched|canceled|cancelled))\.?$/i.test(reason.trim());
+      return { status: "not-canceled", reason, ...(notOpen ? { notOpen: true } : {}) };
+    }
     return result.canceled?.some((canceledId) => String(canceledId) === id)
       ? { status: "canceled" }
       : { status: "not-canceled", reason: "venue returned no cancellation acknowledgment for this order" };
@@ -1238,7 +1257,11 @@ export class PolymarketAdapter implements VenueAdapter {
    */
   async redeem(acct: VenueAccount, position: Position, hooks?: RedemptionHooks): Promise<RedemptionReceipt> {
     asPmAccount(acct);
-    const { conditionId } = await this.marketInfoForToken(position.marketRef);
+    // positions() already validated this identity through the SDK's account
+    // snapshot. Redemption must not depend on a resolved market's order book.
+    const known = this.tokenToCondition.get(position.marketRef);
+    const conditionId = position.conditionId && known === position.conditionId ? known :
+      (await this.marketInfoForToken(position.marketRef)).conditionId;
     if (position.conditionId && position.conditionId.toLowerCase() !== conditionId.toLowerCase()) {
       throw new Error("Polymarket redemption position condition does not match its market token");
     }

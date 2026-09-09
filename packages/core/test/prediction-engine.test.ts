@@ -155,6 +155,70 @@ function harness(options: { side?: "YES" | "NO"; legacy?: boolean; maxHoldDays?:
 }
 
 describe("Engine adaptive prediction wiring", () => {
+  it("sizes from cash plus marked deployed equity even when unrealized P&L is omitted", async () => {
+    const h = harness(); h.venue.cash = 400;
+    h.venue.holdings.set("held:YES", { marketRef: "held", tokenId: "held:YES", conditionId: "condition:held",
+      side: "YES", size: 1000, avgPrice: .9, currentPrice: .6 });
+    const ctx = await h.engine.strategyContext();
+    expect(ctx.equity).toBe(1000);
+    await h.engine.tick(1);
+    const parent = (await h.engine.predictionStatus())!.parents.find(p => p.side === "BUY")!;
+    expect(parent.provenance).toMatchObject({ equityUsd: 1000, targetUsd: 25 });
+    expect(parent.reservedNotionalUsd).toBeCloseTo(25, 1);
+  });
+
+  it("continues new entries while redemption confirmation is slow, and does not resubmit", async () => {
+    const h = harness();
+    let release!: (value: { transactionHash: string }) => void;
+    const redeem = vi.fn(async (_a, _p, hooks) => {
+      await hooks.beforeSubmit(); await hooks.submitted({ transactionId: "pending-redemption" });
+      return await new Promise<{ transactionHash: string }>(resolve => { release = resolve; });
+    });
+    Object.assign(h.venue, { redeem });
+    h.venue.holdings.set("settled:YES", { marketRef: "settled", tokenId: "settled:YES", conditionId: "settled-condition",
+      side: "YES", size: 10, avgPrice: .7, currentPrice: 1, redeemable: true });
+    expect((await h.engine.tick(1)).errors).toBe(0);
+    expect(h.venue.placements).toHaveLength(1);
+    expect(redeem).toHaveBeenCalledOnce();
+    h.clock.now += 60_000; await h.engine.tick(2);
+    expect(redeem).toHaveBeenCalledOnce();
+    release({ transactionHash: "confirmed" });
+    h.clock.now += 60_000; await h.engine.tick(3);
+    expect(redeem).toHaveBeenCalledOnce();
+  });
+
+  it("drains a pending redemption before its state can be closed", async () => {
+    const h = harness(); let release!: (value: { transactionHash: string }) => void;
+    const redeem = vi.fn(async (_a, _p, hooks) => {
+      await hooks.beforeSubmit(); await hooks.submitted({ transactionId: "pending-redemption" });
+      return new Promise<{ transactionHash: string }>(resolve => { release = resolve; });
+    });
+    Object.assign(h.venue, { redeem });
+    h.venue.holdings.set("settled:YES", { marketRef: "settled", tokenId: "settled:YES", conditionId: "settled-condition",
+      side: "YES", size: 10, avgPrice: .7, currentPrice: 1, redeemable: true });
+    await h.engine.tick(1);
+    let drained = false;
+    const draining = h.engine.drainRedemptions().then(() => { drained = true; });
+    await Promise.resolve(); expect(drained).toBe(false);
+    release({ transactionHash: "confirmed" }); await draining;
+    expect(JSON.parse((await h.state.get("engine:redemption:settled-condition"))!).status).toBe("confirmed");
+    h.venue.holdings.set("another:YES", { marketRef: "another", tokenId: "another:YES", conditionId: "another-condition",
+      side: "YES", size: 1, avgPrice: .7, currentPrice: 0, redeemable: true });
+    h.clock.now += 60_000; await h.engine.tick(2);
+    expect(redeem).toHaveBeenCalledOnce();
+  });
+
+  it("continues entries when one redemption fails", async () => {
+    const h = harness();
+    const redeem = vi.fn(async () => { throw new Error("relayer temporarily unavailable"); });
+    Object.assign(h.venue, { redeem });
+    h.venue.holdings.set("settled:YES", { marketRef: "settled", tokenId: "settled:YES", conditionId: "settled-condition",
+      side: "YES", size: 10, avgPrice: .7, currentPrice: 0, redeemable: true });
+    expect((await h.engine.tick(1)).errors).toBe(1);
+    expect(h.venue.placements).toHaveLength(1);
+    expect((await h.engine.predictionStatus())!.blocked).toBe(false);
+  });
+
   it("redeems a resolved loser even when another market's order reconciliation fails", async () => {
     const h = harness(); await h.engine.tick(1);
     vi.spyOn(h.venue, "executionOrder").mockRejectedValue(new Error("order detail unavailable"));
@@ -164,7 +228,8 @@ describe("Engine adaptive prediction wiring", () => {
       side: "YES", size: 10, avgPrice: .7, currentPrice: 0, unrealizedPnl: -7, redeemable: true });
     h.clock.now += 60_000;
     const result = await h.engine.tick(2);
-    expect(result.errors).toBeGreaterThan(0);
+    expect(result.errors).toBe(0);
+    expect((await h.engine.predictionStatus())!.blocked).toBe(false);
     expect(redeem).toHaveBeenCalledOnce();
     expect(h.venue.placements).toHaveLength(1);
   });

@@ -21,12 +21,20 @@ function setup() {
     cancelOrder: vi.fn(), redeem, redemptionStatus: vi.fn(async () => "pending") } as unknown as VenueAdapter;
   const account = { venue: "polymarket" as const, signerAddress: "0x1", funder: "0x2", signatureType: 3 };
   const config = parseBotConfig({ id: "redemption", venue: "polymarket", execution: { mode: "legacy" } });
+  const strategyTick = vi.fn(async () => [{ kind: "redeem" as const, marketRef: loss.marketRef }]);
   const engine = () => new Engine({ botId: config.id, config, adapter, account, state, log: silentLogger, alerter: { send },
-    strategy: { id: "test", tick: async () => [{ kind: "redeem", marketRef: loss.marketRef }] }, signals: { latest: async () => [] } });
-  return { state, adapter, account, engine, redeem, send, positions };
+    strategy: { id: "test", tick: strategyTick }, signals: { latest: async () => [] } });
+  return { state, adapter, account, engine, redeem, send, positions, strategyTick };
 }
 
 describe("directional resolution settlement", () => {
+  it("redeems resolved holdings even when the strategy fails", async () => {
+    const s = setup(); s.strategyTick.mockRejectedValue(new Error("forecast unavailable"));
+    expect((await s.engine().tick(1)).errors).toBe(1);
+    expect(s.redeem).toHaveBeenCalledOnce();
+    expect(JSON.parse((await s.state.get("engine:redemption:condition"))!).status).toBe("confirmed");
+  });
+
   it("redeems a zero-value loser below the trade minimum and deduplicates across restart/indexer lag", async () => {
     const s = setup();
     expect((await s.engine().tick(1)).errors).toBe(0);

@@ -156,6 +156,7 @@ export interface SwingState {
   lastNav: number;
   lastAt: number;
   halted: boolean;
+  haltReason?: string;
   entries: Record<string, SwingEntryRecord>;
   cooldowns: Record<string, number>;
 }

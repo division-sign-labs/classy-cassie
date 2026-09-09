@@ -69,6 +69,8 @@ export class QuotientSwingStrategy implements Strategy {
     if (ctx.perpExecution) {
       // The engine owns cash-flow-adjusted live high water and execution halt state.
       stored.halted = ctx.perpExecution.halted;
+      if (stored.halted) stored.haltReason = ctx.perpExecution.haltReason ?? "execution_halted";
+      else delete stored.haltReason;
       stored.highWaterNav = ctx.perpExecution.highWaterEquity;
       // A submitted entry the engine no longer tracks (rejected or failed before placement) frees its slot at once.
       for (const [marketRef, entry] of Object.entries(stored.entries)) {

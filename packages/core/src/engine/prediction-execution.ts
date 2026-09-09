@@ -1,10 +1,11 @@
 // packages/core/src/engine/prediction-execution.ts
 // Durable directional prediction execution; strategy output never signs or places orders.
 import type { BotConfig } from "../config.js";
-import type { Action, Alerter, Fill, Logger, OrderBook, OrderIntent, Position, PredictionExecutionMarket, Signal, StateStore, StrategyActionResult, VenueAccount, VenueAdapter } from "../types.js";
+import type { Action, Alerter, Fill, Logger, Order, OrderBook, OrderIntent, Position, PredictionCancellationResult, PredictionExecutionMarket, Signal, StateStore, StrategyActionResult, VenueAccount, VenueAdapter } from "../types.js";
 import { getJson, setJson } from "../state.js";
 import { checkCapacity } from "../risk/capacity.js";
 import { derivePredictionExecutionMetrics, type PredictionExecutionMetrics } from "./prediction-execution-metrics.js";
+import { positionMarketValue } from "../portfolio.js";
 
 export const PREDICTION_EXECUTION_KEY = "prediction:execution:v1";
 
@@ -104,6 +105,9 @@ interface Child {
   cancelRequestedAt?: number;
   cancelAcceptedAt?: number;
   cancelFailures?: number;
+  notOpenAt?: number;
+  nextCancelAt?: number;
+  reconciliationError?: string;
   error?: string;
 }
 
@@ -166,6 +170,7 @@ export class PredictionExecutor {
   private heartbeatPending?: Promise<boolean>;
   private safetyGeneration = 0;
   private paused = false;
+  private operatorPaused = false;
   private stopping = false;
   private signals?: Signal[];
   private heartbeatHaltReason?: string;
@@ -346,11 +351,12 @@ export class PredictionExecutor {
 
   supervise(options: PredictionSupervisionOptions = {}): Promise<void> {
     // Latch pause synchronously so a signing operation currently awaiting IO cannot POST afterward.
+    if (options.paused !== undefined) this.operatorPaused = options.paused;
     if (options.paused) { this.paused = true; this.safetyGeneration += 1; }
     return this.serial(async () => {
       this.requireSupport();
       const c = await this.load();
-      this.paused = this.stopping || Boolean(this.heartbeatHaltReason) || (options.paused ?? this.paused);
+      this.paused = this.stopping || this.operatorPaused || Boolean(this.heartbeatHaltReason);
       if (options.signals) this.signals = options.signals;
       if (options.refreshedAt !== undefined && Number.isFinite(options.refreshedAt) && options.refreshedAt > (c.refreshedAt ?? 0)) c.refreshedAt = options.refreshedAt;
       for (const p of Object.values(c.parents).filter(active)) {
@@ -389,13 +395,18 @@ export class PredictionExecutor {
         await this.cancelForReadFailure(`authoritative execution read failed: ${String(error)}`);
         throw error;
       }
+      await this.recoverTransientHalt();
       // A timed-out POST may arrive later. Keep draining the account until its
       // receipt is resolved; one cancellation at timeout is insufficient.
       if (c.haltReason) await this.rpc("halted account cancellation", () => this.d.adapter.cancelAll(this.d.account))
         .catch(error => this.d.log.error("halted prediction cancellation failed", { error: String(error) }));
       for (const p of Object.values(c.parents).filter(active)) {
         if (this.paused || c.haltReason) await this.stopParent(p, this.paused ? "execution paused" : c.haltReason!);
-        else {
+        else if (this.children(p).some(child => working(child) && child.reconciliationError)) {
+          await this.stopParent(p, "order reconciliation pending");
+        } else if (p.status === "canceling" || p.status === "blocked") {
+          await this.stopParent(p, p.cancelReason ?? "order cancellation pending");
+        } else {
           try { await this.workParent(p); }
           catch (error) { await this.stopParent(p, `execution book unavailable: ${String(error)}`); }
         }
@@ -607,7 +618,7 @@ export class PredictionExecutor {
     for (const position of positions) {
       if (!(position.size > EPS)) continue;
       exposure.set(position.marketRef, (exposure.get(position.marketRef) ?? 0) + position.size * position.avgPrice);
-      positionValue += position.size * (position.currentPrice ?? position.avgPrice);
+      positionValue += positionMarketValue(position);
     }
     // Authenticated token balances supply inventory that the public position index has not caught up with.
     const knownTokens = new Map(Object.values(c.parents).filter(p => active(p) || !p.inventoryObserved || this.now() - (p.terminalAt ?? p.admittedAt) < FILL_OVERLAP_MS || positions.some(position => position.tokenId === p.tokenId)).map(p => [p.tokenId, p]));
@@ -683,43 +694,18 @@ export class PredictionExecutor {
     const orders = await this.rpc("open orders", () => this.d.adapter.openOrders(this.d.account));
     const owned = new Set(Object.values(c.children).flatMap(child => child.venueId ? [child.venueId] : []));
     if (orders.some(order => !owned.has(order.id))) c.haltReason = "unowned open orders require reconciliation before adaptive execution";
-    for (const child of Object.values(c.children).filter(working)) {
-      if (!child.venueId) continue;
-      const order = await this.rpc("order state", () => this.d.adapter.executionOrder!(this.d.account, child.venueId!));
-      const listed = orders.some(candidate => candidate.id === child.venueId);
-      if (listed || order?.status === "open" || order?.status === "unknown") {
-        if (listed || order?.status === "open") child.cancelAcceptedAt = undefined;
-        child.terminalFirstObservedAt = undefined;
-        child.terminalObservedAt = undefined;
-        child.terminalObservations = 0;
+    await Promise.all(Object.values(c.children).filter(working).map(async child => {
+      if (!child.venueId) return;
+      try {
+        await this.reconcileChild(child, orders);
+        child.reconciliationError = undefined;
+      } catch (error) {
+        const message = String(error);
+        if (child.reconciliationError !== message) this.d.log.warn("prediction order reconciliation pending", { orderId: child.venueId, error: message });
+        child.reconciliationError = message;
+        this.resetTerminalObservations(child);
       }
-      if (!order && child.cancelAcceptedAt !== undefined && !listed) {
-        // A confirmed cancellation plus repeated absence can outlive the venue's
-        // order-detail record. Keep the reservation for the full late-fill window
-        // and reconcile every known match before releasing it.
-        const observedAt = this.now();
-        child.terminalFirstObservedAt ??= observedAt;
-        if (observedAt > (child.terminalObservedAt ?? 0)) {
-          child.terminalObservedAt = observedAt;
-          child.terminalObservations = (child.terminalObservations ?? 0) + 1;
-        }
-        if (observedAt - Math.max(child.cancelAcceptedAt, child.terminalFirstObservedAt) >= FILL_OVERLAP_MS &&
-          (child.terminalObservations ?? 0) >= 2 && child.confirmedSize + child.failedSize + EPS >= child.observedMatched &&
-          !this.pendingSettlements(child)) child.status = "terminal";
-        continue;
-      }
-      if (!order || order.status === "unknown") continue;
-      if (order.orderId !== child.venueId || Math.abs(order.size - child.intent.size) > .011 || !Number.isFinite(order.matchedSize) || order.matchedSize < 0 || order.matchedSize > child.intent.size + EPS || !Number.isFinite(order.observedAt) || this.now() - order.observedAt > BOOK_AGE_MS || order.observedAt - this.now() > 1000) throw new Error(`invalid authoritative order state for ${child.id}`);
-      child.observedMatched = Math.max(child.observedMatched, order.matchedSize);
-      const absent = !orders.some(candidate => candidate.id === child.venueId);
-      const terminal = ["matched", "canceled", "expired"].includes(order.status) && absent;
-      if (terminal && order.observedAt > (child.terminalObservedAt ?? 0)) {
-        child.terminalFirstObservedAt ??= order.observedAt;
-        child.terminalObservedAt = order.observedAt;
-        child.terminalObservations = (child.terminalObservations ?? 0) + 1;
-      }
-      if (terminal && (child.terminalObservations ?? 0) >= 2 && order.observedAt - (child.terminalFirstObservedAt ?? order.observedAt) >= 5000 && child.confirmedSize + child.failedSize + EPS >= child.observedMatched && !this.pendingSettlements(child)) child.status = "terminal";
-    }
+    }));
     for (const p of Object.values(c.parents).filter(active)) {
       if (!this.children(p).some(working)) {
         if (p.status === "canceling") this.finish(p, p.filledSize + EPS >= p.targetSize ? "completed" : "canceled");
@@ -730,6 +716,62 @@ export class PredictionExecutor {
     c.lastSettlementScanAt = scanStartedAt;
     await this.save();
     await this.alertConfirmedFills();
+  }
+
+  private resetTerminalObservations(child: Child): void {
+    child.terminalFirstObservedAt = undefined;
+    child.terminalObservedAt = undefined;
+    child.terminalObservations = 0;
+  }
+
+  private observeTerminal(child: Child, waitMs: number, since = 0): boolean {
+    const observedAt = this.now();
+    child.terminalFirstObservedAt ??= observedAt;
+    if (observedAt > (child.terminalObservedAt ?? 0)) {
+      child.terminalObservedAt = observedAt;
+      child.terminalObservations = (child.terminalObservations ?? 0) + 1;
+    }
+    return (child.terminalObservations ?? 0) >= 2 && observedAt - Math.max(since, child.terminalFirstObservedAt) >= waitMs;
+  }
+
+  private async reconcileChild(child: Child, orders: Order[]): Promise<void> {
+      const listed = orders.some(candidate => candidate.id === child.venueId);
+      // Confirmed settlement for the entire signed quantity is terminal even if
+      // the venue has already discarded its order-detail record (notably FAKs).
+      if (!listed && child.confirmedSize + EPS >= child.intent.size && !this.pendingSettlements(child)) {
+        if (this.observeTerminal(child, 5000)) child.status = "terminal";
+        return;
+      }
+      const order = await this.rpc("order state", () => this.d.adapter.executionOrder!(this.d.account, child.venueId!));
+      if (listed || order?.status === "open" || order?.status === "unknown") {
+        if (listed || order?.status === "open") { child.cancelAcceptedAt = undefined; child.notOpenAt = undefined; }
+        this.resetTerminalObservations(child);
+      }
+      if (!order && (child.cancelAcceptedAt !== undefined || child.notOpenAt !== undefined) && !listed) {
+        // A confirmed cancellation plus repeated absence can outlive the venue's
+        // order-detail record. Keep the reservation for the full late-fill window
+        // and reconcile every known match before releasing it.
+        if (child.notOpenAt !== undefined && child.cancelAcceptedAt === undefined) {
+          const parent = this.checkpoint!.parents[child.parentId]!;
+          const quantity = await this.rpc("missing-order token balance", () => this.d.adapter.tokenBalance!(this.d.account, parent.tokenId));
+          const expected = parent.priorMarketSize + (parent.side === "BUY" ? 1 : -1) * parent.filledSize;
+          // A missing trade or external inventory change keeps this market
+          // reserved. Never manufacture a fill from the inventory difference.
+          if (!Number.isFinite(quantity) || Math.abs(quantity - expected) > .011) {
+            this.resetTerminalObservations(child);
+            return;
+          }
+        }
+        if (this.observeTerminal(child, FILL_OVERLAP_MS, child.cancelAcceptedAt ?? child.notOpenAt) &&
+          child.confirmedSize + child.failedSize + EPS >= child.observedMatched &&
+          !this.pendingSettlements(child)) child.status = "terminal";
+        return;
+      }
+      if (!order || order.status === "unknown") return;
+      if (order.orderId !== child.venueId || Math.abs(order.size - child.intent.size) > .011 || !Number.isFinite(order.matchedSize) || order.matchedSize < 0 || order.matchedSize > child.intent.size + EPS || !Number.isFinite(order.observedAt) || this.now() - order.observedAt > BOOK_AGE_MS || order.observedAt - this.now() > 1000) throw new Error(`invalid authoritative order state for ${child.id}`);
+      child.observedMatched = Math.max(child.observedMatched, order.matchedSize);
+      const terminal = ["matched", "canceled", "expired"].includes(order.status) && !listed;
+      if (terminal && this.observeTerminal(child, 5000) && child.confirmedSize + child.failedSize + EPS >= child.observedMatched && !this.pendingSettlements(child)) child.status = "terminal";
   }
 
   /** Persist deduplication before best-effort delivery; notifications never block execution. */
@@ -794,7 +836,8 @@ export class PredictionExecutor {
   private async cancel(child: Child, reason: string): Promise<void> {
     if (!working(child)) return;
     // Reconciliation clears this acknowledgement if the order is observed live.
-    if (child.cancelAcceptedAt !== undefined) return;
+    if (child.cancelAcceptedAt !== undefined || child.notOpenAt !== undefined || child.confirmedSize + EPS >= child.intent.size) return;
+    if (child.nextCancelAt !== undefined && this.now() < child.nextCancelAt) return;
     if (child.status === "reserved") { child.status = "rejected"; await this.save(); return; }
     if (child.status !== "unknown") child.status = "canceling";
     child.cancelRequestedAt ??= this.now();
@@ -802,15 +845,52 @@ export class PredictionExecutor {
     if (!child.venueId) return;
     try {
       const result = await this.rpc("order cancellation", () => this.d.adapter.cancelOrderChecked!(this.d.account, child.venueId!));
-      if (result.status !== "canceled") { child.error = result.reason ?? "venue did not cancel order"; child.cancelFailures = (child.cancelFailures ?? 0) + 1; }
-      else { child.cancelFailures = 0; child.cancelAcceptedAt = this.now(); }
-      this.d.log.info("prediction cancellation requested", { executionId: child.parentId, orderId: child.venueId, reason, confirmed: result.status === "canceled" });
+      this.recordCancellation(child, result);
+      this.d.log.info("prediction cancellation requested", { executionId: child.parentId, orderId: child.venueId, reason, confirmed: result.status === "canceled", ...(result.notOpen ? { notOpen: true } : {}) });
     } catch (error) { child.error = String(error); child.cancelFailures = (child.cancelFailures ?? 0) + 1; this.d.log.warn("prediction cancellation remains pending", { orderId: child.venueId, error: String(error) }); }
-    if ((child.cancelFailures ?? 0) >= 3) {
-      this.checkpoint!.haltReason = `repeated cancellation failure for ${child.id}`;
+    if (child.cancelFailures) child.nextCancelAt = this.now() + Math.min(60_000, 5000 * 2 ** Math.min(child.cancelFailures - 1, 4));
+    if (child.cancelFailures === 3) {
+      // Escalate once, retaining this market's full reservation. An order-level
+      // cancellation failure must not latch a permanent account-wide halt.
       await this.rpc("account cancellation", () => this.d.adapter.cancelAll(this.d.account)).catch(error => this.d.log.error("prediction cancellation escalation failed", { error: String(error) }));
     }
     await this.save();
+  }
+
+  private recordCancellation(child: Child, result: PredictionCancellationResult): void {
+    if (result.status === "canceled") { child.cancelFailures = 0; child.cancelAcceptedAt = this.now(); child.nextCancelAt = undefined; }
+    else if (result.notOpen) { child.cancelFailures = 0; child.notOpenAt ??= this.now(); child.nextCancelAt = undefined; child.error = result.reason; }
+    else {
+      child.error = result.reason ?? "venue did not cancel order";
+      child.cancelFailures = (child.cancelFailures ?? 0) + 1;
+      child.nextCancelAt = this.now() + Math.min(60_000, 5000 * 2 ** Math.min(child.cancelFailures - 1, 4));
+    }
+  }
+
+  /** Recover connectivity/cancellation halts after a clean account audit. */
+  private async recoverTransientHalt(): Promise<void> {
+    const c = this.checkpoint!;
+    if (this.stopping || this.operatorPaused || !c.haltReason ||
+      !/^(?:heartbeat safety halt:|repeated cancellation failure for )/.test(c.haltReason)) return;
+    if (Object.values(c.children).some(child => child.status === "signed" || child.status === "unknown")) return;
+    const generation = this.safetyGeneration;
+    try {
+      const [orders, balances, positions] = await this.rpc("recovery account snapshot", () => Promise.all([
+        this.d.adapter.openOrders(this.d.account), this.d.adapter.balances(this.d.account), this.d.adapter.positions(this.d.account),
+      ]), undefined, 30_000);
+      if (orders.length || balances.some(balance => !Number.isFinite(balance.total) || balance.total < 0) ||
+        positions.some(position => !Number.isFinite(position.size) || position.size < 0)) return;
+      if ((await this.rpc("recovery final open orders", () => this.d.adapter.openOrders(this.d.account))).length) return;
+      if (this.stopping || this.operatorPaused || generation !== this.safetyGeneration) return;
+      const reason = c.haltReason;
+      c.haltReason = undefined;
+      this.heartbeatHaltReason = undefined;
+      this.paused = false;
+      await this.save();
+      this.d.log.info("prediction execution recovered after account reconciliation", { reason });
+    } catch (error) {
+      this.d.log.warn("prediction recovery awaits a fresh account snapshot", { error: String(error) });
+    }
   }
 
   private async stopParent(parent: Parent, reason: string): Promise<void> {
@@ -834,7 +914,7 @@ export class PredictionExecutor {
   }
 
   cancelAll(reason = "execution stopped"): Promise<void> {
-    this.paused = true; this.safetyGeneration += 1;
+    this.operatorPaused = true; this.paused = true; this.safetyGeneration += 1;
     return this.serial(async () => { const c = await this.load(); c.queuedExits = {}; for (const p of Object.values(c.parents).filter(active)) await this.stopParent(p, reason); await this.reconcile(); });
   }
 
@@ -861,6 +941,7 @@ export class PredictionExecutor {
       if ((await this.rpc("resume final open orders", () => this.d.adapter.openOrders(this.d.account))).length) throw new Error("open orders changed during account audit; prediction execution remains paused");
       c.haltReason = undefined;
       this.heartbeatHaltReason = undefined;
+      this.operatorPaused = false;
       this.paused = false;
       await this.save();
     });
@@ -884,7 +965,9 @@ export class PredictionExecutor {
     if (this.heartbeatHaltReason || !Object.values(c.children).some(working)) return false;
     if (this.heartbeatPending) return this.heartbeatPending;
     const pending = (async () => {
-      const passive = Object.values(c.children).filter(child => working(child) && child.intent.postOnly && child.cancelAcceptedAt === undefined);
+      const passive = Object.values(c.children).filter(child => working(child) && child.intent.postOnly &&
+        child.confirmedSize + EPS < child.intent.size && child.cancelAcceptedAt === undefined && child.notOpenAt === undefined &&
+        (child.nextCancelAt === undefined || this.now() >= child.nextCancelAt));
       const expired = passive.filter(child => this.now() >= c.parents[child.parentId]!.deadlineAt);
       if (expired.length) {
         // Ordinary deadlines cancel immediately without turning a scheduled expiry
@@ -898,7 +981,7 @@ export class PredictionExecutor {
             if (parent.side === "BUY" && !this.commodities) { parent.status = "canceling"; parent.cancelReason = "entry deadline"; }
             if (working(child) && child.venueId) {
               child.status = "canceling"; child.cancelRequestedAt ??= this.now();
-              if (result?.status === "canceled") child.cancelAcceptedAt = this.now();
+              if (result) this.recordCancellation(child, result);
             }
           }
           await this.save();
