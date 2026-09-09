@@ -1,0 +1,130 @@
+<!doctype html>
+<html lang="en" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="dark light">
+<title>cassie</title>
+<link rel="stylesheet" href="app.css">
+</head>
+<body>
+<main id="login" class="login" hidden>
+<form id="login-form" class="login-form" novalidate>
+<h1 class="wordmark">cassie</h1>
+<input id="login-password" type="password" autocomplete="current-password" placeholder="Password" aria-label="Password" required>
+<button id="login-submit" type="submit" class="btn-fill">Sign in</button>
+<p id="login-error" class="form-error" role="alert" hidden></p>
+</form>
+</main>
+<div id="app" hidden>
+<header class="topbar">
+<div class="topbar-inner">
+<span class="wordmark">cassie</span>
+<label class="sr-only" for="bot-select">Bot</label>
+<select id="bot-select" class="bot-select" hidden></select>
+<span id="bot-name" class="bot-name"></span>
+<span id="source-badge" class="meta"></span>
+<span id="status-pill" class="pill"><span id="status-dot" class="dot" aria-hidden="true"></span><span id="status-text"></span></span>
+<span class="spacer"></span>
+<span id="refresh-info" class="meta"></span>
+<button id="refresh-btn" type="button" class="btn-ghost">Refresh</button>
+<button id="theme-btn" type="button" class="btn-ghost" aria-label="Toggle theme">Light</button>
+<button id="signout-btn" type="button" class="btn-ghost" hidden>Sign out</button>
+</div>
+</header>
+<div class="shell">
+<div id="banners" class="banners"></div>
+<nav class="tabs" role="tablist" aria-label="Sections">
+<a role="tab" id="tab-overview" href="#overview">Overview</a>
+<a role="tab" id="tab-positions" href="#positions">Positions</a>
+<a role="tab" id="tab-performance" href="#performance">Performance</a>
+<a role="tab" id="tab-metrics" href="#metrics">Metrics</a>
+<a role="tab" id="tab-logs" href="#logs">Logs</a>
+</nav>
+<div id="empty-bots" class="empty" hidden>No bots configured.</div>
+<section id="panel-overview" role="tabpanel" aria-labelledby="tab-overview" hidden>
+<div class="hero">
+<div id="ov-hero" class="hero-value">—</div>
+<div id="ov-hero-sub" class="hero-sub"></div>
+</div>
+<div id="ov-stats" class="stats"></div>
+<div class="filters"><div id="ov-range" class="seg" role="group" aria-label="Range"></div></div>
+<figure class="chart-card">
+<div id="ov-chart" class="chart"></div>
+<div id="ov-chart-table"></div>
+</figure>
+<div id="ov-engine" class="engine"></div>
+</section>
+<section id="panel-positions" role="tabpanel" aria-labelledby="tab-positions" hidden>
+<h2>Positions</h2>
+<div id="pos-table"></div>
+<h2>Resting orders</h2>
+<div id="ord-table"></div>
+<p id="pos-balances" class="meta"></p>
+</section>
+<section id="panel-performance" role="tabpanel" aria-labelledby="tab-performance" hidden>
+<div class="filters"><div id="pf-range" class="seg" role="group" aria-label="Range"></div></div>
+<figure class="chart-card">
+<figcaption>Equity</figcaption>
+<div id="pf-equity" class="chart chart-lg"></div>
+<div id="pf-equity-table"></div>
+</figure>
+<div id="pf-stats" class="stats"></div>
+<figure class="chart-card">
+<figcaption>Realized and unrealized</figcaption>
+<div id="pf-pnl" class="chart"></div>
+<div id="pf-pnl-table"></div>
+</figure>
+<figure class="chart-card">
+<figcaption>Cash and positions</figcaption>
+<div id="pf-cash" class="chart"></div>
+<div id="pf-cash-table"></div>
+</figure>
+<p id="pf-sample" class="meta"></p>
+</section>
+<section id="panel-metrics" role="tabpanel" aria-labelledby="tab-metrics" hidden>
+<figure class="chart-card">
+<figcaption>API calls, last 24 hours</figcaption>
+<div id="mt-hourly" class="chart chart-sm"></div>
+</figure>
+<div class="filters"><div id="mt-scope" class="seg" role="group" aria-label="Scope"></div><span id="mt-scope-note" class="meta"></span></div>
+<div id="mt-table"></div>
+<h2>Engine</h2>
+<div id="mt-engine" class="stats"></div>
+<h2>Alerts</h2>
+<div id="mt-alerts" class="stats"></div>
+<div id="mt-hl" hidden>
+<h2>Hyperliquid scheduler</h2>
+<div id="mt-hl-stats" class="stats"></div>
+</div>
+<p id="mt-sampler" class="meta"></p>
+</section>
+<section id="panel-logs" role="tabpanel" aria-labelledby="tab-logs" hidden>
+<div class="filters">
+<div id="lg-levels" class="chips" role="group" aria-label="Level"></div>
+<input id="lg-search" type="search" placeholder="Search" aria-label="Search">
+</div>
+<div id="lg-list" class="log-list"></div>
+</section>
+</div>
+</div>
+<template id="tpl-log-row">
+<article class="log-row">
+<div class="log-head">
+<time class="log-time"></time>
+<span class="log-ago meta"></span>
+<span class="log-level"><span class="dot" aria-hidden="true"></span><span class="log-level-text"></span></span>
+<span class="log-code"></span>
+<span class="log-venue meta"></span>
+<span class="log-tick meta"></span>
+</div>
+<p class="log-msg"></p>
+<details class="log-ctx" hidden><summary>Context</summary><pre></pre></details>
+</article>
+</template>
+<template id="tpl-tip">
+<div class="chart-tip" role="status"><div class="tip-title"></div><ul class="tip-rows"></ul></div>
+</template>
+<script type="module" src="app.js"></script>
+</body>
+</html>

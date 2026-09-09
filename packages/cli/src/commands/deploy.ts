@@ -26,6 +26,7 @@ import {
 } from "../cloud-init.js";
 import { DigitalOcean, ensureDigitalOceanReady, publicIpv4, type Droplet } from "../digitalocean.js";
 import { cliVersion } from "../version.js";
+import { remoteWriteCommand } from "../remote-write.js";
 import { resolvePolymarketGaslessAuth } from "../polymarket-gasless.js";
 import { activateWorkspaceRuntime, buildWorkspaceRuntime, stageWorkspaceRuntime } from "../workspace-runtime.js";
 import {
@@ -38,12 +39,29 @@ import {
   sshExecOrThrow,
   type Target,
 } from "../ssh.js";
+import {
+  DEFAULT_DASHBOARD_PORT,
+  authFilePath,
+  certFingerprintCommand,
+  dashboardAuthFile,
+  dashboardDisableCommands,
+  dashboardEnvLines,
+  dashboardOn,
+  dashboardProvisionCommands,
+  dashboardUrl,
+  parseFingerprint,
+  resolveDashboardConfig,
+  verifyDashboardCommand,
+} from "../dashboard/provision.js";
 
 export interface DeployOpts {
   region?: string;
   size?: string;
   yes?: boolean;
   fromWorkspace?: boolean;
+  /** undefined keeps the saved choice; false is --no-dashboard. */
+  dashboard?: boolean;
+  dashboardPort?: number;
 }
 
 type Deployment = NonNullable<BotConfig["deployment"]>;
@@ -496,16 +514,12 @@ export function marketMakeStateSource(
  * path first so a dropped connection cannot leave a half-written env file.
  */
 function writeFile(target: Target, path: string, content: string, mode: string, owner: string): void {
-  const tmp = `${path}.tmp`;
-  sshExecOrThrow(
-    target,
-    `umask 077 && cat > '${tmp}' && chown ${owner} '${tmp}' && chmod ${mode} '${tmp}' && mv '${tmp}' '${path}'`,
-    content,
-  );
+  sshExecOrThrow(target, remoteWriteCommand(path, mode, owner), content);
 }
 
 export async function runDeploy(botId: string, opts: DeployOpts = {}): Promise<void> {
-  const cfg = loadBotConfig(botId);
+  const loadedCfg = loadBotConfig(botId);
+  let cfg = loadedCfg;
   if (cfg.strategy.id === "quotient-swing") QuotientSwingConfigSchema.parse(cfg.strategy.config);
   if (cfg.venue === "lighter") {
     throw new Error("Lighter deployment is unsupported.");
@@ -566,6 +580,20 @@ export async function runDeploy(botId: string, opts: DeployOpts = {}): Promise<v
     surplusApiKey = resolvedSurplus.value;
   }
   const telegramToken = process.env.TELEGRAM_BOT_TOKEN ?? (await getKeystoreSecret(botId, KeyRoles.telegramToken));
+
+  const dashboard = await resolveDashboardConfig(cfg, opts);
+  if (dashboard.passwordOrigin) console.log(pc.dim(`dashboard password: ${dashboard.passwordOrigin}`));
+  if (dashboard.skipped) console.log(pc.yellow(`Dashboard skipped: ${dashboard.skipped}`));
+  const dashboardChanged =
+    dashboard.config.passwordHash !== cfg.dashboard?.passwordHash ||
+    ((opts.dashboard !== undefined || opts.dashboardPort !== undefined) && JSON.stringify(dashboard.config) !== JSON.stringify(cfg.dashboard));
+  if (dashboardChanged) {
+    // Saved now so an interrupted deploy keeps the hash the operator just typed.
+    cfg = { ...cfg, dashboard: dashboard.config };
+    saveBotConfig(cfg);
+  }
+  const previousDashboardPort = loadedCfg.dashboard?.port;
+  const serveDashboard = dashboardOn(cfg);
 
   const name = dropletName(botId);
   const existing = cfg.deployment ? await client.droplet(cfg.deployment.dropletId).catch(() => null) : null;
@@ -635,10 +663,12 @@ export async function runDeploy(botId: string, opts: DeployOpts = {}): Promise<v
       tags: ["cassie", `cassie-bot-${botId}`],
     });
     droplet = await waitForActive(client, created.id);
-    await client.upsertFirewall(firewallName(botId), droplet.id).catch((error) => {
-      console.log(pc.yellow(`firewall not applied: ${(error as Error).message.slice(0, 160)}`));
-    });
   }
+  await client
+    .upsertFirewall(firewallName(botId), droplet.id, { inboundTcpPorts: serveDashboard ? [22, cfg.dashboard!.port] : [22] })
+    .catch((error) => {
+      console.log(pc.yellow(`firewall not applied: ${(error as Error).message.slice(0, 160)}${serveDashboard ? "; the dashboard stays unreachable from outside" : ""}`));
+    });
 
   const host = publicIpv4(droplet);
   if (!host) throw new Error("the droplet came up without a public IPv4 address");
@@ -672,6 +702,18 @@ export async function runDeploy(botId: string, opts: DeployOpts = {}): Promise<v
   } else if (preservedState) {
     console.log("Runtime state retained on the droplet.");
     console.log("Local recovery snapshot retained.");
+  }
+
+  if (serveDashboard) {
+    process.stdout.write(pc.dim("installing the dashboard… "));
+    for (const command of dashboardProvisionCommands(botId, host, cfg.dashboard!.port, { previousPort: previousDashboardPort })) {
+      sshExecOrThrow(target, command);
+    }
+    writeFile(target, authFilePath(botId), dashboardAuthFile(cfg.dashboard!.passwordHash!), "0600", "cassie:cassie");
+    console.log(pc.green("ok"));
+  } else if (reuse && dashboardOn(loadedCfg)) {
+    // This droplet served the dashboard before; close the port and drop the hash.
+    for (const command of dashboardDisableCommands(botId, previousDashboardPort ?? DEFAULT_DASHBOARD_PORT)) sshExec(target, command);
   }
 
   const overrideDir = `/etc/systemd/system/cassie@${botId}.service.d`;
@@ -719,6 +761,7 @@ export async function runDeploy(botId: string, opts: DeployOpts = {}): Promise<v
     ["QUOTIENT_API_TOKEN", quotientToken],
     ["TELEGRAM_BOT_TOKEN", telegramToken],
     ["SURPLUS_API_KEY", surplusApiKey],
+    ...dashboardEnvLines(deployedCfg),
   ];
   const lines: string[] = [];
   for (const [key, value] of env) {
@@ -758,6 +801,17 @@ export async function runDeploy(botId: string, opts: DeployOpts = {}): Promise<v
     throw new Error(`refusing to resume: expected workspace build ${workspaceArtifact.id}, got ${String(runtime.buildId ?? "no build identity")}; the runtime remains idle`);
   }
   console.log(`Runtime region verified: ${runtime.region}`);
+
+  let fingerprint: string | null = null;
+  if (serveDashboard) {
+    const port = cfg.dashboard!.port;
+    const answered = await waitFor("checking the dashboard", 1_000, 10, async () => {
+      const probe = sshExec(target, verifyDashboardCommand(port));
+      return probe.ok && probe.stdout.trim() === "401" ? true : null;
+    }).catch(() => null);
+    if (!answered) console.log(pc.yellow(`dashboard not answering on ${dashboardUrl(host, port)}; the bot is unaffected. cassie logs ${botId}`));
+    fingerprint = parseFingerprint(sshExec(target, certFingerprintCommand()).stdout);
+  }
 
   if (deployedCfg.venue === "polymarket") {
     const geoblock = controlCall(target, botId, "GET", "/geoblock/check") as {
@@ -841,6 +895,12 @@ export async function runDeploy(botId: string, opts: DeployOpts = {}): Promise<v
   if (deployedCfg.venue === "polymarket" && isPredictionDeployment(deployedCfg)) console.log(QUOTIENT_POLYMARKET_FEE_DISCLOSURE);
 
   console.log("");
+  if (serveDashboard) {
+    console.log(`Dashboard: ${dashboardUrl(host, cfg.dashboard!.port)}`);
+    if (fingerprint) console.log(`Certificate fingerprint (self-signed): ${fingerprint}`);
+    console.log("The browser warns once about the self-signed certificate; compare the fingerprint, then continue.");
+    console.log("");
+  }
   if (deployedCfg.strategy.id === "kalshi-commodities") {
     console.log(`${botId} installed; trading paused.`);
     console.log(`cassie commodities dry-run ${botId}`);

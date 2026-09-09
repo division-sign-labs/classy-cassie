@@ -222,6 +222,17 @@ export const DeploymentSchema = z.object({
   deployedAt: z.string().optional(),
 });
 
+/** Hosted monitoring dashboard. `cassie deploy` provisions it; the hash is scrypt, never the password. */
+export const DashboardConfigSchema = z
+  .object({
+    enabled: z.boolean().default(true),
+    port: z.number().int().min(1024).max(65535).default(8443),
+    passwordHash: z.string().optional(),
+  })
+  .strict();
+
+export type DashboardConfig = z.output<typeof DashboardConfigSchema>;
+
 export const BotConfigSchema = z
   .object({
     id: z.string().regex(/^[a-z0-9][a-z0-9-]{0,31}$/, "bot id: lowercase alphanumerics and dashes, max 32 chars"),
@@ -254,6 +265,8 @@ export const BotConfigSchema = z
     tickIntervalMin: z.number().positive().default(1),
     /** Set by `cassie deploy`: the droplet this bot runs on. */
     deployment: DeploymentSchema.optional(),
+    /** Read-only HTTPS dashboard served by a deployed bot. */
+    dashboard: DashboardConfigSchema.optional(),
     createdAt: z.string().optional(),
   })
   .superRefine((config, ctx) => {

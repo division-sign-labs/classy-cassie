@@ -262,9 +262,11 @@ cassie strategy <botId> --daily-budget 100 --position-budget-pct 25   # legacy a
 cassie strategy <botId> --max-entry-edge unlimited   # remove the forecast-edge ceiling
 cassie strategy <botId> --position-check-seconds 60 --signal-check-minutes 5
 cassie strategy <botId> --scenario-exit on      # confirmed seven-day signal-exit state machine
-cassie deploy <botId> [--region <slug>] [--size <slug>] [-y]   # a droplet in YOUR DigitalOcean account
+cassie deploy <botId> [--region <slug>] [--size <slug>] [--no-dashboard] [--dashboard-port <n>] [-y]   # a droplet in YOUR DigitalOcean account
 cassie destroy <botId> [-y] [--force]        # cancel resting orders, delete the droplet
 cassie status <botId>                        # droplet + service + engine, one screen
+cassie dashboard [botId...] [--port 4747] [--no-open] [--refresh 30]   # local browser dashboard, every bot
+cassie dashboard password <botId>            # set or rotate the hosted dashboard password
 cassie ssh <botId>                           # a shell on the droplet
 cassie signals-key <botId> [--auto]           # pin this bot's Quotient key to its keystore
 cassie reporting <botId> [--no-post|--off]   # configure Ares for this bot only
@@ -403,13 +405,24 @@ lag. A timeout with a transaction ID is reconciled through the Relayer. An ambig
 submission without an ID requires status/log review and venue reconciliation before
 retrying; do not erase its pending receipt blindly.
 
-Reaching a deployed bot needs no token and no open port. The runtime listens on a unix
+Control of a deployed bot needs no token and no open port. The runtime listens on a unix
 socket at `/run/cassie/<botId>.sock`; the CLI runs `curl --unix-socket` over SSH. The
-droplet firewall allows inbound 22 and nothing else.
+droplet firewall allows inbound 22 plus the dashboard port (8443 by default) unless the
+bot was deployed with `--no-dashboard`.
+
+With the dashboard on, deploy also asks for a dashboard password (or reads
+`CASSIE_DASHBOARD_PASSWORD` from the nearest `.local.env` or the environment), saves only
+its scrypt hash in the bot config, creates a self-signed certificate under
+`/etc/cassie/tls` (reused on redeploy to the same droplet), writes the hash to
+`/etc/cassie/<botId>.dashboard.json` over SSH stdin, opens the port in ufw and the
+DigitalOcean firewall, and checks that `https://127.0.0.1:<port>/api/session` answers 401.
+If that check fails, deploy prints a warning and continues; the bot is unaffected. The
+closing output prints the dashboard URL and the certificate's SHA-256 fingerprint.
 
 ```sh
 cassie deploy <botId> --region fra1     # somewhere else
 cassie deploy <botId> --size s-1vcpu-2gb
+cassie deploy <botId> --no-dashboard    # SSH only, no open port
 cassie deploy <botId> -y                # no confirmation prompt
 cassie destroy <botId>                  # cancel resting orders, then delete the droplet
 ```
@@ -431,8 +444,21 @@ cassie logs <botId>                        # last 200 journal lines
 cassie logs <botId> -f                     # follow until Ctrl-C
 cassie logs <botId> --since '1 hour ago'
 cassie logs <botId> --errors               # the engine's recorded errors instead
+cassie dashboard                           # local browser: positions, equity history, API calls and failures, errors
+cassie dashboard password <botId>          # rotate the hosted dashboard password
 cassie ssh <botId>                         # a shell on the droplet
 ```
+
+`cassie dashboard` serves `http://127.0.0.1:4747` with a bot selector and five tabs:
+overview, positions and resting orders, performance (equity over 24h, 7d, 30d, or all
+time), metrics (API calls, errors and latency by venue method and host, engine
+counters), and the recorded errors. A deployed bot is read over SSH, a bot running in
+another terminal over its local socket, and a stopped bot from its SQLite file (history
+only). A droplet whose runtime predates the dashboard shows current state only and says
+so; redeploy to start recording history. The hosted copy at `https://<droplet-ip>:8443`
+needs the password set at deploy; the certificate is self-signed, so compare the
+fingerprint deploy printed before continuing past the browser warning. Both dashboards
+are read-only.
 
 `cassie status` reads the DigitalOcean API, `systemctl show`, and the control socket, then
 prints the droplet (region, size, address, monthly cost, uptime), the service (state,
@@ -655,6 +681,8 @@ executable held-side bid, the default seven-day maximum hold, or resolution; wit
 4. On any error, read `cassie status <botId>` and `cassie logs <botId>` **before**
    retrying. `--errors` narrows to the engine's own recorded failures.
 5. Numbers come from the CLI (§9). Categorical answers in, computed figures out.
+6. The dashboard password stays off the command line: `cassie dashboard password <botId>`
+   prompts for it, or reads `CASSIE_DASHBOARD_PASSWORD` from `.local.env` or the environment.
 
 ## 11. Venue support and runtime notes
 
@@ -712,6 +740,13 @@ Never attach a Polymarket bot EOA to a Splits account.
   `169.254.169.254` is reachable from the droplet.
 - **`cassie logs` says the host key changed** — the droplet was rebuilt outside cassie.
   Verify that is what happened, then `ssh-keygen -R <ip> -f ~/.cassie/ssh/known_hosts`.
+- **The browser warns about the dashboard certificate** — it is self-signed. Compare the
+  fingerprint `cassie deploy` printed (again via `cassie ssh <botId>` then
+  `openssl x509 -in /etc/cassie/tls/cert.pem -noout -fingerprint -sha256`), then continue.
+- **The dashboard says the runtime predates it** — the droplet runs an older runtime;
+  `cassie deploy <botId>` moves it to the CLI's version and starts recording history.
+- **Forgot the dashboard password** — `cassie dashboard password <botId>` writes a new
+  hash to the droplet; the runtime picks it up without a restart.
 - **Splits shows the wrong organization** — `SPLITS_API_KEY` overrides the CLI's saved auth
   and every key belongs to one org. Stop at the org confirmation, unset/change the key,
   and verify with `splits auth whoami`; Cassie has no team-switch command.

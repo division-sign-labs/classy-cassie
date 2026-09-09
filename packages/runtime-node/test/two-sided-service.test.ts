@@ -123,10 +123,13 @@ describe("two-sided market-make BotService integration", () => {
     const [dependencies, options] = constructors.twoSided.mock.calls[0]!;
     expect(dependencies).toMatchObject({
       config: { strategy_id: "two-sided-spread-v1", two_sided: { target_markets: 3 } },
-      venue,
+      venue: expect.any(Object),
       account,
       botId: "two-sided-service",
     });
+    // The venue arrives wrapped for call counting; calls still reach the adapter.
+    await dependencies.venue.openOrders(account);
+    expect(venue.openOrders).toHaveBeenCalledOnce();
     expect(dependencies).not.toHaveProperty("quotient");
     expect(options).toMatchObject({
       deploymentId: "two-sided-test-deployment", autoSchedule: false, enableSubscriptions: true,
@@ -153,7 +156,9 @@ describe("two-sided market-make BotService integration", () => {
         value: '{"orders":[],"inventory":{}}',
       });
       const tables = database.prepare("SELECT name FROM sqlite_master WHERE type = 'table' ORDER BY name").all();
-      expect(tables).toEqual([{ name: "errors" }, { name: "kv" }, { name: "sqlite_sequence" }]);
+      expect(tables).toEqual([
+        { name: "equity_samples" }, { name: "errors" }, { name: "kv" }, { name: "metrics_samples" }, { name: "sqlite_sequence" },
+      ]);
     } finally {
       database.close();
     }

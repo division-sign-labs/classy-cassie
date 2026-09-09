@@ -9,6 +9,7 @@ import { isDeployed, targetFor } from "../context.js";
 import { loadBotConfig, statePath } from "../paths.js";
 import { ensureDigitalOceanReady, publicIpv4 } from "../digitalocean.js";
 import { controlCall, sshExec, sshExecOrThrow, sshInteractive, type Target } from "../ssh.js";
+import { dashboardStatusText } from "../dashboard/provision.js";
 import { money } from "../render.js";
 
 const JOURNAL_UNIT = (botId: string) => `cassie@${botId}`;
@@ -246,6 +247,7 @@ export async function showStatus(botId: string): Promise<void> {
   }
   row("runtime", `${runtime?.version ?? "unknown"} in ${runtime?.region ?? deployment.region}`);
   if (runtime?.buildId) row("build", runtime.buildId.slice(0, 16));
+  row("dashboard", dashboardStatusText(cfg));
 
   if (reachable) {
     const recent = sshExec(target, `journalctl -u ${JOURNAL_UNIT(botId)} --no-pager -n 5 -o short-iso`);

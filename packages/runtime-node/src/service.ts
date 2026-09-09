@@ -21,7 +21,12 @@ import {
   computePortfolio,
   consoleLogger,
   createAdapter,
+  defaultMetricsRegistry,
+  hyperliquidInfoSchedulerStatsForScope,
+  instrumentVenueAdapter,
   type Alerter,
+  type HyperliquidInfoSchedulerStats,
+  type MetricsRegistry,
   type BotConfig,
   type LogLevel,
   type Logger,
@@ -48,6 +53,10 @@ import {
   type PreviewableStrategy,
 } from "@quotient-forecasting/strategy-agent";
 import { SqliteStateStore } from "./state.js";
+import { CountingAlerter, EngineCounters } from "./dashboard/counters.js";
+import { DashboardSampler, type DashboardSamplerStatus } from "./dashboard/sampler.js";
+import { DashboardSnapshotCache, buildDashboardSnapshot } from "./dashboard/snapshot.js";
+import type { DashboardRange, DashboardSnapshot } from "./dashboard/types.js";
 import { SwingController } from "./swing-controller.js";
 import { CommodityDataSource } from "./commodity-data.js";
 import { CommodityRecordingStore } from "./commodity-recordings.js";
@@ -105,6 +114,10 @@ export interface BotRuntimeOptions {
   telegramToken?: string;
   /** Surplus Intelligence key (inf_…). Required by the agent strategy only. */
   surplusApiKey?: string;
+  /** Shared call counters; defaults to the process-wide registry. */
+  metrics?: MetricsRegistry;
+  /** Equity/metrics sampling for the dashboard. */
+  dashboard?: { sampleMinutes?: number; enabled?: boolean };
   log?: Logger;
   /** Contributor-test hook for a deterministic signal file. */
   signalsFixturePath?: string;
@@ -242,13 +255,15 @@ function compactNumber(value: number): string {
   return String(Number(value.toFixed(4)));
 }
 
-export function buildAlerter(opts: BotRuntimeOptions, log: Logger): Alerter {
+export function buildAlerter(opts: BotRuntimeOptions, log: Logger, counters?: EngineCounters): Alerter {
+  // Counting sits inside SafeAlerter so a swallowed delivery failure is still counted.
+  const count = (sink: Alerter): Alerter => (counters ? new CountingAlerter(sink, counters) : sink);
   const sinks: Alerter[] = [];
   const chatId = opts.config.alerts.telegram?.chatId;
   if (opts.telegramToken && chatId) {
-    sinks.push(new SafeAlerter(new TelegramAlerter(opts.telegramToken, chatId), log));
+    sinks.push(new SafeAlerter(count(new TelegramAlerter(opts.telegramToken, chatId)), log));
   }
-  if (sinks.length === 0) return new ConsoleAlerter(log);
+  if (sinks.length === 0) return count(new ConsoleAlerter(log));
   return sinks.length === 1 ? sinks[0]! : new FanoutAlerter(sinks);
 }
 
@@ -282,6 +297,11 @@ export class BotService {
   private terminating = false;
   private shutdownPromise?: Promise<ShutdownResult>;
   private lastTickAt?: number;
+  readonly startedAt = Date.now();
+  readonly metrics: MetricsRegistry;
+  readonly counters = new EngineCounters();
+  private readonly sampler?: DashboardSampler;
+  private snapshotCache?: DashboardSnapshotCache;
 
   constructor(opts: BotRuntimeOptions) {
     this.opts = opts;
@@ -289,15 +309,16 @@ export class BotService {
     this.account = opts.account;
     this.log = opts.log ?? consoleLogger(opts.config.id);
     this.state = new SqliteStateStore(opts.statePath);
+    this.metrics = opts.metrics ?? defaultMetricsRegistry();
     this.intervalSeconds = Math.max(1, Math.round(opts.config.tickIntervalMin * 60));
-    this.adapter = createAdapter(opts.config.venue, {
+    this.adapter = instrumentVenueAdapter(createAdapter(opts.config.venue, {
       urls: opts.config.venueUrls,
       creds: opts.creds,
       polymarketGaslessAuth: opts.polymarketGaslessAuth,
       fixtureBooks: opts.fixtureBooksPath ? readFileSync(opts.fixtureBooksPath, "utf8") : undefined,
       perpDex: opts.config.strategy.id === "quotient-swing" ? "xyz" : undefined,
-    });
-    const alerter = buildAlerter(opts, this.log);
+    }), this.metrics);
+    const alerter = buildAlerter(opts, this.log, this.counters);
     if (opts.config.strategy.id === "kalshi-commodities") this.commodityRecordings = new CommodityRecordingStore(`${opts.statePath}.commodities.sqlite`);
     if (opts.config.strategy.id === "quotient-swing") {
       if (!opts.quotientToken) throw new Error("quotient-swing needs a Quotient API key");
@@ -373,6 +394,15 @@ export class BotService {
       region: opts.region,
       deploymentId: opts.deploymentId,
     };
+    if (opts.dashboard?.enabled !== false) {
+      this.sampler = new DashboardSampler({
+        store: this.state,
+        metrics: this.metrics,
+        portfolio: () => this.portfolio(),
+        log: this.log,
+        intervalMs: (opts.dashboard?.sampleMinutes ?? 5) * 60_000,
+      });
+    }
   }
 
   get running(): boolean {
@@ -421,6 +451,7 @@ export class BotService {
         }
       });
       this.active = true;
+      this.sampler?.start();
       // Tick the current slot right away rather than idling to the next
       // boundary. The slot-derived id makes that a no-op when a restart lands
       // inside a slot the engine already completed.
@@ -454,6 +485,7 @@ export class BotService {
   }
 
   private stopTimers(): void {
+    this.sampler?.stop();
     if (this.heartbeatTimer) clearInterval(this.heartbeatTimer);
     if (this.triggerTimer) clearInterval(this.triggerTimer);
     if (this.tickTimer) clearTimeout(this.tickTimer);
@@ -682,6 +714,7 @@ export class BotService {
 
   tick(tickId?: number): Promise<MarketMakeTickResult | import("@quotient-forecasting/cassie-core").TickResult> {
     return this.exclusive(async () => {
+      try {
       const result = this.marketMaker
         ? this.marketMaker instanceof TwoSidedMarketMakeController
           ? await this.marketMaker.tick({ scheduled: true })
@@ -694,6 +727,12 @@ export class BotService {
       }
       if (!this.marketMaker) await this.syncFastLoops();
       return result;
+      } catch (error) {
+        this.counters.tickErrors += 1;
+        throw error;
+      } finally {
+        this.counters.ticks += 1;
+      }
     });
   }
 
@@ -820,6 +859,38 @@ export class BotService {
 
   logs(level?: LogLevel, tail?: number) {
     return this.state.readErrors({ level, tail });
+  }
+
+  // --- dashboard reads -------------------------------------------------------
+
+  signalCheckMinutes(): number | undefined {
+    return this.engine ? configuredSignalPollIntervalMin(this.config) : undefined;
+  }
+
+  samplerStatus(): DashboardSamplerStatus {
+    return this.sampler?.status() ?? { errors: 0, intervalMinutes: 0 };
+  }
+
+  equitySamples(q: { since?: number } = {}) {
+    return this.state.readEquitySamples(q);
+  }
+
+  metricTotals(since: number) {
+    return this.state.readMetricTotals(since);
+  }
+
+  metricHourly(since: number) {
+    return this.state.readMetricHourly(since);
+  }
+
+  hyperliquidSchedulerStats(): HyperliquidInfoSchedulerStats | undefined {
+    return this.config.venue === "hyperliquid" ? hyperliquidInfoSchedulerStatsForScope() : undefined;
+  }
+
+  /** Cached for ten seconds per range so several viewers cost one venue read. */
+  dashboardSnapshot(range: DashboardRange): Promise<DashboardSnapshot> {
+    this.snapshotCache ??= new DashboardSnapshotCache((r) => buildDashboardSnapshot(this, { range: r }));
+    return this.snapshotCache.get(range);
   }
 
   signalCheck() {

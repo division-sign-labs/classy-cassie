@@ -55,6 +55,8 @@ Ctrl-C cancels resting orders before the process exits.
 | `cassie run <bot>` | Run the bot here. |
 | `cassie deploy <bot>` | Run the bot on a droplet. |
 | `cassie status <bot>` | Droplet, service, and engine on one screen. |
+| `cassie dashboard [bot...]` | Positions, equity over time, API calls and failures, errors, in a local browser tab. |
+| `cassie dashboard password <bot>` | Set or rotate the deployed dashboard password. |
 | `cassie logs <bot>` | Recent log lines. `-f` to follow. |
 | `cassie ssh <bot>` | A shell on the droplet. |
 | `cassie destroy <bot>` | Cancel resting orders, delete the droplet. |
@@ -249,13 +251,19 @@ droplet cassie-bot-1 ready at 203.0.113.10 (blr1)
 installing credentials… ok
 starting the runtime.. done
 runtime verified: droplet in blr1 (Bangalore 1)
+installing the dashboard… ok
 Polymarket order placement permitted from IN
 signals credential verified by the droplet (34 published rows)
 loop started: positions every 60s; signals every 5m
 
+Dashboard: https://203.0.113.10:8443
+Certificate fingerprint (self-signed): SHA256:…
+The browser warns once about the self-signed certificate; compare the fingerprint, then continue.
+
 bot-1 is live on cassie-bot-1 in Bangalore 1.
   cassie status bot-1
   cassie logs bot-1
+  cassie dashboard bot-1
   cassie destroy bot-1
 ```
 
@@ -267,14 +275,21 @@ bot idle.
 
 `--region <slug>` picks somewhere else. The default is `blr1`.
 
-Reaching a deployed bot needs no token or open port. The runtime listens on a unix socket,
-the droplet's firewall allows SSH alone, and `cassie` uses a key it generates at
-`~/.cassie/ssh/id_ed25519`. Host keys are pinned on first contact.
+Control of a deployed bot needs no token or open port. The runtime listens on a unix
+socket, and `cassie` uses a key it generates at `~/.cassie/ssh/id_ed25519`. Host keys are
+pinned on first contact. The firewall allows SSH plus the dashboard port (8443 by
+default); `--no-dashboard` closes it.
+
+The dashboard is read-only, password-protected, and served with a self-signed
+certificate; the browser warns once per device. `CASSIE_DASHBOARD_PASSWORD` in the nearest
+`.local.env` or the environment supplies the password without a prompt.
 
 ```sh
 cassie status bot-1
 cassie logs bot-1 --since '1 hour ago'
 cassie logs bot-1 --errors        # the engine's recorded errors, not the journal
+cassie dashboard                  # every bot, locally, no password
+cassie dashboard password bot-1   # rotate the hosted password
 cassie destroy bot-1              # cancels resting orders, then deletes the droplet
 ```
 
@@ -285,8 +300,8 @@ Cassie's local files live under `~/.cassie`, mode 0600:
 | | |
 |---|---|
 | `keys/<bot>.json` | AES-256-GCM, scrypt-derived from your passphrase |
-| `bots/<bot>.json` | Bot configuration. Holds no secret. |
-| `state/<bot>.sqlite` | Tick state and recorded errors from local runs |
+| `bots/<bot>.json` | Bot configuration and the dashboard password hash. Holds no secret. |
+| `state/<bot>.sqlite` | Tick state, recorded errors, and dashboard samples from local runs |
 | `ssh/id_ed25519` | The deploy key |
 | `digitalocean.token` | Your API token |
 

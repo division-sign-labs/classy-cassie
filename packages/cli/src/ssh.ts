@@ -120,6 +120,62 @@ export function sshExec(
   };
 }
 
+/**
+ * The same command, without blocking the event loop. The local dashboard
+ * refreshes several droplets at once; a sync spawn would freeze its server for
+ * every round trip. Never rejects: a spawn failure or timeout is an ExecResult.
+ */
+export function sshExecAsync(
+  target: Target,
+  command: string,
+  stdin?: string,
+  options: { maxBufferBytes?: number; timeoutMs?: number } = {},
+): Promise<ExecResult> {
+  const limit = options.maxBufferBytes ?? 32 * 1024 * 1024;
+  return new Promise((resolve) => {
+    const child = spawn("ssh", [...sshArgs(target), "--", command], {
+      stdio: ["pipe", "pipe", "pipe"],
+      env: restrictedChildEnv(["SSH_"]),
+    });
+    const out: Buffer[] = [];
+    const err: Buffer[] = [];
+    let size = 0;
+    let failure = "";
+    let settled = false;
+    const finish = (code: number | null) => {
+      if (settled) return;
+      settled = true;
+      if (timer) clearTimeout(timer);
+      const stderr = [Buffer.concat(err).toString("utf8"), failure].filter(Boolean).join("\n");
+      resolve({ ok: code === 0 && !failure, code, stdout: Buffer.concat(out).toString("utf8"), stderr });
+    };
+    const timer = options.timeoutMs
+      ? setTimeout(() => {
+          failure = `ssh failed: timed out after ${Math.round(options.timeoutMs! / 1000)}s`;
+          child.kill("SIGKILL");
+        }, options.timeoutMs)
+      : undefined;
+    const collect = (chunks: Buffer[]) => (chunk: Buffer) => {
+      size += chunk.length;
+      if (size > limit) {
+        failure = `ssh failed: output exceeded ${limit} bytes`;
+        child.kill("SIGKILL");
+        return;
+      }
+      chunks.push(chunk);
+    };
+    child.stdout.on("data", collect(out));
+    child.stderr.on("data", collect(err));
+    child.on("error", (error) => {
+      failure = `ssh failed: ${error.message}`;
+      finish(null);
+    });
+    child.on("close", (code) => finish(code));
+    if (stdin !== undefined) child.stdin.end(stdin);
+    else child.stdin.end();
+  });
+}
+
 export function sshExecOrThrow(target: Target, command: string, stdin?: string): string {
   const result = sshExec(target, command, stdin);
   if (!result.ok) {
@@ -151,9 +207,51 @@ export class ControlApiError extends Error {
   constructor(
     message: string,
     readonly body?: unknown,
+    /** HTTP status when curl reported one; a 404 means the runtime predates the route. */
+    readonly status?: number,
   ) {
     super(message);
     this.name = "ControlApiError";
+  }
+}
+
+const STATUS_MARKER = "cassie-http-status=";
+const CONTROL_BUFFER_BYTES = 256 * 1024 * 1024;
+
+/** The curl invocation run on the droplet. The status lands on stderr so the body stays clean. */
+export function controlCurlCommand(botId: string, method: "GET" | "POST", path: string, hasBody: boolean): string {
+  const parts = [
+    "curl", "--silent", "--show-error", "--fail-with-body",
+    "--unix-socket", controlSocketPath(botId),
+    "-X", method,
+    "-H", "'content-type: application/json'",
+    "-w", `'%{stderr}${STATUS_MARKER}%{http_code}\\n'`,
+  ];
+  if (hasBody) parts.push("--data-binary", "@-");
+  parts.push(`'http://localhost${path.startsWith("/") ? path : `/${path}`}'`);
+  return parts.join(" ");
+}
+
+/** Parsed JSON on success; ControlApiError with body and status otherwise. */
+export function parseControlResult(result: ExecResult): unknown {
+  const statusMatch = new RegExp(`${STATUS_MARKER}(\\d{3})`).exec(result.stderr);
+  const status = statusMatch ? Number(statusMatch[1]) : undefined;
+  const stderr = result.stderr.replace(new RegExp(`${STATUS_MARKER}\\d{3}\\n?`, "g"), "").trim();
+  const text = result.stdout.trim();
+  if (!result.ok) {
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(text);
+    } catch {
+      parsed = undefined;
+    }
+    const detail = /ssh failed:/.test(stderr) ? stderr : (text || stderr);
+    throw new ControlApiError(`control API: ${detail.slice(0, 400) || `curl exited ${result.code}`}`, parsed, status);
+  }
+  try {
+    return JSON.parse(text);
+  } catch {
+    return text;
   }
 }
 
@@ -164,32 +262,21 @@ export function controlCall(
   path: string,
   body?: string,
 ): unknown {
-  const socket = controlSocketPath(botId);
-  const parts = [
-    "curl", "--silent", "--show-error", "--fail-with-body",
-    "--unix-socket", socket,
-    "-X", method,
-    "-H", "'content-type: application/json'",
-  ];
-  if (body !== undefined) parts.push("--data-binary", "@-");
-  parts.push(`'http://localhost${path.startsWith("/") ? path : `/${path}`}'`);
-
   // A dry-run or status body over dozens of markets can run to tens of MB.
-  const result = sshExec(target, parts.join(" "), body, { maxBufferBytes: 256 * 1024 * 1024 });
-  const text = result.stdout.trim();
-  if (!result.ok) {
-    let parsed: unknown;
-    try {
-      parsed = JSON.parse(text);
-    } catch {
-      parsed = undefined;
-    }
-    const detail = /ssh failed:/.test(result.stderr) ? result.stderr.trim() : (text || result.stderr.trim());
-    throw new ControlApiError(`control API: ${detail.slice(0, 400) || `curl exited ${result.code}`}`, parsed);
-  }
-  try {
-    return JSON.parse(text);
-  } catch {
-    return text;
-  }
+  return parseControlResult(sshExec(target, controlCurlCommand(botId, method, path, body !== undefined), body, { maxBufferBytes: CONTROL_BUFFER_BYTES }));
+}
+
+export async function controlCallAsync(
+  target: Target,
+  botId: string,
+  method: "GET" | "POST",
+  path: string,
+  body?: string,
+  options: { timeoutMs?: number } = {},
+): Promise<unknown> {
+  const result = await sshExecAsync(target, controlCurlCommand(botId, method, path, body !== undefined), body, {
+    maxBufferBytes: CONTROL_BUFFER_BYTES,
+    timeoutMs: options.timeoutMs ?? 30_000,
+  });
+  return parseControlResult(result);
 }

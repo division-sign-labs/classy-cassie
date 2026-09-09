@@ -117,18 +117,22 @@ describe("createDroplet", () => {
 });
 
 describe("firewall", () => {
-  it("attaches an existing firewall rather than creating a second one", async () => {
+  it("replaces an existing firewall whole, keeping its droplets, rather than creating a second one", async () => {
     const calls: string[] = [];
-    stubFetch((url, init) => {
+    const spy = stubFetch((url, init) => {
       calls.push(`${(init.method ?? "GET").toUpperCase()} ${url}`);
-      if (url.includes("/firewalls?")) return jsonResponse(200, { firewalls: [{ id: "fw-1", name: "cassie-bot-1" }] });
-      return jsonResponse(204, null);
+      if (url.includes("/firewalls?")) return jsonResponse(200, { firewalls: [{ id: "fw-1", name: "cassie-bot-1", droplet_ids: [7] }] });
+      return jsonResponse(200, { firewall: { id: "fw-1" } });
     });
-    await new DigitalOcean("t").upsertFirewall("cassie-bot-1", 42);
-    expect(calls[1]).toBe("POST https://api.digitalocean.com/v2/firewalls/fw-1/droplets");
+    await new DigitalOcean("t").upsertFirewall("cassie-bot-1", 42, { inboundTcpPorts: [22, 8443] });
+    expect(calls[1]).toBe("PUT https://api.digitalocean.com/v2/firewalls/fw-1");
+    const body = JSON.parse((spy.mock.calls[1]![1] as RequestInit).body as string);
+    expect(body.droplet_ids).toEqual([7, 42]);
+    expect(body.inbound_rules.map((r: { ports: string }) => r.ports)).toEqual(["22", "8443"]);
+    expect(body.outbound_rules).toHaveLength(3);
   });
 
-  it("opens ssh inbound and nothing else", async () => {
+  it("opens ssh inbound and nothing else by default", async () => {
     const spy = stubFetch((url, init) => {
       if (url.includes("/firewalls?")) return jsonResponse(200, { firewalls: [] });
       return jsonResponse(202, { firewall: { id: "fw-2" } });
@@ -137,6 +141,16 @@ describe("firewall", () => {
     const body = JSON.parse((spy.mock.calls[1]![1] as RequestInit).body as string);
     expect(body.inbound_rules).toHaveLength(1);
     expect(body.inbound_rules[0]).toMatchObject({ protocol: "tcp", ports: "22" });
+  });
+
+  it("always keeps port 22 and de-duplicates the dashboard port", async () => {
+    const spy = stubFetch((url) => {
+      if (url.includes("/firewalls?")) return jsonResponse(200, { firewalls: [] });
+      return jsonResponse(202, { firewall: { id: "fw-2" } });
+    });
+    await new DigitalOcean("t").upsertFirewall("cassie-bot-1", 42, { inboundTcpPorts: [8443, 8443] });
+    const body = JSON.parse((spy.mock.calls[1]![1] as RequestInit).body as string);
+    expect(body.inbound_rules.map((r: { ports: string }) => r.ports)).toEqual(["22", "8443"]);
   });
 });
 

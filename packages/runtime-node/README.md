@@ -26,6 +26,10 @@ environment file:
 | `CASSIE_REQUIRED_REGION` | the region the bot is pinned to |
 | `QUOTIENT_API_TOKEN` | signals |
 | `TELEGRAM_BOT_TOKEN` | optional |
+| `CASSIE_DASHBOARD_PORT` | serve the read-only HTTPS dashboard on this port; unset means none |
+| `CASSIE_DASHBOARD_AUTH_FILE` | `{"passwordHash": "scrypt$…"}`, re-read when it changes; default `/etc/cassie/<botId>.dashboard.json` |
+| `CASSIE_DASHBOARD_TLS_DIR` | holds `cert.pem` and `key.pem`; default `/etc/cassie/tls` |
+| `CASSIE_DASHBOARD_SAMPLE_MINUTES` | equity and call-counter sampling cadence; default 5 |
 
 On start it asks DigitalOcean's metadata service which region it is in and refuses to run
 anywhere but `CASSIE_REQUIRED_REGION`. Venue access is decided by where orders leave from,

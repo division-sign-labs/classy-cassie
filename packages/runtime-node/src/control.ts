@@ -8,6 +8,8 @@ import { chmodSync, mkdirSync, rmSync } from "node:fs";
 import { dirname } from "node:path";
 import type { LogLevel, ManualOrderParams } from "@quotient-forecasting/cassie-core";
 import type { BotService } from "./service.js";
+import { parseDashboardRange } from "./dashboard/snapshot.js";
+import type { DashboardRange } from "./dashboard/types.js";
 
 function send(response: ServerResponse, data: unknown, status = 200): void {
   const body = JSON.stringify(data, null, 2);
@@ -171,6 +173,17 @@ export async function handle(service: BotService, request: IncomingMessage, resp
         ? { expectedProposalHash: body.expectedProposalHash }
         : {}),
     }));
+    return;
+  }
+  if (method === "GET" && action === "dashboard") {
+    let range: DashboardRange;
+    try {
+      range = parseDashboardRange(url.searchParams.get("range"));
+    } catch (error) {
+      send(response, { error: (error as Error).message }, 400);
+      return;
+    }
+    send(response, await service.dashboardSnapshot(range));
     return;
   }
   if (method === "GET" && action === "logs") {

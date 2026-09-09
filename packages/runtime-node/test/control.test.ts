@@ -40,6 +40,7 @@ function fakeService(over: Partial<Record<string, unknown>> = {}) {
     pause: record("pause"),
     resume: record("resume"),
     logs: record("logs", []),
+    dashboardSnapshot: record("dashboardSnapshot", { schema: 1, history: { range: "7d" } }),
     signalCheck: record("signalCheck", { count: 3 }),
     executionStatus: record("executionStatus", { parents: [], blocked: false }),
     geoblockCheck: record("geoblockCheck", { blocked: false, country: "SG" }),
@@ -128,6 +129,16 @@ describe("serveControl", () => {
   it("exposes execution receipts and removes the retired reporting endpoint", async () => {
     expect((await call(socketPath, "GET", "/execution/status")).json).toEqual({ parents: [], blocked: false });
     expect((await call(socketPath, "GET", "/reporting/check")).status).toBe(404);
+  });
+
+  it("serves the dashboard snapshot for a range and rejects an unknown one", async () => {
+    const ok = await call(socketPath, "GET", "/dashboard?range=7d");
+    expect(ok).toEqual({ status: 200, json: { schema: 1, history: { range: "7d" } } });
+    expect(service.calls.at(-1)).toEqual({ name: "dashboardSnapshot", args: ["7d"] });
+    await call(socketPath, "GET", "/dashboard");
+    expect(service.calls.at(-1)).toEqual({ name: "dashboardSnapshot", args: ["24h"] });
+    const bad = await call(socketPath, "GET", "/dashboard?range=1y");
+    expect(bad.status).toBe(400);
   });
 
   it("accepts the /bots/:botId prefix as well as a bare path", async () => {
