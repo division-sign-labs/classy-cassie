@@ -167,3 +167,11 @@ describe("math", () => {
     expect(ui.barPath(10, 100, 20, 40)).toMatch(/^M10,100V63Q10,60 13,60H27Q30,60 30,63V100Z$/);
   });
 });
+
+describe("botStatus while loading", () => {
+  it("reports loading for a pending entry without a snapshot", async () => {
+    const { botStatus } = await import("../src/dashboard/ui/app.js");
+    expect(botStatus({ id: "a", source: "droplet", pending: true })).toBe("loading");
+    expect(botStatus({ id: "a", source: "droplet", pending: true, snapshot: { bot: { active: true } } })).toBe("running");
+  });
+});

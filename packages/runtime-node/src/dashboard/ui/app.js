@@ -159,6 +159,7 @@ export function dailyStats(points) {
 }
 export function botStatus(entry) {
   if (!entry) return "unreachable";
+  if (entry.pending && !entry.snapshot) return "loading";
   if (entry.source === "offline") return "offline";
   const bot = entry.snapshot?.bot;
   if (!bot) return "unreachable";
@@ -292,7 +293,7 @@ const Api = {
 
 // state
 const state = {
-  view: "loading", session: null, bots: [], refreshSeconds: DEFAULT_REFRESH,
+  view: "loading", session: null, bots: [], loaded: false, refreshSeconds: DEFAULT_REFRESH,
   selectedId: null, tab: "overview", range: "24h", entry: null,
   lastRefreshAt: null, stale: false, netError: null,
   metricsScope: "last24h", metricsSort: { key: "calls", dir: "desc" },
@@ -345,7 +346,9 @@ let timer = null, inflight = null;
 function schedule() {
   clearTimeout(timer);
   if (document.hidden || state.view !== "app") return;
-  timer = setTimeout(() => refresh(), state.refreshSeconds * 1000);
+  // A bot still being read answers within seconds; poll it quickly instead of waiting a full interval.
+  const seconds = state.bots.some((b) => b.pending && !b.snapshot) ? 3 : state.refreshSeconds;
+  timer = setTimeout(() => refresh(), seconds * 1000);
 }
 function pickSelected(bots, wanted) {
   if (wanted && bots.some((b) => b.id === wanted)) return wanted;
@@ -365,7 +368,7 @@ async function refresh(entryOnly = false) {
       const selectedId = bots.some((b) => b.id === state.selectedId) ? state.selectedId : bots[0]?.id ?? null;
       let entry = bots.find((b) => b.id === selectedId) ?? null;
       if (entry && state.range !== "24h") entry = await Api.bot(selectedId, state.range, c.signal);
-      Object.assign(patch, { bots, selectedId, entry, refreshSeconds: Number(list.refreshSeconds) > 0 ? Number(list.refreshSeconds) : DEFAULT_REFRESH });
+      Object.assign(patch, { bots, selectedId, entry, loaded: true, refreshSeconds: Number(list.refreshSeconds) > 0 ? Number(list.refreshSeconds) : DEFAULT_REFRESH });
     }
     if (c !== inflight) return;
     setState(patch);
@@ -386,11 +389,12 @@ function render() {
   renderHeader();
   renderBanners();
   renderTabs();
-  const empty = state.bots.length === 0;
-  byId("empty-bots").hidden = !empty;
-  for (const t of TABS) byId(`panel-${t}`).hidden = empty || t !== state.tab;
-  if (empty) return;
+  const empty = state.loaded && state.bots.length === 0;
   const entry = state.entry;
+  const waiting = !state.loaded || (entry?.pending && !entry.snapshot);
+  byId("empty-bots").hidden = !empty;
+  for (const t of TABS) byId(`panel-${t}`).hidden = empty || waiting || t !== state.tab;
+  if (empty || waiting) return;
   ({ overview: renderOverview, positions: renderPositions, performance: renderPerformance, metrics: renderMetrics, logs: renderLogs })[state.tab](entry);
   for (const el of document.querySelectorAll(".chart")) el.classList.toggle("is-stale", state.stale);
 }
@@ -427,7 +431,8 @@ function renderBanners() {
   const rows = [];
   if (state.netError) rows.push(["Could not refresh. " + state.netError, true]);
   if (e?.source === "offline" && e.snapshot) rows.push([`Offline. Last snapshot ${fmtTime(e.fetchedAt)}.`, false]);
-  if (e?.error && !e.snapshot) rows.push([`${e.id} is unreachable. ${e.error}`, true]);
+  if (e?.pending && !e.snapshot) rows.push([e.source === "droplet" ? "Reading over SSH." : "Reading.", false]);
+  else if (e?.error && !e.snapshot) rows.push([`${e.id} is unreachable. ${e.error}`, true]);
   else if (e?.error) rows.push([`Partial data. ${e.error}`, true]);
   if (e?.degraded) rows.push([`Degraded snapshot. ${e.degradedReason || ""}`, false]);
   if (e?.snapshot?.portfolioError) rows.push([`Portfolio unavailable. ${e.snapshot.portfolioError}`, true]);

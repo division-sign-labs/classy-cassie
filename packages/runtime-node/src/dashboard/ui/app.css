@@ -78,7 +78,7 @@ button {cursor:pointer;}
 .dot.is-running {background:var(--gauge-up);}
 .dot.is-paused {background:var(--gauge-flat);}
 .dot.is-halted,.dot.is-unreachable {background:var(--gauge-down);}
-.dot.is-stopped,.dot.is-offline {background:transparent;border:1px solid var(--mute);}
+.dot.is-stopped,.dot.is-offline,.dot.is-loading {background:transparent;border:1px solid var(--mute);}
 .btn-ghost {background:transparent;border:1px solid var(--line);border-radius:4px;padding:5px 10px;font-size:12px;color:var(--ink2);}
 .btn-ghost:hover {background:var(--hover);color:var(--ink);}
 .btn-fill {background:var(--accent-bright);border:1px solid transparent;border-radius:8px;padding:9px 14px;font-size:12.5px;font-weight:600;color:var(--accent-ink);}

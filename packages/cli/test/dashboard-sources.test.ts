@@ -219,8 +219,13 @@ describe("createDashboardSources", () => {
     t += 31_000;
     await sources.get("a", "7d");
     expect(fetches).toBe(2);
-    const list = await sources.list("24h");
-    expect(list.map((e) => e.id)).toEqual(["a", "b"]);
+    // list answers at once: cached entries as they are, the rest pending with loads started.
+    const first = await sources.list("24h");
+    expect(first.map((e) => e.id)).toEqual(["a", "b"]);
+    expect(first.map((e) => e.pending ?? false)).toEqual([true, true]);
+    await new Promise((r) => setTimeout(r, 5));
+    const second = await sources.list("24h");
+    expect(second.every((e) => e.snapshot && !e.pending)).toBe(true);
     expect(fetches).toBe(4);
     sources.stop();
   });

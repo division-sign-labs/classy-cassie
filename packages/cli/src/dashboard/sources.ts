@@ -248,7 +248,23 @@ export interface DashboardSources extends DashboardBotSource {
   stop(): void;
 }
 
-/** Cached per bot and range; the loop keeps the default range fresh in the background. */
+/** What a bot looks like before its source has answered. */
+export function pendingEntry(id: string, deps: SourceDeps): DashboardBotEntry {
+  try {
+    const cfg = deps.loadConfig(id);
+    if (cfg.deployment) return { id, source: "droplet", host: cfg.deployment.host, pending: true };
+    return { id, source: existsSync(deps.socketPath(cfg.id)) ? "local" : "offline", pending: true };
+  } catch {
+    return { id, source: "offline", pending: true };
+  }
+}
+
+/**
+ * Cached per bot and range; the loop keeps the default range fresh in the
+ * background. `list` answers at once with whatever is cached and starts loads
+ * for the rest, so the page shows every bot before the first SSH round trip
+ * completes; `get` waits for its bot.
+ */
 export function createDashboardSources(
   ids: readonly string[],
   opts: { refreshSeconds: number; concurrency?: number; deps?: SourceDeps; fetch?: typeof fetchBotEntry },
@@ -288,7 +304,13 @@ export function createDashboardSources(
 
   return {
     refreshSeconds: opts.refreshSeconds,
-    list: (range) => mapLimit(ids, concurrency, (id) => Promise.resolve(fresh(id, range) ?? load(id, range))),
+    async list(range) {
+      return ids.map((id) => {
+        const hit = cache.get(id)?.get(range);
+        if (!hit || deps.now() - hit.at >= freshMs) void load(id, range).catch(() => undefined);
+        return hit ? hit.entry : pendingEntry(id, deps);
+      });
+    },
     async get(id, range) {
       if (!ids.includes(id)) return undefined;
       return fresh(id, range) ?? load(id, range);

@@ -114,5 +114,7 @@ export interface DashboardBotEntry {
   error?: string;
   degraded?: boolean;
   degradedReason?: string;
+  /** The source has not answered yet; poll again shortly. */
+  pending?: boolean;
   snapshot?: DashboardSnapshot;
 }
