@@ -14,6 +14,7 @@ import { alertsTest, showOrders, showPortfolio, venueStatus } from "./commands/o
 import { runSsh, showLogs, showStatus } from "./commands/monitor.js";
 import { runTrade } from "./commands/trade.js";
 import { runDeploy } from "./commands/deploy.js";
+import { runDashboard, setDashboardPassword } from "./commands/dashboard.js";
 import { runDestroy } from "./commands/destroy.js";
 import { agentDryRun, agentPersona, agentPrompt, agentStatus } from "./commands/agent.js";
 import { configureSignalsKey } from "./commands/signals-key.js";
@@ -120,6 +121,9 @@ program
   .description("deploy to DigitalOcean")
   .option("--region <slug>", "droplet region (default: blr1)")
   .option("--size <slug>", "droplet size (default: s-1vcpu-1gb)")
+  .option("--dashboard", "serve the password-protected dashboard on the droplet (default)")
+  .option("--no-dashboard", "leave the firewall at SSH only")
+  .option("--dashboard-port <n>", "dashboard port (default: 8443)", parsePort)
   .option("-y, --yes", "skip confirmation")
   .action(wrap(runDeploy));
 
@@ -134,6 +138,18 @@ program
   .command("status <botId>")
   .description("show bot status")
   .action(wrap(showStatus));
+
+const dashboard = program
+  .command("dashboard [botId...]")
+  .description("open a local dashboard: positions, P&L history, API metrics")
+  .option("--port <n>", "local port", parsePort, 4747)
+  .option("--no-open", "print the URL without opening a browser")
+  .option("--refresh <seconds>", "refresh interval", parseSeconds, 30)
+  .action(wrap(runDashboard));
+dashboard
+  .command("password <botId>")
+  .description("set or rotate the deployed dashboard password")
+  .action(wrap(setDashboardPassword));
 
 program
   .command("ssh <botId>")
@@ -341,6 +357,18 @@ const skill = program.command("skill").description("agent operator skill");
 skill.command("install").description("install or refresh the Cassie skill for Codex and Claude Code").action(wrap(installSkill));
 
 if (import.meta.main) program.parseAsync().catch(fail);
+
+function parsePort(raw: string): number {
+  const value = Number(raw);
+  if (!Number.isInteger(value) || value < 1 || value > 65535) throw new InvalidArgumentError("must be a port from 1 to 65535");
+  return value;
+}
+
+function parseSeconds(raw: string): number {
+  const value = Number(raw);
+  if (!Number.isInteger(value) || value < 5) throw new InvalidArgumentError("must be a whole number of seconds, at least 5");
+  return value;
+}
 
 function parseMaxEdgePp(raw: string): string {
   const value = Number(raw);

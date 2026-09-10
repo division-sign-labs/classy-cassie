@@ -5,12 +5,15 @@
 // cancels resting orders before exit.
 
 import { existsSync, readFileSync } from "node:fs";
+import { hostname } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { parseBotConfig, parsePolymarketGaslessAuth, consoleLogger, type RuntimeCreds } from "@quotient-forecasting/cassie-core";
 import { BotService } from "./service.js";
 import { serveControl } from "./control.js";
 import { requireRegion } from "./region.js";
+import { dashboardSampleMinutesFromEnv } from "./dashboard/sampler.js";
+import { fileDashboardAuth, singleBotSource, startDashboardServer } from "./dashboard/server.js";
 
 /** The installed package's own version, so `--version` reports what is running. */
 function version(): string {
@@ -30,6 +33,14 @@ function installedBuildId(): string | undefined {
   const value = JSON.parse(readFileSync(path, "utf8")) as { id?: unknown };
   if (typeof value.id !== "string" || !/^[a-f0-9]{64}$/.test(value.id)) throw new Error("invalid installed workspace build identity");
   return value.id;
+}
+
+/** Unset means no hosted dashboard; anything else must be a port above 1023. */
+export function parseDashboardPort(raw: string | undefined): number | undefined {
+  if (raw === undefined || raw === "") return undefined;
+  const port = Number(raw);
+  if (!Number.isInteger(port) || port < 1024 || port > 65535) throw new Error("CASSIE_DASHBOARD_PORT must be an integer from 1024 to 65535");
+  return port;
 }
 
 function required(name: string): string {
@@ -75,10 +86,23 @@ async function main(): Promise<void> {
     // Required only when the bot runs the agent strategy; buildStrategy throws
     // a targeted error there, so a plain signals bot keeps booting without it.
     surplusApiKey: config.strategy.id === "agent" ? required("SURPLUS_API_KEY") : process.env.SURPLUS_API_KEY,
+    dashboard: { sampleMinutes: dashboardSampleMinutesFromEnv() },
     log,
   });
 
   const server = serveControl(service, process.env.CASSIE_CONTROL_SOCKET ?? `/run/cassie/${botId}.sock`);
+
+  // Read-only HTTPS dashboard behind the operator's password; off unless deploy set a port.
+  const dashboardPort = parseDashboardPort(process.env.CASSIE_DASHBOARD_PORT);
+  const dashboard = dashboardPort === undefined ? undefined : await startDashboardServer({
+    port: dashboardPort,
+    tlsDir: process.env.CASSIE_DASHBOARD_TLS_DIR ?? "/etc/cassie/tls",
+    auth: fileDashboardAuth(process.env.CASSIE_DASHBOARD_AUTH_FILE ?? `/etc/cassie/${botId}.dashboard.json`, log),
+    mode: "hosted",
+    bot: { id: botId, venue: config.venue, strategy: config.strategy.id },
+    bots: singleBotSource(service, hostname()),
+    log,
+  });
 
   // Deployment holds startup until region, venue and signal checks pass.
   // Durable pause/activation state still governs later process restarts.
@@ -100,6 +124,7 @@ async function main(): Promise<void> {
         return;
       }
     }
+    await dashboard?.close().catch(() => undefined);
     server.close(() => process.exit(0));
     setTimeout(() => process.exit(1), 30_000).unref();
   };

@@ -164,31 +164,36 @@ export class DigitalOcean {
     return this.call(`/droplets/${id}`, { method: "DELETE" });
   }
 
-  /** SSH in, everything out. The bot needs no inbound port of its own. */
-  async upsertFirewall(name: string, dropletId: number): Promise<void> {
-    const { firewalls } = await this.call<{ firewalls: Array<{ id: string; name: string }> }>("/firewalls?per_page=200");
+  /**
+   * SSH in, plus the dashboard port when one is given; everything out. Port 22
+   * is always kept so a caller cannot lock the operator out. An existing
+   * firewall is replaced whole (PUT resets omitted fields), droplets included.
+   */
+  async upsertFirewall(name: string, dropletId: number, opts: { inboundTcpPorts?: number[] } = {}): Promise<void> {
+    const ports = [...new Set([22, ...(opts.inboundTcpPorts ?? [])])].sort((a, b) => a - b);
+    const inbound_rules = ports.map((port) => ({ protocol: "tcp", ports: String(port), sources: { addresses: ["0.0.0.0/0", "::/0"] } }));
+    const outbound_rules = [
+      { protocol: "tcp", ports: "all", destinations: { addresses: ["0.0.0.0/0", "::/0"] } },
+      { protocol: "udp", ports: "all", destinations: { addresses: ["0.0.0.0/0", "::/0"] } },
+      { protocol: "icmp", destinations: { addresses: ["0.0.0.0/0", "::/0"] } },
+    ];
+    const { firewalls } = await this.call<{ firewalls: Array<{ id: string; name: string; droplet_ids?: number[] }> }>("/firewalls?per_page=200");
     const existing = firewalls.find((f) => f.name === name);
     if (existing) {
-      await this.call(`/firewalls/${existing.id}/droplets`, {
-        method: "POST",
-        body: JSON.stringify({ droplet_ids: [dropletId] }),
+      await this.call(`/firewalls/${existing.id}`, {
+        method: "PUT",
+        body: JSON.stringify({
+          name,
+          droplet_ids: [...new Set([...(existing.droplet_ids ?? []), dropletId])],
+          inbound_rules,
+          outbound_rules,
+        }),
       });
       return;
     }
     await this.call("/firewalls", {
       method: "POST",
-      body: JSON.stringify({
-        name,
-        droplet_ids: [dropletId],
-        inbound_rules: [
-          { protocol: "tcp", ports: "22", sources: { addresses: ["0.0.0.0/0", "::/0"] } },
-        ],
-        outbound_rules: [
-          { protocol: "tcp", ports: "all", destinations: { addresses: ["0.0.0.0/0", "::/0"] } },
-          { protocol: "udp", ports: "all", destinations: { addresses: ["0.0.0.0/0", "::/0"] } },
-          { protocol: "icmp", destinations: { addresses: ["0.0.0.0/0", "::/0"] } },
-        ],
-      }),
+      body: JSON.stringify({ name, droplet_ids: [dropletId], inbound_rules, outbound_rules }),
     });
   }
 

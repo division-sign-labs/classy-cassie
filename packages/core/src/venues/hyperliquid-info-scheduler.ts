@@ -271,6 +271,11 @@ export function wrapHyperliquidInfoClient(info: InfoClient, options: Hyperliquid
   return proxy;
 }
 
+/** Stats for a shared scheduler scope; the adapter's InfoClient is private, so this is the dashboard's read. */
+export function hyperliquidInfoSchedulerStatsForScope(scope = "process-default"): HyperliquidInfoSchedulerStats | undefined {
+  return shared.get(scope)?.stats();
+}
+
 export function hyperliquidInfoSchedulerStats(info: InfoClient): HyperliquidInfoSchedulerStats | undefined {
   return schedulers.get(info)?.stats();
 }

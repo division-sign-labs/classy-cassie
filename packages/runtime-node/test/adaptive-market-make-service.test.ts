@@ -102,8 +102,11 @@ describe("adaptive market-make BotService wiring", () => {
     const [dependencies, options] = calls.controller.mock.calls[0]!;
     expect(dependencies).toMatchObject({
       config: { strategy_id: "quotient-adaptive-liquidity-v1", schema_version: "polymarket-adaptive-mm/1", two_sided: { adaptive: config.two_sided!.adaptive } },
-      venue, account, botId: "adaptive-service", quotient: expect.any(Object),
+      venue: expect.any(Object), account, botId: "adaptive-service", quotient: expect.any(Object),
     });
+    // The venue arrives wrapped for call counting; calls still reach the adapter.
+    await dependencies.venue.openOrders(account);
+    expect(venue.openOrders).toHaveBeenCalledOnce();
     expect(marketMakeConfigHash(dependencies.config)).not.toBe(marketMakeConfigHash(createTwoSidedMarketMakeConfig()));
     expect(options).toMatchObject({ deploymentId: "adaptive-test-deployment", autoSchedule: false, enableSubscriptions: true });
     expect(bot.status().marketMake).toEqual({ mode: "q-adaptive", halted: true });
@@ -127,7 +130,7 @@ describe("adaptive market-make BotService wiring", () => {
     try {
       expect(database.prepare("SELECT value FROM kv WHERE key = ?").get("adaptive-checkpoint")).toEqual({ value: '{"forecasts":{}}' });
       expect(database.prepare("SELECT name FROM sqlite_master WHERE type = 'table' ORDER BY name").all()).toEqual([
-        { name: "errors" }, { name: "kv" }, { name: "sqlite_sequence" },
+        { name: "equity_samples" }, { name: "errors" }, { name: "kv" }, { name: "metrics_samples" }, { name: "sqlite_sequence" },
       ]);
     } finally { database.close(); }
     expect(readdirSync(directory).filter((name) => name.endsWith(".sqlite"))).toEqual(["bot.sqlite"]);

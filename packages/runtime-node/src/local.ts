@@ -9,6 +9,7 @@ import { chmodSync, closeSync, fstatSync, mkdirSync, openSync, readFileSync, sta
 import { createServer, type Server } from "node:http";
 import { dirname, resolve } from "node:path";
 import { BotService } from "./service.js";
+import { dashboardSampleMinutesFromEnv } from "./dashboard/sampler.js";
 import type { PolymarketGaslessAuth } from "@quotient-forecasting/cassie-core";
 import { handle } from "./control.js";
 
@@ -30,10 +31,12 @@ export interface LocalRunOpts {
   controlSocket?: string;
   /** Test hook: run at most N ticks then return. */
   maxTicks?: number;
+  /** Equity/metrics sampling for the dashboard; defaults from CASSIE_DASHBOARD_SAMPLE_MINUTES. */
+  dashboard?: { sampleMinutes?: number; enabled?: boolean };
 }
 
 export function buildLocalService(opts: LocalRunOpts): BotService {
-  return new BotService({ ...opts, runtime: "local" });
+  return new BotService({ ...opts, runtime: "local", dashboard: opts.dashboard ?? { sampleMinutes: dashboardSampleMinutesFromEnv() } });
 }
 
 /** Cooperating local launches serialize before opening the bot's persistent state. */

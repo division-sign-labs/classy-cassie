@@ -88,11 +88,18 @@ Credentials reach the droplet over SSH on stdin and land in `/etc/cassie/<botId>
 mode 0600, owned by the service user. Droplet user-data carries none, since the metadata
 service serves it to anything running on the box.
 
-Reaching a deployed bot needs no token and no open port. The runtime listens on a unix
+Control of a deployed bot needs no token and no open port. The runtime listens on a unix
 socket at `/run/cassie/<botId>.sock`; `cassie status`, `cassie logs`, `cassie ssh`,
 `cassie portfolio`, and `cassie trade` all go over SSH with a key generated at
 `~/.cassie/ssh/id_ed25519`. Host keys are pinned to `~/.cassie/ssh/known_hosts` on first
 contact, and every later connection runs with `StrictHostKeyChecking=yes`.
+
+The one open port is the dashboard. Deploy asks for a dashboard password (or reads
+`CASSIE_DASHBOARD_PASSWORD`), keeps only its scrypt hash, and serves a read-only HTTPS
+dashboard on port 8443 behind a self-signed certificate whose SHA-256 fingerprint deploy
+prints. `--no-dashboard` keeps the firewall at SSH only, `--dashboard-port <n>` picks
+another port, and `cassie dashboard password <botId>` rotates the password without a
+redeploy.
 
 Those deployed control commands need only the SSH key. Commands that decrypt local
 credentials, including deploy, local run, funding, and withdrawal, read the per-bot
@@ -102,12 +109,27 @@ override for headless environments.
 `cassie destroy <botId>` cancels resting orders, stops the service, and deletes the
 droplet. Keys and venue balances are untouched.
 
+## Dashboard
+
+```sh
+cassie dashboard            # every bot on this machine, in the browser
+cassie dashboard purps-1    # one bot
+```
+
+`cassie dashboard` serves `http://127.0.0.1:4747` with tabs for positions and orders,
+equity over 24h, 7d, 30d, or all time, API calls and failures by venue and host, and the
+engine's recorded errors. A deployed bot is read over SSH, a bot running in another
+terminal over its socket, and a stopped bot from its SQLite file. Every runtime samples
+equity and flushes call counters to SQLite every five minutes
+(`CASSIE_DASHBOARD_SAMPLE_MINUTES`). A droplet on a runtime older than the dashboard
+shows current state only and says so; redeploy to start recording.
+
 ## Layout
 
 | path                   | what                                                                 |
 |------------------------|----------------------------------------------------------------------|
 | `packages/core`        | venue adapters, wallet/keystore, strategy engine, risk module, signal client, alerts, thesis sizing |
-| `packages/cli`         | the `cassie` binary: wizard, wallet, fund, run, deploy, status, logs, portfolio, trade, orders, ticket |
+| `packages/cli`         | the `cassie` binary: wizard, wallet, fund, run, deploy, status, logs, dashboard, portfolio, trade, orders, ticket |
 | `packages/runtime-node` | the bot process: engine loop, SQLite state, unix-socket control API. Same code for `cassie run` and a droplet |
 | `strategies/flip-flat` | the `signals` strategy: follow Quotient signals; prediction positions exit on convergence or the seven-day maximum hold |
 | `skills/cassie`        | agent-facing operator manual ([SKILL.md](skills/cassie/SKILL.md)) + thesis policy (`thesis/mappings.json`) |
