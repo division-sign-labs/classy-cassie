@@ -248,7 +248,6 @@ export class Engine {
     let actionsCount = 0;
     let ordersPlaced = 0;
     let errors = 0;
-    let predictionReconciliationFailed = false;
     let redemptionWork = Promise.resolve(0);
 
     try {
@@ -256,10 +255,8 @@ export class Engine {
         await this.perps.reconcile();
       } else {
       if (this.predictions) await this.supervisePredictions().catch(async (err) => {
-        // Execution retains its halt/reservations on read failures. Resolved
-        // positions in other markets still need their independent redemption.
+        // Execution keeps its reservations on read failures; each market resolves on its own.
         errors += 1;
-        predictionReconciliationFailed = true;
         await this.recordError(seq, "prediction-reconcile", err);
       });
       await this.reconcileFills(seq).catch(async (err) => {
@@ -314,13 +311,11 @@ export class Engine {
           this.predictionExitsEvaluatedAt = this.now();
           await this.supervisePredictions().catch(async (err) => {
             errors += 1;
-            predictionReconciliationFailed = true;
             await this.recordError(seq, "prediction-reconcile", err);
           });
         }
         actionsCount += actions.length;
         for (const action of actions) {
-          if (predictionReconciliationFailed && action.kind !== "redeem" && action.kind !== "cancel") continue;
           try {
             const result = await this.executeAction(action, ctx);
             if (result.placed) ordersPlaced += 1;
@@ -514,7 +509,7 @@ export class Engine {
         }
         const working = ctx.openOrders.filter(order => order.marketRef === pos.marketRef);
         const managed = ctx.execution?.parents.some(parent => parent.marketRef === pos.marketRef &&
-          ["active", "canceling", "blocked"].includes(parent.status));
+          ["active", "canceling"].includes(parent.status));
         if (working.length || managed) {
           if (this.predictions) await this.predictions.cancelMarket(pos.marketRef, "market resolved; cancel before redemption");
           else for (const order of working) await adapter.cancelOrder(account, order.id);
@@ -551,13 +546,13 @@ export class Engine {
   }
 
   private async quoteFor(marketRef: string, outcome?: "YES" | "NO") {
-    if (this.predictions && outcome && this.d.adapter.executionMarket) {
-      const { book, quote } = await this.d.adapter.executionMarket(marketRef, outcome);
-      return { book, quote };
+    if (outcome && this.d.adapter.executionMarket) {
+      const { book, quote, minOrderSize } = await this.d.adapter.executionMarket(marketRef, outcome);
+      return { book, quote, minOrderSize };
     }
     const [book, quote] = await Promise.all([this.d.adapter.book(marketRef), this.d.adapter.quote(marketRef)]);
-    if (outcome === "NO") return { book: mirrorBookForNo(book), quote: mirrorQuoteForNo(quote) };
-    return { book, quote };
+    if (outcome === "NO") return { book: mirrorBookForNo(book), quote: mirrorQuoteForNo(quote), minOrderSize: undefined };
+    return { book, quote, minOrderSize: undefined };
   }
 
   private async placeChecked(p: {
@@ -580,7 +575,7 @@ export class Engine {
     provenance?: Record<string, unknown>;
   }): Promise<StrategyActionResult> {
     const { adapter, account, config, botId } = this.d;
-    const { book, quote } = await this.quoteFor(p.marketRef, p.outcome);
+    const { book, quote, minOrderSize } = await this.quoteFor(p.marketRef, p.outcome);
     const refPrice = p.limitPrice ?? quote.mid;
     const desiredSize = p.desiredSize ?? (p.desiredNotional ?? 0) / refPrice;
     const enforceMinimumNotional = p.enforceMinimumNotional ?? true;
@@ -609,12 +604,24 @@ export class Engine {
       p.side === "BUY" && p.desiredNotional !== undefined
         ? Math.min(p.desiredNotional, risk.maxOrderNotional)
         : undefined;
-    const size =
+    const cappedSize =
       entrySpendCeiling !== undefined
         ? floorSizeToNotionalCap(cap.size, limitPrice, entrySpendCeiling, 6)
         : round(cap.size, 6);
+    // Reservations must match the quantity the venue will sign. Flooring may
+    // also put a small top-up below the venue's share minimum.
+    const size = adapter.normalizeOrderSize?.(cappedSize) ?? cappedSize;
     const placedNotional = size * limitPrice;
     const effectiveMinimumNotional = Math.max(risk.minViableNotional, p.minimumNotional ?? 0);
+    if (p.side === "BUY" && enforceMinimumNotional && minOrderSize !== undefined &&
+      (!Number.isFinite(minOrderSize) || minOrderSize <= 0 || size + 1e-9 < minOrderSize)) {
+      await this.alert({
+        kind: "skipped-order",
+        botId,
+        message: `skipped BUY ${shortRef(p.marketRef)}: size ${size} is below venue minimum ${minOrderSize}`,
+      });
+      return { placed: false };
+    }
     if (
       entrySpendCeiling !== undefined &&
       (size <= 0 || placedNotional < effectiveMinimumNotional)
@@ -849,10 +856,10 @@ export class Engine {
       const outcome = t.outcome ?? (isPrediction ? t.posSide as "YES" | "NO" : undefined);
       let pos = positions.find((p) => p.marketRef === t.marketRef && (!outcome || (p.outcome ?? p.side) === outcome));
       const parents = execution?.parents.filter(parent => parent.marketRef === t.marketRef && parent.outcome === outcome) ?? [];
-      const unresolved = parents.some(parent => ["active", "canceling", "blocked"].includes(parent.status));
-      const entry = parents.filter(parent => parent.side === "BUY" && (parent.filledSize > 0 || ["active", "canceling", "blocked"].includes(parent.status)))
+      const unresolved = parents.some(parent => ["active", "canceling"].includes(parent.status));
+      const entry = parents.filter(parent => parent.side === "BUY" && (parent.filledSize > 0 || ["active", "canceling"].includes(parent.status)))
         .sort((a, b) => b.admittedAt - a.admittedAt)[0];
-      const tracked = entry ?? parents.find(parent => ["active", "canceling", "blocked"].includes(parent.status));
+      const tracked = entry ?? parents.find(parent => ["active", "canceling"].includes(parent.status));
       if (this.predictions && isPrediction && (tracked || pos?.tokenId)) {
         const tokenId = tracked?.tokenId ?? pos!.tokenId!;
         try {
@@ -1027,8 +1034,7 @@ export class Engine {
 
   async supervisePerps(): Promise<void> { await this.perps?.reconcile(); }
   async perpStatus() { return this.perps?.status(); }
-  async haltPerps(reason?: string): Promise<void> { await this.perps?.halt(reason); }
-  async startPerps(): Promise<void> { await this.perps?.start(); }
+  async haltPerps(): Promise<void> { await this.perps?.halt(); }
   async resumePerps(acknowledgeLossReset = false): Promise<void> { await this.perps?.resume(acknowledgeLossReset); }
 
   // -------------------------------------------------------------------------

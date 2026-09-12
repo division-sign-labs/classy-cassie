@@ -237,14 +237,19 @@ describe("Kalshi commodity strategy and durable Engine", () => {
     expect(h.venue.placements).toHaveLength(1);
   });
 
-  it("latches ambiguous accepted submissions and will not duplicate after restart", async () => {
+  it("adopts an ambiguous accepted submission from the venue and will not duplicate after restart", async () => {
     const h = harness({ style: "adaptive" }); h.venue.loseAck = true;
     await h.engine.tick();
-    expect((await h.engine.predictionStatus())!.blocked).toBe(true);
+    const status = (await h.engine.predictionStatus())!;
+    expect(status.blocked).toBe(false);
+    expect(status.reconcilingMarkets).toHaveLength(1);
     h.venue.loseAck = false;
     const restarted = h.createEngine(); await restarted.recoverPredictions();
     h.clock.now += 30_000; await restarted.tick();
     expect(h.venue.placements).toHaveLength(1);
-    expect((await restarted.predictionStatus())!.blocked).toBe(true);
+    const after = (await restarted.predictionStatus())!;
+    expect(after.blocked).toBe(false);
+    expect(after.reconcilingMarkets).toBeUndefined();
+    expect(after.parents[0]!.childOrderIds).toHaveLength(1);
   });
 });

@@ -603,6 +603,11 @@ export interface PredictionCancellationResult {
   notOpen?: boolean;
 }
 
+export interface TokenBalanceOptions {
+  /** Force a venue-side chain refresh before reading; throws a transient error if the refresh budget denies it. */
+  refresh?: boolean;
+}
+
 export interface VenueAdapter {
   executionMarket?(marketRef: string, outcome: "YES" | "NO"): Promise<PredictionExecutionMarket>;
   executionOrder?(acct: VenueAccount, orderId: string): Promise<PredictionOrderState | null>;
@@ -650,8 +655,14 @@ export interface VenueAdapter {
   candles?(marketRef: string, interval: CandleInterval, lookback: number): Promise<Candle[]>;
   /** Exact outcome-token book; avoids manufacturing NO from YES. */
   tokenBook?(tokenId: string): Promise<OrderBook>;
-  /** Authenticated total token shares; callers subtract their outstanding SELL reservations. */
-  tokenBalance?(acct: VenueAccount, tokenId: string): Promise<number>;
+  /**
+   * Authenticated total token shares; callers subtract their outstanding SELL reservations.
+   * `refresh: true` forces a venue-side chain re-sync and throws a transient error when the
+   * venue's update budget denies it; opportunistic readers accept a recently synced value.
+   */
+  tokenBalance?(acct: VenueAccount, tokenId: string, opts?: TokenBalanceOptions): Promise<number>;
+  /** A confirmed fill changed this token's inventory; the next read re-syncs it. */
+  invalidateTokenBalance?(tokenId: string): void;
   /** Venue-native realtime feeds. Payload normalization belongs to the runtime adapter. */
   subscribeMarketData?(tokenIds: string[]): Promise<RealtimeSubscription>;
   subscribeUserData?(): Promise<RealtimeSubscription>;

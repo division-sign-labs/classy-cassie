@@ -1,7 +1,7 @@
 // packages/core/test/prediction-execution.test.ts
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { PredictionExecutor, PREDICTION_EXECUTION_KEY, assertPredictionExecutionSettled } from "../src/engine/prediction-execution.js";
-import { BotConfigSchema } from "../src/config.js";
+import { BotConfigSchema, PredictionExecutionConfigSchema } from "../src/config.js";
 import { MemoryStateStore } from "../src/state.js";
 import type { Action, Fill, Order, OrderIntent, OrderLifecycleHooks, Position, PredictionExecutionMarket, PredictionOrderState, Signal, VenueAccount, VenueAdapter } from "../src/types.js";
 
@@ -10,8 +10,8 @@ const ACCOUNT = { venue: "polymarket", funder: "wallet" } as VenueAccount;
 const enter = (overrides: Partial<Extract<Action, { kind: "enter" }>> = {}): Extract<Action, { kind: "enter" }> => ({ kind: "enter", marketRef: "yes", side: "YES", notional: 60,
   provenance: { qHeld: .76, signalId: "signal-1", signalTs: new Date(NOW).toISOString() }, ...overrides });
 
-function harness(strategy: Record<string, unknown> = {}) {
-  let now = NOW, sequence = 0, bid = .5, ask = .6, cash = 10_000, volume = 100_000, stale = false, cancelRefused = false, missingStatus = false, lostAck = false, rejectOnce = false;
+function harness(strategy: Record<string, unknown> = {}, execution?: Record<string, unknown>) {
+  let now = NOW, sequence = 0, bid = .5, ask = .6, askDepth = 10000, cash = 10_000, volume = 100_000, stale = false, cancelRefused = false, missingStatus = false, lostAck = false, rejectOnce = false;
   const tokenHoldings = new Map<string, number>();
   const orders = new Map<string, Order>();
   const history = new Map<string, PredictionOrderState>();
@@ -20,7 +20,7 @@ function harness(strategy: Record<string, unknown> = {}) {
   const submissions: OrderIntent[] = [];
   const trace: string[] = [];
   const state = new MemoryStateStore();
-  const config = BotConfigSchema.parse({ id: "limits", venue: "polymarket", strategy: { id: "signals", config: { allocationMode: "portfolio-kelly", ...strategy } } });
+  const config = BotConfigSchema.parse({ id: "limits", venue: "polymarket", strategy: { id: "signals", config: { allocationMode: "portfolio-kelly", ...strategy } }, ...(execution ? { execution } : {}) });
   const log = { debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() };
   const alerter = { send: vi.fn(async () => {}) };
   const signal = (side: "YES" | "NO" = "YES"): Signal => ({ id: "signal-1", marketRef: "yes", venue: "polymarket", side, prob: .76, refPrice: .55, ts: new Date(NOW).toISOString(), ttlSec: 10800 });
@@ -28,7 +28,7 @@ function harness(strategy: Record<string, unknown> = {}) {
   const market = (_ref: string, outcome: "YES" | "NO"): PredictionExecutionMarket => {
     const token = outcome === "YES" ? "yes" : "no";
     // The book contains our own live orders in addition to external liquidity.
-    const bids = [{ price: bid, size: 10000 }], asks = [{ price: ask, size: 10000 }];
+    const bids = [{ price: bid, size: 10000 }], asks = [{ price: ask, size: askDepth }];
     for (const order of orders.values()) {
       if (order.tokenId !== token) continue;
       const levels = order.side === "BUY" ? bids : asks;
@@ -71,39 +71,49 @@ function harness(strategy: Record<string, unknown> = {}) {
       if (rejectOnce) { rejectOnce = false; throw Object.assign(new Error("post-only would cross"), { submissionRejected: true }); }
       const id = `order-${++sequence}`;
       submissions.push(structuredClone(intent)); trace.push(`place:${id}`);
-      history.set(id, { orderId: id, status: intent.tif === "FAK" ? "canceled" : "open", size: intent.size, matchedSize: 0, observedAt: now });
-      if (intent.tif !== "FAK") orders.set(id, { id, clientId: intent.clientId, marketRef: intent.marketRef, tokenId: intent.tokenId, conditionId: intent.conditionId, outcome: intent.outcome,
-        side: intent.side, size: intent.size, filledSize: 0, price: intent.limitPrice, status: "open", createdAt: now });
+      // A marketable limit takes the external ask depth immediately as a taker; any remainder rests.
+      const take = intent.tif === "GTC" && !intent.postOnly && intent.side === "BUY" && intent.limitPrice + 1e-8 >= ask ? Math.min(intent.size, askDepth) : 0;
+      history.set(id, { orderId: id, status: intent.tif === "FAK" ? "canceled" : take + 1e-8 >= intent.size ? "matched" : "open", size: intent.size, matchedSize: take, observedAt: now });
+      if (intent.tif !== "FAK" && take + 1e-8 < intent.size) orders.set(id, { id, clientId: intent.clientId, marketRef: intent.marketRef, tokenId: intent.tokenId, conditionId: intent.conditionId, outcome: intent.outcome,
+        side: intent.side, size: intent.size, filledSize: take, price: intent.limitPrice, status: take > 0 ? "partial" : "open", createdAt: now });
+      if (take > 0) {
+        fills.push({ id: `taker-${id}`, orderId: id, marketRef: intent.marketRef, tokenId: intent.tokenId, conditionId: intent.conditionId, outcome: intent.outcome,
+          side: intent.side, size: take, matchedAmountDelta: take, price: ask, ts: now, fee: 0, settlementStatus: "CONFIRMED" });
+        confirmed.add(`taker-${id}:${id}`);
+        tokenHoldings.set(intent.tokenId!, (tokenHoldings.get(intent.tokenId!) ?? 0) + take);
+        cash -= take * ask;
+      }
       if (lostAck) throw new Error("POST timed out after venue accepted order");
-      return { orderId: id, status: "open" as const, clientId: intent.clientId };
+      return { orderId: id, status: take + 1e-8 >= intent.size ? "filled" as const : take > 0 ? "partial" as const : "open" as const, clientId: intent.clientId, ...(take > 0 ? { filledSize: take } : {}) };
     }),
   };
   const deps = { botId: "limits", adapter: adapter as unknown as VenueAdapter, account: ACCOUNT, state, config, log, alerter, now: () => now };
   let executor = new PredictionExecutor(deps);
   async function ready(side: "YES" | "NO" = "YES") { await executor.supervise({ signals: [signal(side)], refreshedAt: now }); }
-  function fill(orderId: string, quantity: number, status: NonNullable<Fill["settlementStatus"]> = "CONFIRMED", id = `trade-${fills.length}`) {
+  function fill(orderId: string, quantity: number, status: NonNullable<Fill["settlementStatus"]> = "CONFIRMED", id = `trade-${fills.length}`, price?: number) {
     const order = orders.get(orderId);
     const submissionIndex = Number(orderId.split("-")[1]) - 1;
     const intent = submissions[submissionIndex]!;
+    const fillPrice = price ?? intent.limitPrice;
     const previous = fills.find(f => f.id === id && f.orderId === orderId);
     if (previous) previous.settlementStatus = status;
     else {
       fills.push({ id, orderId, makerOrderId: intent.postOnly ? orderId : undefined, marketRef: intent.marketRef, tokenId: intent.tokenId,
-        conditionId: intent.conditionId, outcome: intent.outcome, side: intent.side, size: quantity, matchedAmountDelta: quantity, price: intent.limitPrice, ts: now, fee: 0, settlementStatus: status });
+        conditionId: intent.conditionId, outcome: intent.outcome, side: intent.side, size: quantity, matchedAmountDelta: quantity, price: fillPrice, ts: now, fee: 0, settlementStatus: status });
       history.get(orderId)!.matchedSize += quantity;
       if (order) order.filledSize += quantity;
     }
     if (status === "CONFIRMED" && !confirmed.has(`${id}:${orderId}`)) {
       confirmed.add(`${id}:${orderId}`);
       tokenHoldings.set(intent.tokenId!, (tokenHoldings.get(intent.tokenId!) ?? 0) + (intent.side === "BUY" ? quantity : -quantity));
-      cash += (intent.side === "BUY" ? -1 : 1) * quantity * intent.limitPrice;
+      cash += (intent.side === "BUY" ? -1 : 1) * quantity * fillPrice;
     }
     if (history.get(orderId)!.matchedSize >= intent.size) { history.get(orderId)!.status = "matched"; orders.delete(orderId); }
   }
   return { adapter, state, submissions, orders, history, fills, trace, config, log, alerter, positions, ready, fill, market,
     get executor() { return executor; }, now: () => now, advance: (ms: number) => { now += ms; },
     restart: () => { executor = new PredictionExecutor(deps); return executor; },
-    setBook: (nextBid: number, nextAsk: number) => { bid = nextBid; ask = nextAsk; },
+    setBook: (nextBid: number, nextAsk: number, depth = 10000) => { bid = nextBid; ask = nextAsk; askDepth = depth; },
     setHeld: (qty: number, token = "yes") => { tokenHoldings.set(token, qty); },
     setCash: (value: number) => { cash = value; }, setVolume: (value: number) => { volume = value; },
     stale: () => { stale = true; }, refuseCancel: () => { cancelRefused = true; }, allowCancel: () => { cancelRefused = false; },
@@ -172,21 +182,38 @@ describe("adaptive prediction execution", () => {
     await h.executor.admit({ kind: "exit", marketRef: "other", urgent: true }, [position]);
     expect(h.submissions.at(-1)).toMatchObject({ marketRef: "other", side: "SELL" });
     expect((await h.executor.snapshot()).blocked).toBe(false);
-    expect(h.adapter.cancelAll).toHaveBeenCalledOnce();
+    expect(h.adapter.cancelAll).not.toHaveBeenCalled();
   });
 
-  it("automatically recovers a temporary heartbeat outage but preserves an operator pause", async () => {
+  it("keeps resting orders and admits other markets through a heartbeat outage; only an operator pause blocks", async () => {
     const h = harness(); await h.ready(); await h.executor.admit(enter(), []);
     h.adapter.heartbeat.mockRejectedValueOnce(new Error("temporary outage"));
     await expect(h.executor.heartbeat()).rejects.toThrow();
-    await h.settleCancel();
+    expect(h.adapter.cancelAll).not.toHaveBeenCalled();
+    expect(h.orders.size).toBe(1);
+    expect(h.log.warn).toHaveBeenCalledWith("prediction heartbeat failed; resting orders expire on the venue if renewals keep failing", expect.anything());
+    h.advance(5000); await h.executor.supervise();
     expect((await h.executor.snapshot()).blocked).toBe(false);
-    h.advance(300_000); await h.ready(); await h.executor.admit(enter(), []);
+    expect((await h.executor.snapshot()).parents[0]!.status).toBe("active");
+    const original = h.adapter.executionMarket.getMockImplementation()!;
+    h.adapter.executionMarket.mockImplementation(async (ref, side) => {
+      const market = await original(ref, side);
+      const book = { ...market.book, marketRef: ref, bids: [{ price: .5, size: 10000 }], asks: [{ price: .6, size: 10000 }] };
+      return ref === "other" ? { ...market, marketRef: ref, tokenId: "other", conditionId: "other-condition", book } : market;
+    });
+    const both: Signal[] = ["yes", "other"].map(ref => ({ id: `signal-${ref}`, marketRef: ref, venue: "polymarket", side: "YES", prob: .76, refPrice: .55, ts: new Date(NOW).toISOString(), ttlSec: 10800 }));
+    await h.executor.supervise({ signals: both, refreshedAt: h.now() });
+    // Until a renewal succeeds, new entries wait; the next successful heartbeat releases them.
+    expect(await h.executor.admit(enter({ marketRef: "other" }), [])).toEqual({ placed: false });
+    expect(h.log.warn).toHaveBeenLastCalledWith("enter refused for other: venue heartbeat failing");
+    expect(await h.executor.heartbeat()).toBe(true);
+    expect(await h.executor.admit(enter({ marketRef: "other" }), [])).toHaveProperty("executionId");
     expect(h.submissions).toHaveLength(2);
-    h.adapter.heartbeat.mockRejectedValueOnce(new Error("temporary outage"));
-    await expect(h.executor.heartbeat()).rejects.toThrow();
     await h.executor.supervise({ paused: true }); await h.settleCancel();
     expect((await h.executor.snapshot()).blocked).toBe(true);
+    expect((await h.executor.snapshot()).haltReason).toBe("operator pause");
+    expect(await h.executor.admit(enter(), [])).toEqual({ placed: false });
+    expect(h.log.warn).toHaveBeenCalledWith("enter refused for yes: execution paused");
   });
 
   it("reconciles a canceled order whose detail is missing only after the late-fill window, including restart", async () => {
@@ -220,36 +247,37 @@ describe("adaptive prediction execution", () => {
   it("reserves before signing, preserves queue position, and replaces only after two terminal observations", async () => {
     const h = harness(); await h.ready();
     expect(await h.executor.admit(enter(), [])).toMatchObject({ placed: false, executionId: expect.any(String) });
-    expect(h.submissions[0]).toMatchObject({ size: 100, limitPrice: .51, postOnly: true, tif: "GTC" });
+    expect(h.submissions[0]).toMatchObject({ size: 100, limitPrice: .59, postOnly: true, tif: "GTC" });
     h.advance(10000); await h.executor.supervise();
     expect(h.submissions).toHaveLength(1);
-    h.advance(20000); await h.executor.supervise();
+    // The order rests one tick inside the ask; only a moved ask re-quotes it, and only after the minimum rest.
+    h.setBook(.5, .61); h.advance(20000); await h.executor.supervise();
     expect(h.orders.size).toBe(0); expect(h.submissions).toHaveLength(1);
     h.advance(5000); await h.executor.supervise();
     expect(h.submissions).toHaveLength(1);
     h.advance(5000); await h.executor.supervise();
-    expect(h.submissions[1]).toMatchObject({ limitPrice: .55, size: 100, postOnly: true });
+    expect(h.submissions[1]).toMatchObject({ limitPrice: .6, size: 100, postOnly: true });
     expect(h.trace).toEqual(["place:order-1", "cancel:order-1", "place:order-2"]);
   });
 
   it("keeps partial fills and unconfirmed matches reserved until cancellation settles", async () => {
     const h = harness(); await h.ready(); await h.executor.admit(enter(), []);
     h.fill("order-1", 20, "MATCHED", "trade-a");
-    h.advance(30000); await h.executor.supervise();
+    h.setBook(.5, .61); h.advance(30000); await h.executor.supervise();
     await h.settleCancel();
     expect(h.submissions).toHaveLength(1);
     expect((await h.executor.snapshot()).parents[0]).toMatchObject({ filledSize: 0, reservedNotionalUsd: 60 });
     h.fill("order-1", 20, "CONFIRMED", "trade-a");
     h.advance(5000); await h.executor.supervise();
-    expect(h.submissions[1]).toMatchObject({ size: 80, limitPrice: .55 });
+    expect(h.submissions[1]).toMatchObject({ size: 80, limitPrice: .6 });
     const p = (await h.executor.snapshot()).parents[0]!;
-    expect(p.filledSize).toBe(20); expect(p.filledNotionalUsd).toBeCloseTo(10.2); expect(p.reservedNotionalUsd).toBeCloseTo(48);
+    expect(p.filledSize).toBe(20); expect(p.filledNotionalUsd).toBeCloseTo(11.8); expect(p.reservedNotionalUsd).toBeCloseTo(48);
     await h.executor.supervise();
-    expect((await h.executor.snapshot()).dailySpentUsd["2026-09-04"]).toBeCloseTo(10.2);
+    expect((await h.executor.snapshot()).dailySpentUsd["2026-09-04"]).toBeCloseTo(11.8);
   });
 
-  it("cancels after 120 seconds without turning the entry into a taker", async () => {
-    const h = harness(); await h.ready(); await h.executor.admit(enter(), []);
+  it("cancels after 120 seconds without turning the entry into a taker when crossing is disabled", async () => {
+    const h = harness({}, { entryCrossingSec: 0 }); await h.ready(); await h.executor.admit(enter(), []);
     h.fill("order-1", 15);
     h.advance(120000); await h.executor.supervise(); await h.settleCancel();
     expect(h.submissions).toHaveLength(1);
@@ -261,7 +289,7 @@ describe("adaptive prediction execution", () => {
   });
 
   it("persists original deadline and signal refresh cooldown through restart", async () => {
-    const h = harness(); await h.ready(); await h.executor.admit(enter(), []);
+    const h = harness({}, { entryCrossingSec: 0 }); await h.ready(); await h.executor.admit(enter(), []);
     const before = (await h.executor.snapshot()).parents[0]!;
     h.advance(125000); await h.restart().recover(); await h.settleCancel();
     const after = (await h.executor.snapshot()).parents[0]!;
@@ -277,11 +305,70 @@ describe("adaptive prediction execution", () => {
     expect(h.submissions).toHaveLength(1); expect((await h.executor.snapshot()).parents[0]!.reservedNotionalUsd).toBe(60);
   });
 
-  it("quarantines a lost POST acknowledgement across restart instead of repeating the order", async () => {
+  it("adopts a lost POST acknowledgement from the venue's open orders across restart instead of repeating the order", async () => {
     const h = harness(); await h.ready(); h.loseAck(); await h.executor.admit(enter(), []);
-    expect((await h.executor.snapshot()).blocked).toBe(true);
+    expect((await h.executor.snapshot()).blocked).toBe(false);
+    expect((await h.executor.snapshot()).reconcilingMarkets).toEqual(["yes"]);
+    expect(h.adapter.cancelAll).not.toHaveBeenCalled();
     h.advance(10000); await h.restart().recover(); await h.executor.supervise();
     expect(h.submissions).toHaveLength(1); expect((await h.executor.snapshot()).parents[0]!.reservedNotionalUsd).toBe(60);
+    // The order rested on the venue the whole time; it is adopted by its signed terms and works normally afterwards.
+    expect((await h.executor.snapshot()).parents[0]!.childOrderIds).toEqual(["order-1"]);
+    expect((await h.executor.snapshot()).reconcilingMarkets).toBeUndefined();
+    expect(h.log.info).toHaveBeenCalledWith("prediction submission adopted from the venue's open orders", expect.objectContaining({ orderId: "order-1" }));
+    h.fill("order-1", 100); h.advance(5000); await h.executor.supervise(); h.advance(5000); await h.executor.supervise();
+    expect((await h.executor.snapshot()).parents[0]).toMatchObject({ status: "completed", filledSize: 100 });
+  });
+
+  it("resolves a lost POST that never landed as rejected after two passes, while another market trades", async () => {
+    const h = harness(); await h.ready();
+    const place = h.adapter.placeOrderWithLifecycle.getMockImplementation()!;
+    h.adapter.placeOrderWithLifecycle.mockImplementationOnce(async (account, intent, hooks) => {
+      await hooks.onPrepared({ preparedHash: "lost", tokenId: intent.tokenId!, conditionId: intent.conditionId });
+      throw new Error("internal server error");
+    });
+    await h.executor.admit(enter(), []);
+    expect(h.log.warn).toHaveBeenCalledWith("prediction submission failed", expect.objectContaining({ ambiguous: true, marketRef: "yes" }));
+    expect((await h.executor.snapshot()).blocked).toBe(false);
+    expect(await h.executor.admit(enter(), [])).toEqual({ placed: false, executionId: "prediction:limits:1" });
+    const original = h.adapter.executionMarket.getMockImplementation()!;
+    h.adapter.executionMarket.mockImplementation(async (ref, side) => {
+      const market = await original(ref, side);
+      return ref === "other" ? { ...market, marketRef: ref, tokenId: "other", conditionId: "other-condition" } : market;
+    });
+    h.adapter.placeOrderWithLifecycle.mockImplementation(place);
+    await h.executor.supervise({ signals: [{ id: "signal-2", marketRef: "other", venue: "polymarket", side: "YES", prob: .76, refPrice: .55, ts: new Date(NOW).toISOString(), ttlSec: 10800 }], refreshedAt: h.now() });
+    expect(await h.executor.admit(enter({ marketRef: "other" }), [])).toHaveProperty("executionId");
+    expect(h.submissions).toHaveLength(1);
+    const both: Signal[] = ["yes", "other"].map(ref => ({ id: `signal-${ref}`, marketRef: ref, venue: "polymarket", side: "YES", prob: .76, refPrice: .55, ts: new Date(NOW).toISOString(), ttlSec: 10800 }));
+    h.advance(20_000); await h.executor.supervise({ signals: both, refreshedAt: h.now() });
+    expect((await h.executor.snapshot()).reconcilingMarkets).toEqual(["yes"]);
+    h.advance(15_000); await h.executor.supervise({ signals: both, refreshedAt: h.now() });
+    expect(h.log.info).toHaveBeenCalledWith("prediction submission resolved as not placed", expect.objectContaining({ marketRef: "yes" }));
+    const checkpoint = JSON.parse((await h.state.get(PREDICTION_EXECUTION_KEY))!);
+    expect(checkpoint.children["prediction:limits:1:child:2"]).toMatchObject({ status: "rejected" });
+    expect((await h.executor.snapshot()).reconcilingMarkets).toBeUndefined();
+    // The parent is still inside its entry window and quotes again in its own market.
+    expect(h.submissions.filter(s => s.marketRef === "yes")).toHaveLength(1);
+    expect((await h.executor.snapshot()).parents.find(p => p.marketRef === "yes")!.status).toBe("active");
+  });
+
+  it("adopts a lost POST from a settlement when the order filled before it could be listed", async () => {
+    const h = harness(); await h.ready();
+    h.adapter.placeOrderWithLifecycle.mockImplementationOnce(async (account, intent, hooks) => {
+      await hooks.onPrepared({ preparedHash: "lost", tokenId: intent.tokenId!, conditionId: intent.conditionId });
+      h.submissions.push(structuredClone(intent));
+      h.history.set("ghost", { orderId: "ghost", status: "matched", size: intent.size, matchedSize: intent.size, observedAt: h.now() });
+      h.fills.push({ id: "ghost-fill", orderId: "ghost", makerOrderId: "ghost", marketRef: "yes", tokenId: "yes", conditionId: "condition", outcome: "YES", side: "BUY", size: intent.size, matchedAmountDelta: intent.size, price: intent.limitPrice, ts: h.now(), fee: 0, settlementStatus: "CONFIRMED" });
+      h.setHeld(intent.size);
+      throw new Error("socket hang up");
+    });
+    await h.executor.admit(enter(), []);
+    h.advance(5000); await h.executor.supervise();
+    expect(h.log.info).toHaveBeenCalledWith("prediction submission adopted from a settlement", expect.objectContaining({ orderId: "ghost" }));
+    h.advance(5000); await h.executor.supervise();
+    expect((await h.executor.snapshot()).parents[0]).toMatchObject({ status: "completed", filledSize: 100, childOrderIds: ["ghost"] });
+    expect(h.submissions).toHaveLength(1);
   });
 
   it("can retry a definitive post-only rejection without treating it as an ambiguous fill", async () => {
@@ -292,7 +379,7 @@ describe("adaptive prediction execution", () => {
 
   it("uses the actual NO book and never exceeds its admission price and budget", async () => {
     const h = harness(); await h.ready("NO"); await h.executor.admit(enter({ side: "NO" }), []);
-    expect(h.submissions[0]).toMatchObject({ tokenId: "no", outcome: "NO", limitPrice: .51 });
+    expect(h.submissions[0]).toMatchObject({ tokenId: "no", outcome: "NO", limitPrice: .59 });
     h.setBook(.58, .65); h.advance(65000); await h.executor.supervise(); await h.settleCancel();
     expect(h.submissions[1]).toMatchObject({ limitPrice: .6, size: 100 });
     expect(h.submissions[1]!.size * h.submissions[1]!.limitPrice).toBeLessThanOrEqual(60);
@@ -350,15 +437,31 @@ describe("adaptive prediction execution", () => {
 
   it("preserves both maker legs when trades share an id across owned child generations", async () => {
     const h = harness(); await h.ready(); await h.executor.admit(enter(), []);
-    h.fill("order-1", 10, "CONFIRMED", "same-trade"); h.advance(30000); await h.executor.supervise(); await h.settleCancel();
+    h.fill("order-1", 10, "CONFIRMED", "same-trade"); h.setBook(.5, .61); h.advance(30000); await h.executor.supervise(); await h.settleCancel();
     h.fill("order-2", 10, "CONFIRMED", "same-trade"); await h.executor.supervise();
     expect((await h.executor.snapshot()).parents[0]!.filledSize).toBe(20);
   });
 
-  it("fails closed on unowned resting orders and refuses startup adoption by matching terms", async () => {
+  it("pauses entries only in a market holding an unowned resting order, and never adopts it by matching terms", async () => {
     const h = harness(); h.orders.set("legacy", { id: "legacy", marketRef: "yes", side: "BUY", size: 100, filledSize: 0, price: .51, status: "open" });
-    await h.ready(); expect((await h.executor.snapshot()).blocked).toBe(true);
+    await h.ready(); expect((await h.executor.snapshot()).blocked).toBe(false);
+    expect((await h.executor.snapshot()).unownedMarkets).toEqual(["yes"]);
+    expect(h.log.warn).toHaveBeenCalledWith("unowned open order; entries in its market wait until it clears", expect.objectContaining({ orderId: "legacy", marketRef: "yes" }));
     expect(await h.executor.admit(enter(), [])).toEqual({ placed: false }); expect(h.submissions).toHaveLength(0);
+    expect(h.log.warn).toHaveBeenCalledWith("enter refused for yes: an order this executor did not place rests in this market");
+    const warnings = h.log.warn.mock.calls.length;
+    await h.executor.admit(enter(), []); expect(h.log.warn).toHaveBeenCalledTimes(warnings);
+    const original = h.adapter.executionMarket.getMockImplementation()!;
+    h.adapter.executionMarket.mockImplementation(async (ref, side) => {
+      const market = await original(ref, side);
+      return ref === "other" ? { ...market, marketRef: ref, tokenId: "other", conditionId: "other-condition" } : market;
+    });
+    await h.executor.supervise({ signals: [{ id: "signal-2", marketRef: "other", venue: "polymarket", side: "YES", prob: .76, refPrice: .55, ts: new Date(NOW).toISOString(), ttlSec: 10800 }], refreshedAt: h.now() });
+    expect(await h.executor.admit(enter({ marketRef: "other" }), [])).toHaveProperty("executionId");
+    expect(h.submissions).toHaveLength(1);
+    h.orders.delete("legacy"); h.advance(5000); await h.executor.supervise();
+    expect((await h.executor.snapshot()).unownedMarkets).toBeUndefined();
+    expect(h.log.info).toHaveBeenCalledWith("unowned open order cleared", { orderId: "legacy" });
   });
 
   it("keeps the shutdown latch permanent against delayed supervise calls and admissions", async () => {
@@ -367,12 +470,26 @@ describe("adaptive prediction execution", () => {
     expect(await h.executor.admit(enter(), [])).toEqual({ placed: false }); expect(h.submissions).toHaveLength(0);
   });
 
-  it("heartbeat failure cancels the venue without waiting for the serialized execution lane", async () => {
+  it("heartbeat failure leaves resting orders to the venue's dead-man switch and places nothing new until renewals succeed", async () => {
     const h = harness(); await h.ready(); await h.executor.admit(enter(), []);
-    h.adapter.heartbeat.mockRejectedValueOnce(new Error("heartbeat lost"));
+    h.adapter.heartbeat.mockRejectedValue(new Error("heartbeat lost"));
     await expect(h.executor.heartbeat()).rejects.toThrow("heartbeat lost");
-    expect(h.adapter.cancelAll).toHaveBeenCalledTimes(1);
-    expect((await h.executor.snapshot()).blocked).toBe(true);
+    h.advance(5000); await expect(h.executor.heartbeat()).rejects.toThrow("heartbeat lost");
+    expect(h.adapter.cancelAll).not.toHaveBeenCalled();
+    expect(h.log.warn.mock.calls.filter(([message]) => String(message).startsWith("prediction heartbeat failed"))).toHaveLength(1);
+    expect((await h.executor.snapshot()).blocked).toBe(false);
+    // The venue's timer fires: the order disappears; the parent stays open for its window but is not re-quoted while renewals fail.
+    h.history.get("order-1")!.status = "canceled"; h.orders.delete("order-1");
+    await h.executor.supervise(); h.advance(5000); await h.executor.supervise(); h.advance(5000); await h.executor.supervise();
+    expect(h.submissions).toHaveLength(1);
+    expect((await h.executor.snapshot()).parents[0]!.status).toBe("active");
+    expect(h.log.warn).toHaveBeenCalledWith("no new orders while the venue heartbeat is failing; resting orders expire on the venue");
+    expect(await h.executor.admit(enter({ marketRef: "other" }), [])).toEqual({ placed: false });
+    h.adapter.heartbeat.mockResolvedValue(undefined);
+    h.advance(5000); await h.executor.heartbeat();
+    await h.executor.supervise();
+    expect(h.submissions).toHaveLength(2);
+    expect(h.log.info).toHaveBeenCalledWith("venue heartbeat recovered; new orders resume");
   });
 
   it("cancels an old-side entry when a newer opposite signal appears, and honors signal TTL", async () => {
@@ -387,14 +504,14 @@ describe("adaptive prediction execution", () => {
   });
 
   it("uses the configured polling interval for retry admission and still requires a successful newer refresh", async () => {
-    const h = harness({ signalPollIntervalMin: 1 }); await h.ready(); await h.executor.admit(enter(), []);
+    const h = harness({ signalPollIntervalMin: 1 }, { entryCrossingSec: 0 }); await h.ready(); await h.executor.admit(enter(), []);
     h.advance(120000); await h.executor.supervise(); await h.settleCancel();
     expect(await h.executor.admit(enter(), [])).toEqual({ placed: false });
     await h.ready(); expect(await h.executor.admit(enter(), [])).toHaveProperty("executionId");
   });
 
   it("advances the settlement scan window after terminal reconciliation but keeps an overlap", async () => {
-    const h = harness(); await h.ready(); await h.executor.admit(enter(), []);
+    const h = harness({}, { entryCrossingSec: 0 }); await h.ready(); await h.executor.admit(enter(), []);
     h.advance(120000); await h.executor.supervise(); await h.settleCancel(); h.advance(600000);
     await h.executor.supervise(); h.advance(5000); await h.executor.supervise();
     const calls = h.adapter.tradeSettlements.mock.calls;
@@ -409,56 +526,35 @@ describe("adaptive prediction execution", () => {
     expect(h.submissions).toHaveLength(1);
   });
 
-  it("permits explicit resume after a known heartbeat halt is canceled and settled, while unknown POST stays blocked", async () => {
+  it("resume clears only the operator pause; an unknown POST keeps resolving in its own market", async () => {
     const h = harness(); await h.ready(); await h.executor.admit(enter(), []);
-    h.adapter.heartbeat.mockRejectedValueOnce(new Error("temporary outage")); await expect(h.executor.heartbeat()).rejects.toThrow();
-    await h.settleCancel(); await h.executor.resume();
+    await h.executor.supervise({ paused: true }); await h.settleCancel();
+    expect((await h.executor.snapshot()).blocked).toBe(true);
+    await h.executor.resume(); await h.executor.supervise({ paused: false });
     expect((await h.executor.snapshot()).blocked).toBe(false);
+    h.advance(300_000); await h.ready(); expect(await h.executor.admit(enter(), [])).toHaveProperty("executionId");
     const unknown = harness(); await unknown.ready(); unknown.loseAck(); await unknown.executor.admit(enter(), []);
-    await expect(unknown.executor.resume()).rejects.toThrow("unresolved");
+    await unknown.executor.resume();
+    expect((await unknown.executor.snapshot()).blocked).toBe(false);
+    expect((await unknown.executor.snapshot()).parents[0]!.childOrderIds).toEqual(["order-1"]);
   });
 
-  it("allows a five-second cold positions snapshot during resume and rechecks open orders before admitting entries", async () => {
+  it("resume tolerates a slow or throttled reconciliation and does not block entries on it", async () => {
     vi.useFakeTimers();
     const h = harness(); await h.ready(); await h.executor.supervise({ paused: true });
-    const orderReadTimes: number[] = [];
-    h.adapter.openOrders.mockImplementation(async () => { orderReadTimes.push(h.now()); return []; });
-    h.adapter.positions.mockImplementationOnce(() => new Promise(resolve => { setTimeout(() => resolve([]), 5000); }));
-    let settled = false;
-    const outcome = h.executor.resume().then(() => { settled = true; return undefined; }, error => { settled = true; return error as Error; });
-    await vi.advanceTimersByTimeAsync(0);
-    h.advance(4000); await vi.advanceTimersByTimeAsync(4000);
-    expect(settled).toBe(false);
-    expect(h.submissions).toHaveLength(0);
-    h.advance(1000); await vi.advanceTimersByTimeAsync(1000);
-    expect(await outcome).toBeUndefined();
-    expect(orderReadTimes.at(-1)).toBe(h.now());
-    expect(orderReadTimes.some(time => time < h.now())).toBe(true);
+    h.adapter.tradeSettlements.mockRejectedValueOnce(Object.assign(new Error("rate limited"), { name: "RateLimitError", retryAfter: 1 }));
+    await h.executor.resume();
+    expect((await h.executor.snapshot()).blocked).toBe(false);
+    expect((await h.executor.snapshot()).supervision).toMatchObject({ stage: "reconcile" });
+    h.advance(2000); await vi.advanceTimersByTimeAsync(2000);
+    await h.executor.supervise({ paused: false });
     expect(await h.executor.admit(enter(), [])).toHaveProperty("executionId");
     expect(h.submissions).toHaveLength(1);
-    expect(h.submissions[0]).toMatchObject({ side: "BUY", postOnly: true });
-  });
-
-  it("times out a never-resolving resume positions snapshot at thirty seconds and leaves entries paused", async () => {
-    vi.useFakeTimers();
-    const h = harness(); await h.ready(); await h.executor.supervise({ paused: true });
-    h.adapter.positions.mockImplementation(() => new Promise(() => {}));
-    let settled = false;
-    const outcome = h.executor.resume().then(() => { settled = true; return undefined; }, error => { settled = true; return error as Error; });
-    await vi.advanceTimersByTimeAsync(0);
-    h.advance(29999); await vi.advanceTimersByTimeAsync(29999);
-    expect(settled).toBe(false);
-    expect(h.submissions).toHaveLength(0);
-    h.advance(1); await vi.advanceTimersByTimeAsync(1);
-    expect((await outcome)?.message).toMatch(/resume account snapshot exceeded/);
-    expect(await h.executor.admit(enter(), [])).toEqual({ placed: false });
-    expect(h.adapter.placeOrderWithLifecycle).not.toHaveBeenCalled();
-    expect(h.orders.size).toBe(0);
   });
 
   it("does not invent inventory from failed settlement and safely retries only the remaining target", async () => {
     const h = harness(); await h.ready(); await h.executor.admit(enter(), []);
-    h.fill("order-1", 20, "MATCHED", "failed-trade"); h.advance(30000); await h.executor.supervise(); await h.settleCancel();
+    h.fill("order-1", 20, "MATCHED", "failed-trade"); h.setBook(.5, .61); h.advance(30000); await h.executor.supervise(); await h.settleCancel();
     expect(h.submissions).toHaveLength(1);
     h.fill("order-1", 20, "FAILED", "failed-trade"); h.advance(5000); await h.executor.supervise();
     expect(h.submissions[1]!.size).toBe(100); expect((await h.executor.snapshot()).parents[0]!.filledSize).toBe(0);
@@ -481,7 +577,7 @@ describe("adaptive prediction execution", () => {
     expect((await h.executor.snapshot()).parents[0]!.status).toBe("canceled");
   });
 
-  it.each(["book", "order"] as const)("bounds a never-resolving %s read and cancels without replacing", async resource => {
+  it.each(["book", "order"] as const)("bounds a never-resolving %s read and keeps the resting order for a later pass", async resource => {
     vi.useFakeTimers();
     const h = harness(); await h.ready(); await h.executor.admit(enter(), []); h.advance(5000);
     if (resource === "book") h.adapter.executionMarket.mockImplementationOnce(() => new Promise(() => {}));
@@ -491,9 +587,30 @@ describe("adaptive prediction execution", () => {
     const error = await outcome;
     expect(error).toBeUndefined();
     if (resource === "order") expect(h.log.warn).toHaveBeenCalledWith("prediction order reconciliation pending", expect.objectContaining({ error: expect.stringContaining("order state exceeded four seconds") }));
-    expect(h.orders.size).toBe(0);
+    else expect(h.log.warn).toHaveBeenCalledWith("prediction supervision deferred", expect.objectContaining({ stage: "work" }));
+    expect(h.orders.size).toBe(1);
     expect(h.submissions).toHaveLength(1);
-    expect((await h.executor.snapshot()).parents[0]).toMatchObject({ status: "canceling", filledSize: 0, reservedNotionalUsd: 60 });
+    expect(h.adapter.cancelOrderChecked).not.toHaveBeenCalled();
+    expect((await h.executor.snapshot()).parents[0]).toMatchObject({ status: "active", filledSize: 0, reservedNotionalUsd: 60 });
+    h.advance(5000); await h.executor.supervise();
+    expect(h.orders.size).toBe(1); expect(h.submissions).toHaveLength(1);
+    expect((await h.executor.snapshot()).supervision).toBeUndefined();
+  });
+
+  it.each(["book", "order"] as const)("stops a parent whose %s read has been failing for more than a minute, without an account halt", async resource => {
+    const h = harness(); await h.ready(); await h.executor.admit(enter(), []);
+    const limited = () => Promise.reject(Object.assign(new Error("Request was rate limited"), { name: "RateLimitError", retryAfter: 2 }));
+    if (resource === "book") h.adapter.executionMarket.mockImplementation(limited);
+    else h.adapter.executionOrder.mockImplementation(limited);
+    for (let elapsed = 0; elapsed < 60_000; elapsed += 5000) { h.advance(5000); await h.executor.supervise(); }
+    expect(h.orders.size).toBe(1);
+    expect((await h.executor.snapshot()).parents[0]!.status).toBe("active");
+    // The order read first failed one pass after admission, so its clock runs five seconds behind the book's.
+    h.advance(resource === "order" ? 10_000 : 5000); await h.executor.supervise();
+    expect(h.orders.size).toBe(0);
+    expect((await h.executor.snapshot()).parents[0]!.status).toBe("canceling");
+    expect((await h.executor.snapshot()).blocked).toBe(false);
+    expect(h.adapter.cancelAll).not.toHaveBeenCalled();
   });
 
   it("cancels an expired entry on the heartbeat lane while order reconciliation is stalled", async () => {
@@ -510,19 +627,24 @@ describe("adaptive prediction execution", () => {
     expect(h.submissions).toHaveLength(1);
   });
 
-  it("suppresses subsequent heartbeats even when emergency cancellation never resolves", async () => {
-    vi.useFakeTimers();
+  it("keeps heartbeating through a short supervision gap, then stops resting orders per parent after a minute without halting the account", async () => {
     const h = harness(); await h.ready(); await h.executor.admit(enter(), []);
-    h.adapter.cancelAll.mockImplementation(() => new Promise(() => {}));
-    h.advance(11000);
     const heartbeatsBefore = h.adapter.heartbeat.mock.calls.length;
-    const outcome = h.executor.heartbeat().catch(error => error as Error);
-    await vi.advanceTimersByTimeAsync(0); h.advance(4000); await vi.advanceTimersByTimeAsync(4000);
-    expect((await outcome as Error).message).toContain("ten-second freshness");
-    expect(await h.executor.heartbeat()).toBe(false);
-    h.advance(20000); expect(await h.executor.heartbeat()).toBe(false);
-    expect(h.adapter.heartbeat).toHaveBeenCalledTimes(heartbeatsBefore);
-    expect((await h.executor.snapshot()).blocked).toBe(true);
+    h.advance(11000); expect(await h.executor.heartbeat()).toBe(true);
+    h.advance(48000); expect(await h.executor.heartbeat()).toBe(true);
+    expect(h.adapter.heartbeat).toHaveBeenCalledTimes(heartbeatsBefore + 2);
+    expect(h.orders.size).toBe(1);
+    h.advance(2000); expect(await h.executor.heartbeat()).toBe(false);
+    expect(h.orders.size).toBe(0);
+    expect(h.adapter.cancelOrderChecked).toHaveBeenCalledOnce();
+    expect(h.adapter.cancelAll).not.toHaveBeenCalled();
+    expect(h.log.warn).toHaveBeenCalledWith("prediction supervision stale; canceling resting orders without halting the account", expect.anything());
+    expect((await h.executor.snapshot()).parents[0]).toMatchObject({ status: "canceling", cancelReason: "supervision stale for more than 60 seconds" });
+    expect((await h.executor.snapshot()).blocked).toBe(false);
+    await h.settleCancel();
+    expect((await h.executor.snapshot()).parents[0]!.status).toBe("canceled");
+    h.advance(300_000); await h.ready(); expect(await h.executor.admit(enter(), [])).toHaveProperty("executionId");
+    expect(h.submissions).toHaveLength(2);
   });
 
   it.each(["timeout", "watchdog"] as const)("rejects late SDK preparation after %s without sending a POST", async trigger => {
@@ -547,8 +669,8 @@ describe("adaptive prediction execution", () => {
     await start;
     if (trigger === "timeout") { h.advance(4000); await vi.advanceTimersByTimeAsync(4000); await admission; }
     else {
-      h.advance(11000);
-      await expect(h.executor.heartbeat()).rejects.toThrow("ten-second freshness");
+      h.advance(61000);
+      expect(await h.executor.heartbeat()).toBe(false);
     }
     release(); await vi.advanceTimersByTimeAsync(0); await admission;
     expect(await lateResult).toBeInstanceOf(Error);
@@ -617,7 +739,7 @@ describe("adaptive prediction execution", () => {
     await h.executor.supervise(); await h.restart().recover();
     expect(h.alerter.send).toHaveBeenCalledTimes(1);
     const metrics = (await h.executor.snapshot()).parents[0]!.metrics!;
-    expect(metrics.makerShare).toBe(1); expect(metrics.fillRatio).toBe(.2); expect(metrics.priceImprovementUsd).toBeCloseTo(1.8);
+    expect(metrics.makerShare).toBe(1); expect(metrics.fillRatio).toBe(.2); expect(metrics.priceImprovementUsd).toBeCloseTo(.2);
   });
 
   it("does not block execution on a failed fill notification", async () => {
@@ -652,12 +774,14 @@ describe("adaptive prediction execution", () => {
     await expect(assertPredictionExecutionSettled(h.state)).resolves.toBeUndefined();
   });
 
-  it("refuses a strategy switch after an unknown POST even when emergency cancellation removed every visible order", async () => {
+  it("refuses a strategy switch while an unknown POST is unresolved, and permits it once the adopted order settles", async () => {
     const h = harness(); await h.ready(); h.loseAck(); await h.executor.admit(enter(), []);
-    expect(h.orders.size).toBe(0);
+    expect(h.orders.size).toBe(1);
     await expect(assertPredictionExecutionSettled(h.state)).rejects.toThrow("unresolved adaptive prediction execution");
     h.advance(10000); await h.restart().recover();
     await expect(assertPredictionExecutionSettled(h.state)).rejects.toThrow("unresolved adaptive prediction execution");
+    await h.executor.cancelMarket("yes", "prepare strategy switch"); await h.settleCancel();
+    await expect(assertPredictionExecutionSettled(h.state)).resolves.toBeUndefined();
   });
 
   it("refuses a mode switch between a settled BUY cancellation and its queued urgent SELL", async () => {
@@ -680,6 +804,238 @@ describe("adaptive prediction execution", () => {
     expect(h.submissions).toHaveLength(1);
     await h.executor.supervise({ exitDecisions: { yes: "normal" }, exitsEvaluatedAt: h.now() });
     expect(h.submissions[1]).toMatchObject({ side: "SELL", tif: "FAK", postOnly: false });
+  });
+
+
+  it("crosses at the deadline with a marketable limit at the price bound and completes on the taker fill", async () => {
+    const h = harness(); await h.ready(); await h.executor.admit(enter(), []);
+    expect((await h.executor.snapshot()).parents[0]!.crossingDeadlineAt).toBe(NOW + 180_000);
+    h.advance(120000); await h.executor.supervise();
+    expect(h.orders.size).toBe(0); expect(h.submissions).toHaveLength(1);
+    expect((await h.executor.snapshot()).parents[0]!.status).toBe("active");
+    await h.settleCancel();
+    expect(h.submissions[1]).toMatchObject({ side: "BUY", size: 100, limitPrice: .6, postOnly: false, tif: "GTC" });
+    expect(h.log.info).toHaveBeenCalledWith("prediction entry crossing", expect.objectContaining({ ask: .6, cap: .6, price: .6, size: 100 }));
+    expect(h.fills.at(-1)).toMatchObject({ orderId: "order-2", size: 100, price: .6, settlementStatus: "CONFIRMED" });
+    h.advance(5000); await h.executor.supervise(); h.advance(5000); await h.executor.supervise();
+    const parent = (await h.executor.snapshot()).parents[0]!;
+    expect(parent).toMatchObject({ status: "completed", filledSize: 100, reservedNotionalUsd: 0 });
+    expect(parent.metrics!.makerShare).toBe(0);
+    expect(h.submissions).toHaveLength(2);
+    expect(h.log.info).toHaveBeenCalledWith("prediction entry crossing finished", expect.objectContaining({ status: "completed", remaining: 0 }));
+  });
+
+  it("sweeps the offers inside the bound at their own prices when the ask sits below the cap", async () => {
+    const h = harness(); await h.ready(); await h.executor.admit(enter(), []);
+    h.advance(120000); await h.executor.supervise();
+    // The maker order is gone; the ask then improves below the bound before the crossing child is placed.
+    h.setBook(.5, .58); await h.settleCancel();
+    expect(h.submissions[1]).toMatchObject({ limitPrice: .6, size: 100, postOnly: false });
+    expect(h.fills.at(-1)).toMatchObject({ orderId: "order-2", size: 100, price: .58 });
+  });
+
+  it("rests the crossing remainder at the bound without chasing and completes on a later maker fill", async () => {
+    const h = harness(); await h.ready(); await h.executor.admit(enter(), []);
+    h.setBook(.5, .6, 40); h.advance(120000); await h.executor.supervise(); await h.settleCancel();
+    expect(h.submissions[1]).toMatchObject({ size: 100, limitPrice: .6, postOnly: false });
+    expect(h.orders.get("order-2")).toMatchObject({ filledSize: 40 });
+    // The sweep consumed the offer; the remainder is now the best bid under a higher ask.
+    h.setBook(.5, .61);
+    h.advance(5000); await h.executor.supervise(); h.advance(5000); await h.executor.supervise();
+    expect((await h.executor.snapshot()).parents[0]).toMatchObject({ status: "active", filledSize: 40 });
+    expect(h.submissions).toHaveLength(2); expect(h.orders.size).toBe(1);
+    h.fill("order-2", 60, "CONFIRMED", "maker-rest", .6);
+    h.advance(5000); await h.executor.supervise(); h.advance(5000); await h.executor.supervise();
+    expect((await h.executor.snapshot()).parents[0]).toMatchObject({ status: "completed", filledSize: 100, reservedNotionalUsd: 0 });
+  });
+
+  it("completes a crossed entry whose remainder is below the venue minimum once the window closes", async () => {
+    const h = harness(); await h.ready(); await h.executor.admit(enter(), []);
+    h.setBook(.5, .6, 97); h.advance(120000); await h.executor.supervise(); await h.settleCancel();
+    expect(h.orders.get("order-2")).toMatchObject({ filledSize: 97 });
+    h.advance(60000); await h.executor.supervise(); await h.settleCancel();
+    expect((await h.executor.snapshot()).parents[0]).toMatchObject({ status: "completed", filledSize: 97, reservedNotionalUsd: 0 });
+    expect(h.orders.size).toBe(0);
+  });
+
+  it("cancels the crossing remainder when the window closes and ends the entry as a partial", async () => {
+    const h = harness(); await h.ready(); await h.executor.admit(enter(), []);
+    h.setBook(.5, .6, 40); h.advance(120000); await h.executor.supervise(); await h.settleCancel();
+    h.advance(60000); expect(await h.executor.heartbeat()).toBe(false);
+    expect(h.orders.size).toBe(0);
+    await h.settleCancel();
+    expect((await h.executor.snapshot()).parents[0]).toMatchObject({ status: "canceled", filledSize: 40, reservedNotionalUsd: 0, cancelReason: "entry crossing window expired" });
+    expect(h.submissions).toHaveLength(2);
+  });
+
+  it("stops at the deadline when the ask sits above the price bound and re-admits after the cooldown", async () => {
+    const h = harness(); await h.ready(); await h.executor.admit(enter(), []);
+    h.setBook(.58, .63); h.advance(120000); await h.executor.supervise();
+    expect(h.submissions).toHaveLength(1);
+    expect((await h.executor.snapshot()).parents[0]).toMatchObject({ status: "canceling", cancelReason: "entry deadline reached with ask above price limit" });
+    await h.settleCancel();
+    expect((await h.executor.snapshot()).parents[0]!.status).toBe("canceled");
+    h.advance(300_000); await h.ready(); expect(await h.executor.admit(enter(), [])).toHaveProperty("executionId");
+  });
+
+  it("resumes a resting crossing remainder across a restart inside the window and stops it after the window", async () => {
+    const h = harness(); await h.ready(); await h.executor.admit(enter(), []);
+    h.setBook(.5, .6, 40); h.advance(120000); await h.executor.supervise(); await h.settleCancel();
+    h.setBook(.5, .61);
+    h.advance(20000); await h.restart().recover(); await h.executor.supervise();
+    expect((await h.executor.snapshot()).parents[0]).toMatchObject({ status: "active", filledSize: 40 });
+    expect(h.submissions).toHaveLength(2); expect(h.orders.size).toBe(1);
+    h.fill("order-2", 60, "CONFIRMED", "after-restart", .6);
+    h.advance(5000); await h.executor.supervise(); h.advance(5000); await h.executor.supervise();
+    expect((await h.executor.snapshot()).parents[0]!.status).toBe("completed");
+    const late = harness(); await late.ready(); await late.executor.admit(enter(), []);
+    late.setBook(.5, .6, 40); late.advance(120000); await late.executor.supervise(); await late.settleCancel();
+    late.advance(61000); await late.restart().recover(); await late.settleCancel();
+    expect((await late.executor.snapshot()).parents[0]).toMatchObject({ status: "canceled", filledSize: 40, cancelReason: "entry crossing window elapsed during restart" });
+  });
+
+  it("lets the heartbeat lane cancel the expired maker order while the parent stays active for the crossing", async () => {
+    const h = harness(); await h.ready(); await h.executor.admit(enter(), []);
+    h.advance(120000); expect(await h.executor.heartbeat()).toBe(false);
+    expect(h.orders.size).toBe(0);
+    expect((await h.executor.snapshot()).parents[0]!.status).toBe("active");
+    await h.settleCancel();
+    expect(h.submissions[1]).toMatchObject({ limitPrice: .6, postOnly: false, tif: "GTC" });
+  });
+
+  it("defers on a rate-limited settlement read, keeps orders, warns once, and escalates only after a minute", async () => {
+    const h = harness(); await h.ready(); await h.executor.admit(enter(), []);
+    const limited = Object.assign(new Error("Request to /trades was rate limited"), { name: "RateLimitError", retryAfter: 2 });
+    h.adapter.tradeSettlements.mockRejectedValue(limited);
+    h.advance(5000); await expect(h.executor.supervise()).rejects.toBe(limited);
+    expect(h.orders.size).toBe(1);
+    expect(h.adapter.cancelOrderChecked).not.toHaveBeenCalled(); expect(h.adapter.cancelAll).not.toHaveBeenCalled();
+    expect(h.log.warn).toHaveBeenCalledTimes(1);
+    expect(h.log.warn).toHaveBeenCalledWith("prediction supervision deferred", expect.objectContaining({ stage: "reconcile", retryAfterMs: 2000 }));
+    expect((await h.executor.snapshot()).supervision).toMatchObject({ stage: "reconcile" });
+    expect(await h.executor.admit(enter({ marketRef: "other" }), [])).toEqual({ placed: false });
+    expect(h.log.warn).toHaveBeenLastCalledWith("enter refused for other: supervision deferred (reconcile)");
+    expect(h.adapter.executionMarket).toHaveBeenCalledTimes(1);
+    h.advance(5000); await expect(h.executor.supervise()).rejects.toBe(limited);
+    expect(h.log.warn).toHaveBeenCalledTimes(2);
+    h.advance(5000); expect(await h.executor.heartbeat()).toBe(true);
+    for (let elapsed = 15_000; elapsed < 60_000; elapsed += 5000) { h.advance(5000); await expect(h.executor.supervise()).rejects.toBe(limited); }
+    expect(h.orders.size).toBe(1);
+    h.advance(5000); await expect(h.executor.supervise()).rejects.toBe(limited);
+    // Past the stale window the read failure still only defers; the parent is stopped by the heartbeat lane's stale rule.
+    expect(h.log.warn).toHaveBeenLastCalledWith("prediction supervision deferred", expect.objectContaining({ stage: "reconcile" }));
+    expect(h.adapter.cancelAll).not.toHaveBeenCalled();
+    expect((await h.executor.snapshot()).parents[0]!.status).toBe("active");
+    expect(await h.executor.heartbeat()).toBe(false);
+    expect((await h.executor.snapshot()).parents[0]!.status).toBe("canceling");
+    expect((await h.executor.snapshot()).blocked).toBe(false);
+    h.adapter.tradeSettlements.mockImplementation(async () => structuredClone(h.fills));
+    await h.settleCancel();
+    expect(h.log.info).toHaveBeenCalledWith("prediction supervision resumed", expect.anything());
+    expect((await h.executor.snapshot()).supervision).toBeUndefined();
+  });
+
+  it("holds the resting order and places nothing new while the portfolio read is throttled", async () => {
+    const h = harness(); await h.ready(); await h.executor.admit(enter(), []);
+    h.adapter.positions.mockRejectedValueOnce(Object.assign(new Error("rate limited"), { name: "RateLimitError", retryAfter: 1 }));
+    h.setBook(.5, .61); h.advance(30000); await h.executor.supervise();
+    expect(h.orders.size).toBe(1); expect(h.submissions).toHaveLength(1);
+    expect(h.log.warn).toHaveBeenCalledWith("prediction supervision deferred", expect.objectContaining({ stage: "snapshot" }));
+    h.advance(5000); await h.executor.supervise();
+    expect(h.orders.size).toBe(0);
+    await h.settleCancel();
+    expect(h.submissions[1]).toMatchObject({ limitPrice: .6 });
+  });
+
+  it("reads the account once per pass however many parents work, and forces a refresh only for exit sizing", async () => {
+    // The shared fixture book shows every market the same levels, so the exit-depth floor is off here.
+    const h = harness({ minExitDepth2cUsd: 0 });
+    const original = h.adapter.executionMarket.getMockImplementation()!;
+    h.adapter.executionMarket.mockImplementation(async (ref, outcome) => {
+      const market = await original("yes", outcome);
+      return ref === "yes" ? market : { ...market, marketRef: ref, tokenId: `${ref}-yes`, conditionId: `condition-${ref}` };
+    });
+    const signals: Signal[] = ["yes", "m2", "m3"].map(ref => ({ id: `signal-${ref}`, marketRef: ref, venue: "polymarket", side: "YES", prob: .76, refPrice: .55, ts: new Date(NOW).toISOString(), ttlSec: 10800 }));
+    const held: Position[] = Array.from({ length: 8 }, (_, index) => ({ marketRef: `held-${index}`, tokenId: `held-${index}-yes`, conditionId: `condition-held-${index}`, outcome: "YES", side: "YES", size: 10, avgPrice: .4 }));
+    h.adapter.positions.mockImplementation(async () => held);
+    await h.executor.supervise({ signals, refreshedAt: h.now() });
+    for (const ref of ["yes", "m2", "m3"]) await h.executor.admit(enter({ marketRef: ref }), []);
+    expect(h.submissions).toHaveLength(3);
+    h.adapter.positions.mockClear(); h.adapter.balances.mockClear(); h.adapter.tokenBalance.mockClear();
+    h.advance(5000); await h.executor.supervise({ signals, refreshedAt: h.now() });
+    expect(h.adapter.positions).toHaveBeenCalledTimes(1);
+    expect(h.adapter.balances).toHaveBeenCalledTimes(1);
+    expect(h.adapter.tokenBalance).toHaveBeenCalledTimes(3);
+    expect(h.adapter.tokenBalance.mock.calls.every(call => call[2] === undefined)).toBe(true);
+    h.setHeld(100, "yes"); h.adapter.tokenBalance.mockClear();
+    await h.executor.admit({ kind: "exit", marketRef: "yes", urgent: true }, h.positions());
+    await h.settleCancel(); h.advance(5000); await h.executor.supervise({ signals, refreshedAt: h.now() });
+    expect(h.adapter.tokenBalance.mock.calls.some(call => call[1] === "yes" && (call[2] as { refresh?: boolean } | undefined)?.refresh === true)).toBe(true);
+  });
+
+  it("invalidates the venue token balance after a confirmed fill", async () => {
+    const h = harness(); const invalidate = vi.fn(); Object.assign(h.adapter, { invalidateTokenBalance: invalidate });
+    await h.ready(); await h.executor.admit(enter(), []);
+    h.fill("order-1", 20); await h.executor.supervise();
+    expect(invalidate).toHaveBeenCalledWith("yes");
+  });
+
+  it("defaults the crossing window to sixty seconds and allows disabling it", () => {
+    expect(PredictionExecutionConfigSchema.parse({})).toMatchObject({ entryDeadlineSec: 120, entryCrossingSec: 60, exitPassiveSec: 60 });
+    expect(PredictionExecutionConfigSchema.parse({ entryCrossingSec: 0 }).entryCrossingSec).toBe(0);
+    expect(() => PredictionExecutionConfigSchema.parse({ entryCrossingSec: -1 })).toThrow();
+  });
+
+  it("ignores a legacy account halt and blocked parent persisted by an earlier runtime", async () => {
+    const h = harness(); await h.ready(); await h.executor.admit(enter(), []);
+    const checkpoint = JSON.parse((await h.state.get(PREDICTION_EXECUTION_KEY))!);
+    checkpoint.haltReason = "ambiguous submission prediction:limits:1:child:2; reconciliation required";
+    checkpoint.parents["prediction:limits:1"].status = "blocked";
+    await h.state.set(PREDICTION_EXECUTION_KEY, JSON.stringify(checkpoint));
+    h.advance(5000); await h.restart().recover();
+    expect(h.log.warn).toHaveBeenCalledWith("legacy prediction halt ignored; execution resolves per market", { reason: checkpoint.haltReason });
+    expect((await h.executor.snapshot()).blocked).toBe(false);
+    expect((await h.executor.snapshot()).haltReason).toBeUndefined();
+    expect((await h.executor.snapshot()).parents[0]!.status).toBe("active");
+    await h.executor.supervise();
+    expect(h.orders.size).toBe(1);
+  });
+
+  it("pins a contradictory settlement to its own order and keeps other parents working", async () => {
+    const h = harness({ minExitDepth2cUsd: 0 });
+    const original = h.adapter.executionMarket.getMockImplementation()!;
+    h.adapter.executionMarket.mockImplementation(async (ref, outcome) => {
+      const market = await original("yes", outcome);
+      return ref === "yes" ? market : { ...market, marketRef: ref, tokenId: `${ref}-yes`, conditionId: `condition-${ref}` };
+    });
+    const signals: Signal[] = ["yes", "m2"].map(ref => ({ id: `signal-${ref}`, marketRef: ref, venue: "polymarket", side: "YES", prob: .76, refPrice: .55, ts: new Date(NOW).toISOString(), ttlSec: 10800 }));
+    await h.executor.supervise({ signals, refreshedAt: h.now() });
+    for (const ref of ["yes", "m2"]) await h.executor.admit(enter({ marketRef: ref }), []);
+    expect(h.submissions).toHaveLength(2);
+    // A settlement on order-1 that names the wrong token cannot be applied; only that parent stops.
+    h.fills.push({ id: "bad", orderId: "order-1", makerOrderId: "order-1", marketRef: "yes", tokenId: "no", conditionId: "condition", outcome: "YES", side: "BUY", size: 1, matchedAmountDelta: 1, price: .59, ts: h.now(), fee: 0, settlementStatus: "CONFIRMED" });
+    h.advance(5000); await h.executor.supervise({ signals, refreshedAt: h.now() });
+    expect(h.log.warn).toHaveBeenCalledWith("prediction settlement inconsistent with its order", expect.objectContaining({ orderId: "order-1" }));
+    const parents = (await h.executor.snapshot()).parents;
+    expect(parents.find(p => p.marketRef === "yes")!.status).toBe("canceling");
+    expect(parents.find(p => p.marketRef === "m2")!.status).toBe("active");
+    expect(h.orders.has("order-2")).toBe(true);
+    expect((await h.executor.snapshot()).blocked).toBe(false);
+  });
+
+  it("names the reason each time an entry is refused, once per market until it changes", async () => {
+    const h = harness();
+    expect(await h.executor.admit(enter(), [])).toEqual({ placed: false });
+    expect(h.log.warn).toHaveBeenCalledWith("enter refused for yes: no refreshed signals yet");
+    await h.executor.admit(enter(), []);
+    expect(h.log.warn.mock.calls.filter(([message]) => String(message).startsWith("enter refused for yes"))).toHaveLength(1);
+    await h.ready(); h.setVolume(10);
+    expect(await h.executor.admit(enter(), [])).toEqual({ placed: false });
+    expect(h.log.warn).toHaveBeenCalledWith(expect.stringMatching(/^enter refused for yes: capacity: 24h volume/));
+    h.setVolume(100_000);
+    await h.executor.admit(enter(), []);
+    expect(h.submissions).toHaveLength(1);
+    expect((await h.executor.snapshot()).blocked).toBe(false);
   });
 
   it("uses the top-level strategy tick cadence when checking exit-assessment freshness", async () => {

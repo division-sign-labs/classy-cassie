@@ -30,6 +30,22 @@ import {
   type MarketInfo,
 } from "@polymarket/client";
 import { createHash } from "node:crypto";
+import { RequestBudget } from "./request-budget.js";
+
+/**
+ * Which token is the YES side of a binary market. Polymarket labels most markets
+ * "Yes"/"No"; a matchup such as "Sabalenka vs Rybakina" labels its two tokens with
+ * the names instead, and the first listed outcome is the one the question, Quotient's
+ * forecast, and every published signal call YES.
+ */
+export function outcomeTokensOf(tokens: ReadonlyArray<{ tokenId: string | number | bigint; outcome: string }>): { yes: string; no: string } {
+  const label = (token: { outcome: string }): string => token.outcome.trim().toLowerCase();
+  const yes = tokens.find((token) => label(token) === "yes");
+  const no = tokens.find((token) => label(token) === "no");
+  if (yes && no) return { yes: String(yes.tokenId), no: String(no.tokenId) };
+  if (tokens.length === 2 && !yes && !no) return { yes: String(tokens[0]!.tokenId), no: String(tokens[1]!.tokenId) };
+  throw new Error(`market outcomes ${tokens.map((token) => JSON.stringify(token.outcome)).join(", ")} do not form a YES/NO pair`);
+}
 
 // AssetType is exported as a type but not as a runtime value from the SDK's
 // ESM entry (verified 2026-08-13); use the literal values.
@@ -37,6 +53,22 @@ const COLLATERAL = "COLLATERAL" as AssetType;
 const CONDITIONAL = "CONDITIONAL" as AssetType;
 /** pUSD on Polygon — fallback when the client doesn't expose its environment. */
 const PUSD_ADDRESS = "0xC011a7E12a19f7B1f670d46F03B03f3342E82DFB";
+/**
+ * Venue limit: 50 balance-allowance updates per 10 s (docs.polymarket.com rate limits,
+ * verified 2026-09-09). Keep headroom for a second bot on the same address, and hold
+ * back a reserve so exit sizing is never starved by opportunistic refreshes.
+ */
+const BALANCE_REFRESH_WINDOW = { capacity: 40, windowMs: 10_000, reserve: 10 } as const;
+/** A token's CLOB balance is re-synced from chain at most this often unless a caller insists. */
+const TOKEN_BALANCE_REFRESH_MS = 30_000;
+/** Duplicate account reads inside one supervision pass share a single request. */
+const ACCOUNT_READ_MEMO_MS = 3_000;
+interface AccountReadMemo<T> { at: number; value?: T; pending?: Promise<T> }
+function accountRequestBudget(): RequestBudget {
+  const budget = new RequestBudget();
+  budget.window("balance-allowance:update", BALANCE_REFRESH_WINDOW);
+  return budget;
+}
 
 /**
  * Quotient's Polymarket builder code. Every order cassie signs carries it, so
@@ -154,6 +186,7 @@ import type {
   SetupContext,
   VenueAccount,
   VenueAdapter,
+  TokenBalanceOptions,
 } from "../types.js";
 import { registerAdapter, type AdapterOpts } from "./registry.js";
 import { parsePolymarketGaslessAuth, QUOTIENT_POLYMARKET_GASLESS_AUTH, type PolymarketGaslessAuth } from "../polymarket/gasless-auth.js";
@@ -210,6 +243,11 @@ export class PolymarketAdapter implements VenueAdapter {
   /** Attached to every signed order; undefined only when attribution is off. */
   readonly builderCode: `0x${string}` | undefined;
   private builderCodeWarned = false;
+  /** Local request budget: family cooldowns after an explicit 429, plus the balance-refresh window. */
+  private readonly budget = accountRequestBudget();
+  private readonly tokenRefreshAt = new Map<string, number>();
+  private readonly positionsMemo: AccountReadMemo<Position[]> = { at: 0 };
+  private readonly collateralMemo: AccountReadMemo<number> = { at: 0 };
 
   constructor(private readonly opts: AdapterOpts) {
     if (opts.creds && opts.creds.venue === "polymarket") this.creds = opts.creds;
@@ -609,10 +647,25 @@ export class PolymarketAdapter implements VenueAdapter {
   // Read methods
   // -------------------------------------------------------------------------
 
-  private async collateralBalance(): Promise<number> {
-    const client = await this.secure();
-    const res = await fetchBalanceAllowance(client, { assetType: COLLATERAL });
-    return Number(res.balance) / 1e6; // pUSD, 6 decimals
+  /** Share one in-flight account read and reuse it briefly; the executor never sizes a SELL from these. */
+  private memoized<T>(memo: AccountReadMemo<T>, read: () => Promise<T>): Promise<T> {
+    const now = Date.now();
+    if (memo.pending) return memo.pending;
+    if (memo.value !== undefined && now - memo.at <= ACCOUNT_READ_MEMO_MS) return Promise.resolve(memo.value);
+    const pending = read().then(
+      (value) => { memo.at = now; memo.value = value; memo.pending = undefined; return value; },
+      (error: unknown) => { memo.pending = undefined; throw error; },
+    );
+    memo.pending = pending;
+    return pending;
+  }
+
+  private collateralBalance(): Promise<number> {
+    return this.memoized(this.collateralMemo, async () => {
+      const client = await this.secure();
+      const res = await this.budget.run("balance-allowance", () => fetchBalanceAllowance(client, { assetType: COLLATERAL }));
+      return Number(res.balance) / 1e6; // pUSD, 6 decimals
+    });
   }
 
   async balances(_acct: VenueAccount): Promise<Balance[]> {
@@ -621,18 +674,34 @@ export class PolymarketAdapter implements VenueAdapter {
   }
 
   /** Authoritative CLOB token balance; resting SELL reservations are not deducted. */
-  async tokenBalance(acct: VenueAccount, tokenId: string): Promise<number> {
+  async tokenBalance(acct: VenueAccount, tokenId: string, opts: TokenBalanceOptions = {}): Promise<number> {
     asPmAccount(acct);
     if (!tokenId.trim()) throw new Error("polymarket token balance requires a token id");
     const client = await this.secure();
     const request = { assetType: CONDITIONAL, tokenId };
-    // Refresh the CLOB's cached chain balance before using it as execution
-    // capacity. Failure cannot fall back to a potentially stale token balance.
-    await updateBalanceAllowance(client, request);
-    const result = await fetchBalanceAllowance(client, request);
+    // The CLOB caches chain balances. Re-sync before the first read of a token, when the
+    // last sync is old, or when the caller needs authoritative capacity (exit sizing).
+    // Opportunistic refreshes never enter the priority reserve of the venue's update limit.
+    const now = Date.now();
+    const last = this.tokenRefreshAt.get(tokenId);
+    let refresh = false;
+    if (opts.refresh) { this.budget.acquire("balance-allowance:update", { priority: true }); refresh = true; }
+    else if (last === undefined) refresh = this.budget.tryAcquire("balance-allowance:update", { priority: true });
+    else if (now - last >= TOKEN_BALANCE_REFRESH_MS) refresh = this.budget.tryAcquire("balance-allowance:update");
+    if (refresh) {
+      // Failure cannot fall back to a potentially stale token balance.
+      await this.budget.run("balance-allowance", () => updateBalanceAllowance(client, request));
+      this.tokenRefreshAt.set(tokenId, now);
+    }
+    const result = await this.budget.run("balance-allowance", () => fetchBalanceAllowance(client, request));
     const balance = Number(result.balance) / 1e6;
     if (!Number.isFinite(balance) || balance < 0) throw new Error(`invalid Polymarket balance for token ${tokenId}`);
     return balance;
+  }
+
+  /** A confirmed fill changed this token's inventory; the next read re-syncs the CLOB balance. */
+  invalidateTokenBalance(tokenId: string): void {
+    this.tokenRefreshAt.delete(tokenId);
   }
 
   private async marketInfoForToken(tokenId: string): Promise<{ conditionId: string; info: MarketInfo }> {
@@ -650,19 +719,13 @@ export class PolymarketAdapter implements VenueAdapter {
     return { conditionId, info };
   }
 
-  private yesTokenOf(info: MarketInfo): string {
-    const yes = info.tokens.find((t) => t.outcome.trim().toLowerCase() === "yes");
-    if (!yes) throw new Error("market has no explicitly labeled YES token");
-    return String(yes.tokenId);
-  }
+  private yesTokenOf(info: MarketInfo): string { return outcomeTokensOf(info.tokens).yes; }
 
   /** Resolve the tradable token for (marketRef = YES token, outcome). */
   private async tokenFor(marketRef: string, outcome: "YES" | "NO" | undefined): Promise<string> {
     if (outcome !== "NO") return marketRef;
     const { info } = await this.marketInfoForToken(marketRef);
-    const no = info.tokens.find((t) => t.outcome.trim().toLowerCase() === "no");
-    if (!no) throw new Error(`cannot resolve explicitly labeled NO token for ${marketRef}`);
-    return String(no.tokenId);
+    return outcomeTokensOf(info.tokens).no;
   }
 
   /** Validate an explicit token against the market's condition and outcome. */
@@ -677,9 +740,9 @@ export class PolymarketAdapter implements VenueAdapter {
       throw new Error(`token ${tokenId} condition ${conditionId} does not match ${intent.conditionId}`);
     }
     if (intent.outcome) {
-      const token = info.tokens.find((candidate) => String(candidate.tokenId) === tokenId);
-      if (token?.outcome.trim().toUpperCase() !== intent.outcome) {
-        throw new Error(`token ${tokenId} is not labeled ${intent.outcome}`);
+      const sides = outcomeTokensOf(info.tokens);
+      if (tokenId !== (intent.outcome === "YES" ? sides.yes : sides.no)) {
+        throw new Error(`token ${tokenId} is not the ${intent.outcome} side of its market`);
       }
     }
     return { tokenId, conditionId, info };
@@ -692,11 +755,21 @@ export class PolymarketAdapter implements VenueAdapter {
     return { marketRef: yesRef, isYes: yesRef === tokenId };
   }
 
-  async positions(_acct: VenueAccount): Promise<Position[]> {
+  positions(_acct: VenueAccount): Promise<Position[]> {
+    return this.memoized(this.positionsMemo, () => this.readPositions());
+  }
+
+  private async readPositions(): Promise<Position[]> {
     const client = await this.secure();
     const out: Position[] = [];
-    for await (const page of client.listPositions({ sizeThreshold: 0 })) {
-      for (const p of page.items) {
+    // One request covers the account (schema maximum 500 rows); the data API allows 150 per 10 s.
+    const rows = await this.budget.run("positions", async () => {
+      const items: Awaited<ReturnType<ReturnType<PmSecureClient["listPositions"]>["firstPage"]>>["items"] = [];
+      for await (const page of client.listPositions({ sizeThreshold: 0, pageSize: 500 })) items.push(...page.items);
+      return items;
+    });
+    {
+      for (const p of rows) {
         const size = Number(p.size ?? 0);
         if (!p.tokenId || size <= 0) continue;
         const tokenId = String(p.tokenId);
@@ -742,7 +815,7 @@ export class PolymarketAdapter implements VenueAdapter {
   }
 
   async book(marketRef: string): Promise<OrderBook> {
-    const ob = await this.pub().fetchOrderBook({ tokenId: marketRef });
+    const ob = await this.budget.run("book", () => this.pub().fetchOrderBook({ tokenId: marketRef }));
     const toNum = (l: { price: string; size: string }) => ({ price: Number(l.price), size: Number(l.size) });
     return {
       marketRef,
@@ -765,20 +838,22 @@ export class PolymarketAdapter implements VenueAdapter {
   async executionMarket(marketRef: string, outcome: "YES" | "NO"): Promise<PredictionExecutionMarket> {
     const tokenId = await this.tokenFor(marketRef, outcome);
     const { conditionId, info } = await this.marketInfoForToken(tokenId);
-    if (this.yesTokenOf(info) !== marketRef ||
-      info.tokens.find((token) => String(token.tokenId) === tokenId)?.outcome.trim().toUpperCase() !== outcome) {
+    const sides = outcomeTokensOf(info.tokens);
+    if (sides.yes !== marketRef || tokenId !== (outcome === "YES" ? sides.yes : sides.no)) {
       throw new Error("Polymarket execution token does not match the requested market and outcome");
     }
     const url = new URL("/markets", this.urls.gamma);
     url.searchParams.set("clob_token_ids", marketRef);
     const [{ raw, bookObservedAt }, { markets, metadataObservedAt }] = await Promise.all([
-      this.pub().fetchOrderBook({ tokenId }).then(raw => ({ raw, bookObservedAt: Date.now() })),
-      (async () => {
+      this.budget.run("book", async () => { const raw = await this.pub().fetchOrderBook({ tokenId }); return { raw, bookObservedAt: Date.now() }; }),
+      this.budget.run("gamma", async () => {
         const response = await fetch(url, { headers: { accept: "application/json" } });
-        if (!response.ok) throw new Error(`Polymarket execution market metadata unavailable (${response.status})`);
+        if (!response.ok) {
+          throw Object.assign(new Error(`Polymarket execution market metadata unavailable (${response.status})`), { status: response.status });
+        }
         const markets = await response.json() as Array<{ acceptingOrders?: boolean; volume24hr?: string | number }>;
         return { markets, metadataObservedAt: Date.now() };
-      })(),
+      }),
     ]);
     if (!Array.isArray(markets) || markets.length !== 1) throw new Error("Polymarket execution market metadata is ambiguous");
     if (String(raw.tokenId) !== tokenId || String(raw.conditionId).toLowerCase() !== conditionId.toLowerCase()) {
@@ -1052,7 +1127,7 @@ export class PolymarketAdapter implements VenueAdapter {
     const client = await this.secure();
     let order: Awaited<ReturnType<PmSecureClient["fetchOrder"]>>;
     try {
-      order = await client.fetchOrder({ orderId: id });
+      order = await this.budget.run("orders", () => client.fetchOrder({ orderId: id }));
     } catch (error) {
       const response = error as { name?: string; status?: number };
       if (response.name === "RequestRejectedError" && response.status === 404) return null;
@@ -1085,8 +1160,13 @@ export class PolymarketAdapter implements VenueAdapter {
   async openOrders(_acct: VenueAccount): Promise<Order[]> {
     const client = await this.secure();
     const out: Order[] = [];
-    for await (const page of client.listOpenOrders({})) {
-      for (const o of page.items) {
+    const rows = await this.budget.run("orders", async () => {
+      const items: Awaited<ReturnType<ReturnType<PmSecureClient["listOpenOrders"]>["firstPage"]>>["items"] = [];
+      for await (const page of client.listOpenOrders({})) items.push(...page.items);
+      return items;
+    });
+    {
+      for (const o of rows) {
         const tokenId = String(o.tokenId);
         const { marketRef, isYes } = await this.yesRefOf(tokenId);
         const { conditionId } = await this.marketInfoForToken(tokenId);
@@ -1125,8 +1205,13 @@ export class PolymarketAdapter implements VenueAdapter {
     // The API filters whole Unix seconds; keep an extra second at the boundary
     // and retain the exact millisecond filter below for deterministic replay.
     const request = sinceTs > 0 ? { after: String(Math.max(0, Math.floor(sinceTs / 1_000) - 1)) } : {};
-    for await (const page of client.listAccountTrades(request)) {
-      for (const t of page.items) {
+    const rows = await this.budget.run("orders", async () => {
+      const items: Awaited<ReturnType<ReturnType<PmSecureClient["listAccountTrades"]>["firstPage"]>>["items"] = [];
+      for await (const page of client.listAccountTrades(request)) items.push(...page.items);
+      return items;
+    });
+    {
+      for (const t of rows) {
         const ts = Date.parse(t.matchedAt);
         if (!Number.isFinite(ts)) throw new Error(`Polymarket trade ${t.id} has an invalid match timestamp`);
         if (ts < sinceTs) continue;

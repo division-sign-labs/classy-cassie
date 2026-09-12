@@ -23,6 +23,7 @@ export interface LocalRunOpts {
   signalsFixturePath?: string;
   quotientToken?: string;
   telegramToken?: string;
+  telegramChatId?: string;
   /** Surplus Intelligence key. Required by the agent strategy only. */
   surplusApiKey?: string;
   fixtureBooksPath?: string;

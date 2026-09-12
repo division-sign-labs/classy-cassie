@@ -83,6 +83,7 @@ async function main(): Promise<void> {
     buildId: installedBuildId(),
     quotientToken: required("QUOTIENT_API_TOKEN"),
     telegramToken: process.env.TELEGRAM_BOT_TOKEN,
+    telegramChatId: process.env.TELEGRAM_CHAT_ID,
     // Required only when the bot runs the agent strategy; buildStrategy throws
     // a targeted error there, so a plain signals bot keeps booting without it.
     surplusApiKey: config.strategy.id === "agent" ? required("SURPLUS_API_KEY") : process.env.SURPLUS_API_KEY,
@@ -115,15 +116,10 @@ async function main(): Promise<void> {
     if (terminating) return;
     terminating = true;
     log.info(`${signal} received`);
+    // A failed cancellation is logged and the process still exits: native stops stay on
+    // the venue, and the next process's first reconciliation protects any late fill.
     try { await service.shutdown(true); }
-    catch (error) {
-      log.error(`shutdown failed: ${(error as Error).message}`);
-      if (config.strategy.id === "quotient-swing") {
-        terminating = false;
-        log.warn("Supervision is still running; unresolved orders must be reconciled before shutdown.");
-        return;
-      }
-    }
+    catch (error) { log.error(`shutdown failed: ${(error as Error).message}`); }
     await dashboard?.close().catch(() => undefined);
     server.close(() => process.exit(0));
     setTimeout(() => process.exit(1), 30_000).unref();

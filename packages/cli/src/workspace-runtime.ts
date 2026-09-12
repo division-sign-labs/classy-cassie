@@ -76,7 +76,8 @@ function addBuiltTree(files: FileSet, root: string, path: string): void {
     const child = `${path}/${entry.name}`;
     if (entry.isSymbolicLink()) throw new Error(`artifact cannot contain symlinks: ${child}`);
     if (entry.isDirectory()) addBuiltTree(files, root, child);
-    else if (entry.isFile() && /\.(?:js|mjs|cjs|json|map|d\.ts)$/.test(entry.name)) addFile(files, root, child);
+    // Compiled code, source maps, declarations, JSON assets and the dashboard's static UI.
+    else if (entry.isFile() && /\.(?:js|mjs|cjs|json|map|d\.ts|css|html)$/.test(entry.name)) addFile(files, root, child);
     else throw new Error(`unexpected built artifact: ${child}`);
   }
 }

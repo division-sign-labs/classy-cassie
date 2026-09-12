@@ -73,7 +73,8 @@ uses `ARES_API_KEY` and `ARES_BUILDER_CODE`, independently of the keystore passp
 `SURPLUS_API_KEY` (the agent strategy's LLM credential) from
 the nearest `.local.env` (preferred and authoritative over stale exported values) or
 the exported environment override keystore copies; `TELEGRAM_BOT_TOKEN` overrides its
-keystore copy; `CASSIE_DEBUG=1`
+keystore copy and `TELEGRAM_CHAT_ID` (or `TELEGRAM_USER_ID`) overrides the saved chat id, so
+both Telegram values can live in `.local.env`; `CASSIE_DEBUG=1`
 prints stack traces; `DIGITALOCEAN_TOKEN` / `DIGITALOCEAN_ACCESS_TOKEN` override the token
 stored at `~/.cassie/digitalocean.token`.
 
@@ -174,7 +175,21 @@ Every step happens in the terminal; you only leave it to copy-paste dashboard va
    interval, and universe. `cassie strategy <botId>` displays or changes the same settings
    at any time. Polymarket signals bots pay Quotient 0.5% of notional per fill through
    Polymarket's builder fee; the same rate applies to maker and taker fills, and
-   `cassie strategy` shows which side the execution mode produces.
+   `cassie strategy` shows which side the execution mode produces. Adaptive entries rest
+   post-only one tick inside the ask, never above the signal's price bound, for
+   `--entry-deadline-seconds` (default 120); then a marketable limit at that bound takes
+   whatever is offered inside it for `--entry-crossing-seconds` (default 60), and any
+   remainder rests at the bound until the window closes. Set the crossing window to 0 for
+   maker-only entries. A throttled or slow venue defers supervision and keeps resting
+   orders; only a minute without any successful read cancels them, per market, without
+   halting the bot. Nothing that happens to one order stops the others: an order whose
+   POST got no answer is matched against the venue's open orders and settlements and
+   otherwise released after thirty seconds, an order the bot did not place pauses entries
+   in its own market only, and a failing venue heartbeat holds new orders until one
+   renewal succeeds. The only account-wide stops are `cassie pause` / `cassie resume`
+   for prediction bots, and `cassie swing halt` / `cassie swing resume` plus the
+   configured drawdown limit for swing bots. Every refused entry logs its reason once
+   per market every five minutes; `cassie status` lists markets still reconciling.
 8. **Quotient** — live signals and exact Q forecasts. The wizard reuses a key found from
    the Quotient CLI or asks for one. `QUOTIENT_API_KEY` and `QUOTIENT_API_TOKEN` are both
    honoured from the environment, unless the bot pins its key with `cassie signals-key`
@@ -183,7 +198,10 @@ Every step happens in the terminal; you only leave it to copy-paste dashboard va
    fixture sources exist only inside the contributor test harness; they are not an
    operator choice.
 9. **Telegram alerts** — create a bot with **@BotFather** on Telegram and paste its token;
-   get your chat id from **@userinfobot**. The wizard offers a test ping.
+   get your chat id from **@userinfobot**. The wizard offers a test ping. Or skip the
+   prompts and put `TELEGRAM_BOT_TOKEN` and `TELEGRAM_CHAT_ID` in `.local.env`: run,
+   deploy and `cassie alerts test` read them from there, and deploy forwards both to the
+   droplet.
 10. **Funding** — optionally continues straight into `cassie fund <botId>`.
 11. **Runtime** — offers to deploy the completed bot to a DigitalOcean droplet. Declining
     prints both the local-run and deploy-later commands. Reconfiguring a deployed bot

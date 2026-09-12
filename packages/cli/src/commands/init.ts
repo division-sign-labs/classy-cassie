@@ -21,6 +21,7 @@ import { clearInitState, loadInitState, saveInitState, type InitState } from "..
 import { botConfigPath, loadBotConfig, saveBotConfig } from "../paths.js";
 import { createSplitsTreasury } from "../splits-init.js";
 import { discoverQuotientToken } from "../quotient-token.js";
+import { describeTelegramFailure, localTelegramSettings } from "../telegram-settings.js";
 import { recommendedStrategySummary, elicitRecommendedStrategyConfig, elicitStrategyConfig } from "./strategy.js";
 import { AGENT_STRATEGY_SUMMARY, elicitAgentConfig, fetchAndStorePersona } from "./agent.js";
 import { discoverSurplusApiKey, verifySurplusApiKey } from "../surplus-config.js";
@@ -111,14 +112,40 @@ export interface InitTelegramDependencies {
   print: (message: string) => void;
   send: (token: string, chatId: string) => Promise<void>;
   saveToken: (token: string) => void;
+  /** Values already present in the nearest .local.env or the environment; never echoed. */
+  local?: { token?: string; chatId?: string; tokenOrigin?: string; chatIdOrigin?: string };
 }
+
+const TELEGRAM_LOCAL_ENV_HINT = "Alerts read TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID from the nearest .local.env at run, deploy and `cassie alerts test`.";
 
 /** Keep failed test credentials out of the saved configuration. */
 export async function configureInitTelegram(
   existing: { chatId: string } | undefined,
   d: InitTelegramDependencies,
 ): Promise<{ chatId: string } | undefined> {
-  if (!(await d.confirm("Set up Telegram alerts?", true))) return existing;
+  const local = d.local ?? {};
+  const hasLocal = Boolean(local.token && local.chatId);
+  const choice = await d.select("Telegram alerts", [
+    ...(hasLocal ? [{ value: "local", title: "Use TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID from .local.env" }] : []),
+    { value: "enter", title: "Enter a bot token and chat ID now" },
+    ...(hasLocal ? [] : [{ value: "later", title: "Skip: I'll set TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID in .local.env later" }]),
+    { value: "none", title: existing ? "Keep the saved alert settings" : "No alerts" },
+  ]);
+  if (choice === "none") return existing;
+  if (choice === "later") { d.print(TELEGRAM_LOCAL_ENV_HINT); return existing; }
+  if (choice === "local") {
+    d.print(`Telegram: token from ${local.tokenOrigin}; chat id from ${local.chatIdOrigin}`);
+    if (await d.confirm("Send a test message?", true)) {
+      try {
+        await d.send(local.token!, local.chatId!);
+        d.print("Telegram test sent.");
+      } catch (error) {
+        d.print(`${describeTelegramFailure(error)} Fix the values in .local.env, then run \`cassie alerts test\`.`);
+      }
+    }
+    // The saved configuration stays as it is; the values live in .local.env by choice.
+    return existing;
+  }
   d.print("Bot token: @BotFather");
   d.print("Personal chat ID: @userinfobot");
   d.print("Open your alert bot in Telegram and press Start.");
@@ -140,14 +167,7 @@ export async function configureInitTelegram(
         await d.send(token, chatId);
       } catch (error) {
         // Do not echo provider payloads: they may contain credentials or URLs.
-        const message = error instanceof Error ? error.message : "";
-        d.print(/bot.*send.*bot/i.test(message)
-          ? "Telegram rejected a bot chat ID. Use your personal chat ID."
-          : /chat not found|blocked|initiate conversation/i.test(message)
-          ? "Telegram cannot reach that chat. Check the chat ID and press Start in your alert bot."
-          : /401|unauthorized/i.test(message)
-          ? "Telegram rejected the token. Copy it from @BotFather."
-          : "Telegram test failed. Check the token, chat ID and connection.");
+        d.print(describeTelegramFailure(error));
         const next = await d.select("Telegram", [
           { value: "edit", title: "Correct settings" },
           { value: "retry", title: "Retry test" },
@@ -608,8 +628,10 @@ export async function runInit(): Promise<void> {
   }
 
   // Alerts: Telegram only in MVP.
+  const localTelegram = localTelegramSettings();
   const telegram = await configureInitTelegram(existing?.alerts.telegram, {
     ask, confirm, select,
+    local: { token: localTelegram.token?.value, chatId: localTelegram.chatId?.value, tokenOrigin: localTelegram.token?.origin, chatIdOrigin: localTelegram.chatId?.origin },
     print: message => console.log(message),
     send: (token, chatId) => new TelegramAlerter(token, chatId).send({ kind: "test", botId, message: "Cassie alert test" }),
     saveToken: token => ks.putEntry(botId, KeyRoles.telegramToken, token, pass, { runtimeEligible: true }),

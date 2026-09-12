@@ -3,7 +3,6 @@
 
 import pc from "picocolors";
 import {
-  KeyRoles,
   TelegramAlerter,
   computePortfolio,
   createAdapter,
@@ -11,8 +10,9 @@ import {
   type BotPortfolio,
   type Order,
 } from "@quotient-forecasting/cassie-core";
-import { adapterFor, controlFetch, getKeystoreSecret, isDeployed, requireAccount } from "../context.js";
+import { adapterFor, controlFetch, isDeployed, requireAccount } from "../context.js";
 import { listBotIds, loadBotConfig } from "../paths.js";
+import { describeTelegramSettings, resolveTelegramSettings } from "../telegram-settings.js";
 import { money, num, renderTable, shortRef } from "../render.js";
 
 export interface PortfolioOutputBreakdown {
@@ -195,13 +195,13 @@ function printOrders(orders: Order[]): void {
 
 export async function alertsTest(botId: string): Promise<void> {
   const cfg = loadBotConfig(botId);
-  const chatId = cfg.alerts.telegram?.chatId;
-  const token = process.env.TELEGRAM_BOT_TOKEN ?? (await getKeystoreSecret(botId, KeyRoles.telegramToken));
-  if (!chatId || !token) {
-    console.error(pc.red("Telegram needs a token and chat ID. Configure alerts in setup:\ncassie init"));
+  const telegram = await resolveTelegramSettings(botId, cfg.alerts.telegram);
+  if (!telegram.token || !telegram.chatId) {
+    console.error(pc.red(`${describeTelegramSettings(telegram)}.\nPut both in the nearest .local.env, or run: cassie init`));
     process.exit(1);
   }
-  await new TelegramAlerter(token, chatId).send({ kind: "test", botId, message: "test ping from `cassie alerts test`" });
+  console.log(pc.dim(describeTelegramSettings(telegram)));
+  await new TelegramAlerter(telegram.token, telegram.chatId).send({ kind: "test", botId, message: "test ping from `cassie alerts test`" });
   console.log(pc.green("sent"));
 }
 

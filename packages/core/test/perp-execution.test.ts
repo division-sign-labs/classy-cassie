@@ -4,6 +4,7 @@ import { PerpExecutor, PERP_EXECUTION_KEY, isProtectiveOrder } from "../src/engi
 import { MemoryStateStore } from "../src/state.js";
 import { HyperliquidOrderNotSubmittedError, HyperliquidOrderRejectedError, toCloid } from "../src/venues/hyperliquid.js";
 import { formatBoundedHlPrice } from "../src/venues/hyperliquid-perps.js";
+import { HyperliquidInfoDeferredError } from "../src/venues/hyperliquid-info-scheduler.js";
 import type { Action, Fill, Order, OrderAck, OrderIntent, Position, VenueAdapter } from "../src/types.js";
 import type { PerpAccountSnapshot, PerpCashFlow, PerpMarketSnapshot, PerpStopRequest } from "../src/perps.js";
 
@@ -115,7 +116,7 @@ function harness(config: Record<string, unknown> = {}) {
   const targets = () => [...orders.values()].filter(o => targetIds.has(o.id));
   const entries = () => mock.placeOrder.mock.calls.filter(c => !c[1].reduceOnly);
   const targetPlacements = () => mock.placeOrder.mock.calls.filter(c => c[1].purpose === "target");
-  return { executor, mock, orders, positions, flows, store, trace, alerts, addOrder, fillEntry, fillOrder, targets, entries, targetPlacements, market,
+  return { executor, mock, orders, positions, flows, store, trace, alerts, log: deps.log, addOrder, fillEntry, fillOrder, targets, entries, targetPlacements, market,
     advance: (ms = 1000) => { now += ms; }, time: () => now,
     setEquity: (n: number) => { equity = n; }, setComplete: (value: boolean) => { complete = value; },
     setAvailable: (n: number) => { availableOverride = n; },
@@ -124,48 +125,67 @@ function harness(config: Record<string, unknown> = {}) {
 }
 
 describe("protected perp executor", () => {
-  it("automatically starts fresh live execution after authoritative readiness checks", async () => {
+  it("trades a fresh ledger as soon as the first reconciliation in this process completes", async () => {
     const h = harness();
     expect(await h.executor.execute(entry())).toEqual({ placed: false });
-    expect(await h.executor.status()).toMatchObject({ halted: true, haltReason: "startup-readiness" });
-    await h.executor.start();
+    expect(h.log.warn).toHaveBeenCalledWith("perp entry refused for xyz:AAPL: reconciliation-pending");
+    expect(await h.executor.status()).toMatchObject({ halted: false, entriesPaused: "reconciliation-pending" });
+    await h.executor.reconcile();
+    expect(await h.executor.status()).toMatchObject({ halted: false, entriesPaused: undefined });
     expect(await h.executor.execute(entry())).toMatchObject({ placed: true });
     expect(h.mock.configurePerpLeverage).toHaveBeenCalledWith(ACCOUNT, { marketRef: "xyz:AAPL", leverage: 5, marginMode: "isolated" });
     expect(h.mock.placeOrder).toHaveBeenCalledTimes(1);
   });
 
-  it("migrates only a pristine legacy activation gate without an extra resume", async () => {
-    const h = harness(); await h.executor.reconcile();
-    const s = JSON.parse((await h.store.get(PERP_EXECUTION_KEY))!);
-    s.haltReason = "activation-required";
-    await h.store.set(PERP_EXECUTION_KEY, JSON.stringify(s));
-    await h.executor.start();
-    expect(await h.executor.status()).toMatchObject({ halted: false });
+  it("ignores every legacy halt persisted by an earlier runtime except operator and drawdown", async () => {
+    for (const reason of ["activation-required", "startup-readiness", "startup-readiness-failed", "shutdown-pending", "shutdown-unconfirmed", "config-drift",
+      "cash-flow-incomplete", "fill-reconciliation-unavailable", "funding-unavailable", "protection-failed", "stop-ack-unknown", "submission-unknown",
+      "unmanaged-exposure", "position-identity-mismatch", "invalid-stop", "filled-position-not-visible", "working-order-cancel-unknown", "old-stop-cancel-unknown"]) {
+      const h = harness(); await h.executor.reconcile();
+      const s = JSON.parse((await h.store.get(PERP_EXECUTION_KEY))!);
+      s.halted = true; s.haltReason = reason; s.readOutageHalt = "fills"; s.shutdownQuietUntil = 1;
+      await h.store.set(PERP_EXECUTION_KEY, JSON.stringify(s));
+      const restarted = h.restart(); await restarted.reconcile();
+      expect(await restarted.status(), reason).toMatchObject({ halted: false, haltReason: undefined });
+      expect(h.log.warn).toHaveBeenCalledWith("legacy perp halt ignored; execution resolves per market", { reason });
+      expect(h.log.warn.mock.calls.filter(([message]) => message === "legacy perp halt ignored; execution resolves per market")).toHaveLength(1);
+      const stored = JSON.parse((await h.store.get(PERP_EXECUTION_KEY))!);
+      expect(stored.halted).toBe(false); expect(stored.readOutageHalt).toBeUndefined(); expect(stored.shutdownQuietUntil).toBeUndefined();
+      expect(await restarted.execute(entry()), reason).toMatchObject({ placed: true });
+    }
+    for (const reason of ["operator", "drawdown"]) {
+      const h = harness(); await h.executor.reconcile();
+      const s = JSON.parse((await h.store.get(PERP_EXECUTION_KEY))!);
+      s.halted = true; s.haltReason = reason;
+      await h.store.set(PERP_EXECUTION_KEY, JSON.stringify(s));
+      const restarted = h.restart(); await restarted.reconcile();
+      expect(await restarted.status(), reason).toMatchObject({ halted: true, haltReason: reason });
+      expect(await restarted.execute(entry()), reason).toEqual({ placed: false });
+    }
   });
 
   it("automatically reconciles a normal active restart without duplicating an entry", async () => {
-    const h = harness(); await h.executor.start(); await h.executor.execute(entry());
+    const h = harness(); await h.executor.reconcile(); await h.executor.execute(entry());
     h.fillEntry("entry-a", 3); await h.executor.reconcile();
-    const restarted = h.restart(); await restarted.start();
+    const restarted = h.restart(); await restarted.reconcile();
     expect(await restarted.status()).toMatchObject({ halted: false });
     expect(await restarted.execute(entry())).toMatchObject({ placed: false });
     expect(h.entries()).toHaveLength(1);
     expect(h.mock.placePerpStop).toHaveBeenCalledTimes(1);
   });
 
-  it("keeps a persisted active bot entry-blocked until this process passes startup readiness", async () => {
-    const h = harness(); await h.executor.start();
+  it("keeps a persisted active bot entry-blocked until this process has reconciled once", async () => {
+    const h = harness(); await h.executor.reconcile();
     const restarted = h.restart();
-    expect(await restarted.status()).toMatchObject({ halted: false });
-    await restarted.reconcile();
+    expect(await restarted.status()).toMatchObject({ halted: false, entriesPaused: "reconciliation-pending" });
     expect(await restarted.execute(entry())).toEqual({ placed: false });
     expect(h.mock.placeOrder).not.toHaveBeenCalled();
-    await restarted.start();
+    await restarted.reconcile();
     expect(await restarted.execute(entry())).toMatchObject({ placed: true });
   });
 
   it("uses one account and one cash-flow read per idle supervision pass, without fill history", async () => {
-    const h = harness(); await h.executor.start();
+    const h = harness(); await h.executor.reconcile();
     h.mock.perpAccountSnapshot.mockClear(); h.mock.perpCashFlows.mockClear(); h.mock.fills.mockClear();
     for (let tick = 0; tick < 4; tick++) { h.advance(15_000); await h.executor.reconcile(); }
     expect(h.mock.perpAccountSnapshot).toHaveBeenCalledTimes(4);
@@ -175,7 +195,7 @@ describe("protected perp executor", () => {
   });
 
   it("unitizes an idle account's new external cash flow on the next supervision pass", async () => {
-    const h = harness(); await h.executor.start(); h.advance(15_000);
+    const h = harness(); await h.executor.reconcile(); h.advance(15_000);
     h.setEquity(1500); h.flows.push({ id: "idle-deposit", ts: h.time(), amount: 500 });
     await h.executor.reconcile();
     expect(await h.executor.status()).toMatchObject({ highWaterEquity: 1500, drawdownPct: 0, cashFlowsComplete: true });
@@ -183,7 +203,7 @@ describe("protected perp executor", () => {
   });
 
   it("reads fills once per pass when an entry is working or a position needs protection", async () => {
-    const h = harness(); await h.executor.start(); await h.executor.execute(entry());
+    const h = harness(); await h.executor.reconcile(); await h.executor.execute(entry());
     h.mock.fills.mockClear(); h.mock.perpCashFlows.mockClear();
     h.advance(15_000); await h.executor.reconcile();
     expect(h.mock.fills).toHaveBeenCalledTimes(1);
@@ -194,7 +214,7 @@ describe("protected perp executor", () => {
   });
 
   it("does not keep scanning fill history for closed and fully settled cycles", async () => {
-    const h = harness(); await h.executor.start(); await h.executor.execute(entry());
+    const h = harness(); await h.executor.reconcile(); await h.executor.execute(entry());
     for (const order of [...h.orders.values()]) await h.mock.cancelOrder(ACCOUNT, order.id);
     const stored = JSON.parse((await h.store.get(PERP_EXECUTION_KEY))!);
     stored.cycles[0].status = "closed";
@@ -205,20 +225,22 @@ describe("protected perp executor", () => {
     expect(await h.executor.status()).toMatchObject({ halted: false });
   });
 
-  it("keeps an operator halt latched through shutdown and startup until explicit recovery", async () => {
-    const h = harness(); await h.executor.start(); await h.executor.halt();
+  it("keeps an operator halt latched through shutdown and restart until explicit recovery", async () => {
+    const h = harness(); await h.executor.reconcile(); await h.executor.halt();
     await h.executor.cancelWorkingOrders();
-    const restarted = h.restart(); await restarted.start();
+    const restarted = h.restart(); await restarted.reconcile();
     expect(await restarted.status()).toMatchObject({ halted: true, haltReason: "operator" });
     expect(await restarted.execute(entry())).toEqual({ placed: false });
+    expect(h.log.warn).toHaveBeenCalledWith("perp entry refused for xyz:AAPL: halted: operator");
     await restarted.resume();
     expect(await restarted.status()).toMatchObject({ halted: false });
+    expect(await restarted.execute(entry())).toMatchObject({ placed: true });
   });
 
   it("does not automatically reset a drawdown halt during shutdown or restart", async () => {
-    const h = harness(); await h.executor.start(); h.setEquity(700); await h.executor.reconcile();
+    const h = harness(); await h.executor.reconcile(); h.setEquity(700); await h.executor.reconcile();
     await h.executor.cancelWorkingOrders();
-    const restarted = h.restart(); await restarted.start();
+    const restarted = h.restart(); await restarted.reconcile();
     expect(await restarted.status()).toMatchObject({ halted: true, haltReason: "drawdown", highWaterEquity: 1000 });
     expect((await restarted.status()).drawdownPct).toBeCloseTo(30);
     await expect(restarted.resume()).rejects.toThrow("loss-reset");
@@ -226,77 +248,93 @@ describe("protected perp executor", () => {
     expect(await restarted.status()).toMatchObject({ halted: false, highWaterEquity: 700, drawdownPct: 0 });
   });
 
-  it("does not automatically accept configuration drift even with no exposure", async () => {
-    const h = harness(); await h.executor.start(); await h.executor.cancelWorkingOrders();
-    const restarted = h.restart({ maxPositions: 2 }); await restarted.start();
-    expect(await restarted.status()).toMatchObject({ halted: true, haltReason: "config-drift" });
-    expect(await restarted.execute(entry())).toEqual({ placed: false });
-    await restarted.resume();
+  it("accepts configuration drift on restart, with or without exposure, and keeps each open cycle's own protection", async () => {
+    const h = harness(); await h.executor.reconcile(); await h.executor.execute(entry()); h.fillEntry("entry-a", 3);
+    await h.executor.reconcile(); await h.executor.cancelWorkingOrders();
+    const restarted = h.restart({ maxPositions: 2, stopSigmaMultiple: 2, maxHoldHours: 24 }); await restarted.reconcile();
+    expect(h.log.info).toHaveBeenCalledWith("perp configuration changed; accepted", { exposed: true, protectionChanged: true });
+    expect(await restarted.status()).toMatchObject({ halted: false, entriesPaused: undefined });
+    expect((await restarted.status()).cycles[0]).toMatchObject({ status: "open", stopPx: 95, anchorAt: NOW + 3 * 86_400_000 });
+    expect(await restarted.execute(entry({ marketRef: "xyz:MSFT", clientId: "entry-b", themes: ["independent"] }))).toMatchObject({ placed: true });
+    expect(JSON.parse((await h.store.get(PERP_EXECUTION_KEY))!).protectionHash).toBeDefined();
+  });
+
+  it("pauses entries on an incomplete cash-flow interval and lifts the pause on the next complete read", async () => {
+    const h = harness(); h.setComplete(false); await h.executor.reconcile();
+    expect(await h.executor.status()).toMatchObject({ halted: false, entriesPaused: "cash-flow-incomplete", cashFlowsComplete: false });
+    expect(await h.executor.execute(entry())).toEqual({ placed: false });
+    expect(h.log.warn).toHaveBeenCalledWith("perp entry refused for xyz:AAPL: cash-flow-incomplete");
+    h.setComplete(true); await h.executor.reconcile();
+    expect(await h.executor.status()).toMatchObject({ halted: false, entriesPaused: undefined, cashFlowsComplete: true });
+    expect(await h.executor.execute(entry())).toMatchObject({ placed: true });
+  });
+
+  it("writes no halt during shutdown; the next process reconciles and trades", async () => {
+    const h = harness(); await h.executor.reconcile(); h.setComplete(false);
+    await h.executor.cancelWorkingOrders();
+    expect(await h.executor.status()).toMatchObject({ halted: false, entriesPaused: "cash-flow-incomplete" });
+    h.setComplete(true); const restarted = h.restart(); await restarted.reconcile();
+    expect(await restarted.status()).toMatchObject({ halted: false, entriesPaused: undefined });
+    expect(await restarted.execute(entry())).toMatchObject({ placed: true });
+  });
+
+  it("retries protection for a restart-discovered fill every pass, trades other markets meanwhile, and exits that cycle only after the deadline", async () => {
+    const h = harness(); await h.executor.reconcile(); await h.executor.execute(entry()); h.fillEntry("entry-a", 3);
+    h.mock.placePerpStop.mockRejectedValue(new Error("protection rejected"));
+    const restarted = h.restart(); await restarted.reconcile();
+    expect(await restarted.status()).toMatchObject({ halted: false, reconcilingMarkets: ["xyz:AAPL"] });
+    expect(h.mock.placePerpStop).toHaveBeenCalledTimes(1);
+    expect(h.mock.placeOrder.mock.calls.some(c => c[1].reduceOnly === true && c[1].purpose !== "target")).toBe(false);
+    expect(h.alerts.send).toHaveBeenCalledWith(expect.objectContaining({ kind: "error", message: "Protection for xyz:AAPL not confirmed; retrying each pass" }));
+    expect(await restarted.execute(entry({ marketRef: "xyz:MSFT", clientId: "entry-b", themes: ["independent"] }))).toMatchObject({ placed: true });
+    h.advance(60_000); await restarted.reconcile(); h.advance(60_000); await restarted.reconcile();
+    expect(h.mock.placePerpStop.mock.calls.length).toBeGreaterThanOrEqual(2);
+    expect((await restarted.status()).cycles[0]!.status).toBe("open");
+    h.advance(60_000); await restarted.reconcile();
+    expect((await restarted.status()).cycles[0]).toMatchObject({ status: "exiting", exitReason: "protection-failed" });
+    expect(h.mock.placeOrder.mock.calls.some(c => c[1].reduceOnly === true && c[1].marketRef === "xyz:AAPL")).toBe(true);
+    expect((await restarted.status()).cycles[1]).toMatchObject({ marketRef: "xyz:MSFT", status: "pending" });
     expect(await restarted.status()).toMatchObject({ halted: false });
   });
 
-  it("preserves every non-startup safety halt even after its immediate condition clears", async () => {
-    for (const reason of ["cash-flow-incomplete", "fill-reconciliation-unavailable", "protection-failed",
-      "stop-ack-unknown", "submission-unknown", "shutdown-unconfirmed", "shutdown-pending", "funding-unavailable"]) {
-      const h = harness(); await h.executor.start(); await h.executor.halt(reason);
-      await h.executor.cancelWorkingOrders(); await h.restart().start();
-      expect(await h.executor.status()).toMatchObject({ halted: true, haltReason: reason });
-      expect(await h.executor.execute(entry())).toEqual({ placed: false });
-    }
-  });
-
-  it("keeps a fresh cash-flow failure halted on subsequent otherwise healthy startup checks", async () => {
-    const h = harness(); h.setComplete(false); await h.executor.start();
-    expect(await h.executor.status()).toMatchObject({ halted: true, haltReason: "cash-flow-incomplete" });
-    h.setComplete(true); await h.executor.start();
-    expect(await h.executor.status()).toMatchObject({ halted: true, haltReason: "cash-flow-incomplete", cashFlowsComplete: true });
-  });
-
-  it("does not turn a safety failure discovered during clean shutdown into an auto-restart marker", async () => {
-    const h = harness(); await h.executor.start(); h.setComplete(false);
-    await h.executor.cancelWorkingOrders();
-    expect(await h.executor.status()).toMatchObject({ halted: true, haltReason: "cash-flow-incomplete" });
-    h.setComplete(true); await h.restart().start();
-    expect(await h.executor.status()).toMatchObject({ halted: true, haltReason: "cash-flow-incomplete" });
-  });
-
-  it("protects restart-discovered fills and remains halted if native protection fails", async () => {
-    const h = harness(); await h.executor.start(); await h.executor.execute(entry()); h.fillEntry("entry-a", 3);
-    h.mock.placePerpStop.mockRejectedValue(new Error("protection rejected"));
-    const restarted = h.restart(); await restarted.start();
-    expect(await restarted.status()).toMatchObject({ halted: true, haltReason: "protection-failed" });
-    expect(h.mock.placePerpStop).toHaveBeenCalledTimes(1);
-    expect(h.mock.placeOrder.mock.calls.some(c => c[1].reduceOnly === true)).toBe(true);
-    expect(await restarted.execute(entry({ marketRef: "xyz:MSFT", clientId: "entry-b" }))).toEqual({ placed: false });
-  });
-
-  it("rejects unmanaged exposure discovered during initial live startup", async () => {
+  it("pauses only the market holding unmanaged exposure discovered at startup", async () => {
     const h = harness();
     h.positions.push({ marketRef: "xyz:OTHER", side: "LONG", size: 1, avgPrice: 100, currentPrice: 100, marginMode: "isolated", leverage: 5 });
-    await h.executor.start();
-    expect(await h.executor.status()).toMatchObject({ halted: true, haltReason: "unmanaged-exposure" });
+    await h.executor.reconcile();
+    expect(await h.executor.status()).toMatchObject({ halted: false, unmanagedMarkets: ["xyz:OTHER"] });
+    expect(h.log.warn).toHaveBeenCalledWith("unmanaged venue exposure in xyz:OTHER; entries there wait until it is resolved");
+    expect(await h.executor.execute(entry({ marketRef: "xyz:OTHER", clientId: "entry-o" }))).toEqual({ placed: false });
     expect(h.mock.placeOrder).not.toHaveBeenCalled();
+    expect(await h.executor.execute(entry())).toMatchObject({ placed: true });
+    expect(h.mock.placePerpStop.mock.calls.every(c => c[1].marketRef !== "xyz:OTHER")).toBe(true);
+    h.positions.splice(0, 1); await h.executor.reconcile();
+    expect(await h.executor.status()).toMatchObject({ unmanagedMarkets: undefined });
+    expect(h.log.info).toHaveBeenCalledWith("unmanaged exposure in xyz:OTHER cleared");
   });
 
-  it("blocks active persisted execution if startup reconciliation throws before ledger updates", async () => {
-    const h = harness(); await h.executor.start();
+  it("waits for a completed reconciliation when the first one throws, without latching anything", async () => {
+    const h = harness(); await h.executor.reconcile();
     h.mock.disarmScheduledCancel.mockRejectedValueOnce(new Error("venue unavailable"));
-    const restarted = h.restart(); await expect(restarted.start()).rejects.toThrow("venue unavailable");
-    expect(await restarted.status()).toMatchObject({ halted: true, haltReason: "startup-readiness-failed" });
-    await restarted.start();
+    const restarted = h.restart(); await expect(restarted.reconcile()).rejects.toThrow("venue unavailable");
+    expect(await restarted.status()).toMatchObject({ halted: false, entriesPaused: "reconciliation-pending" });
     expect(await restarted.execute(entry())).toEqual({ placed: false });
+    await restarted.reconcile();
+    expect(await restarted.execute(entry())).toMatchObject({ placed: true });
   });
 
-  it("blocks a crash-persisted prepared submission even if its ledger was previously active", async () => {
-    const h = harness(); await h.executor.start();
+  it("keeps a crash-persisted prepared submission reserved in its market only", async () => {
+    const h = harness(); await h.executor.reconcile();
     h.mock.placeOrder.mockRejectedValueOnce(new Error("response lost"));
     await expect(h.executor.execute(entry())).rejects.toThrow("response lost");
     const s = JSON.parse((await h.store.get(PERP_EXECUTION_KEY))!);
-    s.halted = false; delete s.haltReason; s.submissions["entry-a"].status = "prepared";
+    s.submissions["entry-a"].status = "prepared";
     await h.store.set(PERP_EXECUTION_KEY, JSON.stringify(s));
-    const restarted = h.restart(); await expect(restarted.start()).rejects.toThrow("unresolved perp execution");
-    expect(await restarted.status()).toMatchObject({ halted: true, haltReason: "startup-readiness-failed" });
+    const restarted = h.restart(); await restarted.reconcile();
+    expect(await restarted.status()).toMatchObject({ halted: false, reconcilingMarkets: ["xyz:AAPL"] });
+    expect(JSON.parse((await h.store.get(PERP_EXECUTION_KEY))!).submissions["entry-a"].status).toBe("unknown");
+    expect(await restarted.execute(entry({ clientId: "entry-c" }))).toEqual({ placed: false });
     expect(h.mock.placeOrder).toHaveBeenCalledTimes(1);
+    expect(await restarted.execute(entry({ marketRef: "xyz:MSFT", clientId: "entry-b", themes: ["independent"] }))).toMatchObject({ placed: true });
   });
 
   it("protects each actual partial fill and replaces protection before canceling the old stop", async () => {
@@ -320,55 +358,74 @@ describe("protected perp executor", () => {
     expect([...h.orders.keys()].sort()).toEqual([stop.id, h.targets()[0]!.id].sort());
     expect(h.mock.cancelAll).not.toHaveBeenCalled();
     expect(h.mock.disarmScheduledCancel).toHaveBeenCalled();
-    expect(await h.executor.status()).toMatchObject({ halted: true, haltReason: "shutdown-complete" });
-    const restarted = h.restart(); await restarted.start();
-    expect(await restarted.status()).toMatchObject({ halted: false });
+    expect(await h.executor.status()).toMatchObject({ halted: false });
+    const restarted = h.restart(); await restarted.reconcile();
+    expect(await restarted.status()).toMatchObject({ halted: false, entriesPaused: undefined });
     expect(h.orders.has(stop.id)).toBe(true);
   });
 
   it.each([
     "Cannot set scheduled cancel time until enough volume traded. Required: $1000000. Traded: $0.",
     "scheduleCancel acknowledgement timed out",
-  ])("does not infer a safe timer state from a raw disarm failure: %s", async message => {
-    const h = harness(); await h.executor.start();
+  ])("logs a disarm failure at shutdown, finishes the other steps and writes no halt: %s", async message => {
+    const h = harness(); await h.executor.reconcile();
     h.mock.disarmScheduledCancel.mockClear().mockRejectedValueOnce(new Error(message));
-    h.mock.openOrders.mockClear(); h.mock.perpAccountSnapshot.mockClear();
-    await expect(h.executor.cancelWorkingOrders()).rejects.toThrow(message);
-    expect(h.mock.disarmScheduledCancel).toHaveBeenCalledTimes(1);
-    expect(h.mock.openOrders).not.toHaveBeenCalled();
-    expect(h.mock.perpAccountSnapshot).not.toHaveBeenCalled();
+    await h.executor.cancelWorkingOrders();
+    expect(h.log.warn).toHaveBeenCalledWith(`shutdown cancel-timer disarm failed: Error: ${message}`);
+    expect(h.mock.openOrders).toHaveBeenCalled();
     expect(h.mock.cancelAll).not.toHaveBeenCalled();
-    expect(await h.executor.status()).toMatchObject({ halted: true, haltReason: "shutdown-pending" });
-    // Only an adapter-certified result can resolve disarm. Later successful
-    // reads must not convert this failed shutdown into an automatic restart.
-    const restarted = h.restart(); await restarted.start();
-    expect(await restarted.status()).toMatchObject({ halted: true, haltReason: "shutdown-pending" });
-    expect(await restarted.execute(entry())).toEqual({ placed: false });
-    expect(h.mock.placeOrder).not.toHaveBeenCalled();
+    expect(await h.executor.status()).toMatchObject({ halted: false });
+    const restarted = h.restart(); await restarted.reconcile();
+    expect(await restarted.execute(entry())).toMatchObject({ placed: true });
   });
 
-  it("requires final disarm confirmation even after flat-account shutdown checks pass", async () => {
-    const h = harness(); await h.executor.start();
-    h.mock.disarmScheduledCancel.mockClear()
-      .mockResolvedValueOnce(undefined).mockResolvedValueOnce(undefined)
-      .mockRejectedValueOnce(new Error("final timer deletion acknowledgement lost"));
-    h.mock.perpAccountSnapshot.mockClear();
-    await expect(h.executor.cancelWorkingOrders()).rejects.toThrow("final timer deletion acknowledgement lost");
-    expect(h.mock.disarmScheduledCancel).toHaveBeenCalledTimes(3);
-    expect(h.mock.perpAccountSnapshot).toHaveBeenCalledTimes(2);
-    expect(await h.executor.status()).toMatchObject({ halted: true, haltReason: "shutdown-pending" });
-    expect(h.mock.cancelAll).not.toHaveBeenCalled();
-    expect(h.mock.placeOrder).not.toHaveBeenCalled();
+  it("trades again after a shutdown the process did not survive", async () => {
+    const h = harness(); await h.executor.reconcile(); await h.executor.execute(entry());
+    h.fillEntry("entry-a", 3); await h.executor.reconcile();
+    // SIGKILL mid-shutdown under the old runtime left this marker; it is ignored.
+    const s = JSON.parse((await h.store.get(PERP_EXECUTION_KEY))!);
+    s.halted = true; s.haltReason = "shutdown-pending";
+    await h.store.set(PERP_EXECUTION_KEY, JSON.stringify(s));
+    const restarted = h.restart(); await restarted.reconcile();
+    expect(await restarted.status()).toMatchObject({ halted: false });
+    expect(await restarted.execute(entry())).toMatchObject({ placed: false });
+    expect(h.entries()).toHaveLength(1);
+    expect(h.mock.placePerpStop).toHaveBeenCalledTimes(1);
   });
 
-  it("protects a final partial fill racing entry cancellation before confirming shutdown", async () => {
-    const h = harness(); await h.executor.resume(); await h.executor.execute(entry());
+  it("finishes shutdown through a transient venue failure without a halt", async () => {
+    const h = harness(); await h.executor.reconcile();
+    h.mock.openOrders.mockRejectedValueOnce(Object.assign(new Error("Unknown HTTP request error: fetch failed"), { name: "TransportError" }));
+    await h.executor.cancelWorkingOrders();
+    expect(h.log.warn).toHaveBeenCalledWith(expect.stringMatching(/^shutdown entry cancellation failed: /));
+    expect(await h.executor.status()).toMatchObject({ halted: false });
+    const restarted = h.restart(); await restarted.reconcile();
+    expect(await restarted.status()).toMatchObject({ halted: false, entriesPaused: undefined });
+  });
+
+  it("finishes shutdown while the venue is unreachable; the next process reconciles and trades", async () => {
+    const h = harness(); await h.executor.reconcile(); await h.executor.execute(entry());
+    h.fillEntry("entry-a", 3); await h.executor.reconcile();
+    const open = h.mock.openOrders.getMockImplementation()!;
+    h.mock.openOrders.mockRejectedValue(Object.assign(new Error("fetch failed"), { name: "TransportError" }));
+    const before = h.time();
+    await h.executor.cancelWorkingOrders();
+    expect(h.time() - before).toBeLessThan(5_000);
+    expect(await h.executor.status()).toMatchObject({ halted: false });
+    h.mock.openOrders.mockImplementation(open);
+    const restarted = h.restart(); await restarted.reconcile();
+    expect(await restarted.status()).toMatchObject({ halted: false, entriesPaused: undefined });
+    expect(h.entries()).toHaveLength(1);
+    expect(h.mock.placePerpStop).toHaveBeenCalledTimes(1);
+    expect(await restarted.execute(entry({ clientId: "entry-b", marketRef: "xyz:MSFT", themes: ["independent"] }))).toMatchObject({ placed: true });
+  });
+
+  it("protects a final partial fill racing entry cancellation during shutdown", async () => {
+    const h = harness(); await h.executor.reconcile(); await h.executor.execute(entry());
     h.fillEntry("entry-a", 1); await h.executor.reconcile();
     const cancel = h.mock.cancelOrder.getMockImplementation()!;
     h.mock.cancelOrder.mockImplementationOnce(async (account, id) => { h.fillEntry("entry-a", .75); await cancel(account, id); });
-    const before = h.time();
     await h.executor.cancelWorkingOrders();
-    expect(h.time() - before).toBeGreaterThanOrEqual(5_000);
     const stops = [...h.orders.values()].filter(isProtectiveOrder);
     expect(stops).toHaveLength(1);
     expect(stops[0]!.size).toBe(1.75);
@@ -378,50 +435,68 @@ describe("protected perp executor", () => {
     expect(h.targets()[0]!.size).toBe(1.75);
   });
 
-  it("refuses shutdown for an unknown entry acknowledgement and keeps its reservation", async () => {
-    const h = harness(); await h.executor.resume();
+  it("keeps an unknown entry acknowledgement reserved in its market through shutdown and restart", async () => {
+    const h = harness(); await h.executor.reconcile();
     h.mock.placeOrder.mockRejectedValueOnce(new Error("entry ack lost"));
     await expect(h.executor.execute(entry())).rejects.toThrow("entry ack lost");
-    await expect(h.executor.cancelWorkingOrders()).rejects.toThrow("order acknowledgement unresolved");
-    expect(await h.executor.status()).toMatchObject({ halted: true, haltReason: "shutdown-unconfirmed" });
+    await h.executor.cancelWorkingOrders();
+    expect(await h.executor.status()).toMatchObject({ halted: false, reconcilingMarkets: ["xyz:AAPL"] });
     expect((await h.executor.status()).cycles[0]!.status).toBe("pending");
     expect(h.mock.placeOrder).toHaveBeenCalledTimes(1);
+    const restarted = h.restart(); await restarted.reconcile();
+    expect(await restarted.status()).toMatchObject({ halted: false, reconcilingMarkets: ["xyz:AAPL"] });
+    expect(await restarted.execute(entry({ clientId: "entry-c" }))).toEqual({ placed: false });
+    expect(h.mock.placeOrder).toHaveBeenCalledTimes(1);
+    expect(await restarted.execute(entry({ clientId: "entry-b", marketRef: "xyz:MSFT", themes: ["independent"] }))).toMatchObject({ placed: true });
   });
 
-  it("reports a failed cancellation while still protecting its partial fill", async () => {
-    const h = harness(); await h.executor.resume(); await h.executor.execute(entry()); h.fillEntry("entry-a", 1);
+  it("logs a failed entry cancellation at shutdown while still protecting the partial fill", async () => {
+    const h = harness(); await h.executor.reconcile(); await h.executor.execute(entry()); h.fillEntry("entry-a", 1);
     h.mock.cancelOrder.mockRejectedValue(new Error("cancel request failed"));
-    await expect(h.executor.cancelWorkingOrders()).rejects.toThrow("cancellation acknowledgement unconfirmed");
+    await h.executor.cancelWorkingOrders();
+    expect(h.log.warn).toHaveBeenCalledWith(expect.stringMatching(/^shutdown entry cancellation failed: /));
     expect(h.mock.placePerpStop).toHaveBeenCalledTimes(1);
     expect([...h.orders.values()].find(isProtectiveOrder)!.size).toBe(1);
     expect([...h.orders.values()].some(o => !isProtectiveOrder(o))).toBe(true);
-    expect(await h.executor.status()).toMatchObject({ halted: true });
+    expect(await h.executor.status()).toMatchObject({ halted: false });
   });
 
-  it("refuses shutdown when a late fill cannot receive a confirmed native stop", async () => {
-    const h = harness(); await h.executor.resume(); await h.executor.execute(entry());
+  it("keeps retrying protection for a late fill discovered at shutdown, without a halt", async () => {
+    const h = harness(); await h.executor.reconcile(); await h.executor.execute(entry());
     const cancel = h.mock.cancelOrder.getMockImplementation()!;
     h.mock.cancelOrder.mockImplementationOnce(async (account, id) => { h.fillEntry("entry-a", 1); await cancel(account, id); });
     h.mock.placePerpStop.mockRejectedValue(new Error("native stop rejected"));
-    await expect(h.executor.cancelWorkingOrders()).rejects.toThrow("Shutdown not confirmed");
+    await h.executor.cancelWorkingOrders();
     expect(h.positions[0]!.size).toBe(1);
-    expect(await h.executor.status()).toMatchObject({ halted: true, haltReason: "shutdown-unconfirmed" });
+    expect(h.mock.placePerpStop).toHaveBeenCalledTimes(1);
+    expect(await h.executor.status()).toMatchObject({ halted: false, reconcilingMarkets: ["xyz:AAPL"] });
+    const restarted = h.restart(); h.advance(35_000); await restarted.reconcile();
+    expect(h.mock.placePerpStop).toHaveBeenCalledTimes(2);
   });
 
-  it("retains an uncertain submission across restart without duplicate entry", async () => {
-    const h = harness(); await h.executor.resume();
+  it("retains an uncertain submission across restart in its own market, and releases it after the deadline", async () => {
+    const h = harness(); await h.executor.reconcile();
     h.mock.placeOrder.mockRejectedValueOnce(new Error("transport timed out after submission"));
     await expect(h.executor.execute(entry())).rejects.toThrow("timed out");
+    expect(h.alerts.send).toHaveBeenCalledWith(expect.objectContaining({ kind: "error", message: "Order acknowledgement unknown for xyz:AAPL; reservation retained for that market" }));
     const restarted = h.restart();
-    h.advance(600_000); await restarted.reconcile();
-    expect(await restarted.execute(entry())).toEqual({ placed: false });
+    h.advance(300_000); await restarted.reconcile();
+    expect(await restarted.status()).toMatchObject({ halted: false, reconcilingMarkets: ["xyz:AAPL"] });
+    // The same client id is idempotent: it reports the existing reservation and places nothing.
+    expect(await restarted.execute(entry())).toMatchObject({ clientId: "entry-a" });
+    expect(await restarted.execute(entry({ clientId: "entry-c" }))).toEqual({ placed: false });
     expect(h.mock.placeOrder).toHaveBeenCalledTimes(1);
-    const stored = JSON.parse((await h.store.get(PERP_EXECUTION_KEY))!);
+    let stored = JSON.parse((await h.store.get(PERP_EXECUTION_KEY))!);
     expect(stored.submissions["entry-a"].status).toBe("unknown");
     expect(stored.cycles[0].status).toBe("pending");
-    await restarted.start();
-    expect(await restarted.status()).toMatchObject({ halted: true, haltReason: "submission-unknown" });
-    await expect(restarted.resume()).rejects.toThrow("unresolved");
+    expect(await restarted.execute(entry({ clientId: "entry-b", marketRef: "xyz:MSFT", themes: ["independent"] }))).toMatchObject({ placed: true });
+    // Ten minutes with no order, fill or position: the reservation is released and the cycle closes.
+    h.advance(300_000); await restarted.reconcile(); h.advance(6_000); await restarted.reconcile();
+    stored = JSON.parse((await h.store.get(PERP_EXECUTION_KEY))!);
+    expect(stored.submissions["entry-a"]).toMatchObject({ status: "terminal", rejectionReason: "acknowledgement never resolved" });
+    expect(stored.cycles[0].status).toBe("closed");
+    expect(await restarted.status()).toMatchObject({ halted: false, reconcilingMarkets: undefined });
+    expect(await restarted.execute(entry({ clientId: "entry-d" }))).toMatchObject({ placed: true });
   });
 
   it.each(["typed-error", "rejected-ack", "preflight-deferral"])("releases a definitely unplaced entry without halting (%s)", async (source) => {
@@ -435,7 +510,7 @@ describe("protected perp executor", () => {
     expect(stored.submissions["entry-a"]).toMatchObject({ status: "terminal", ack: { status: "rejected" } });
     expect(h.alerts.send.mock.calls.some(([a]) => a.kind === "skipped-order")).toBe(true);
     expect(h.alerts.send.mock.calls.some(([a]) => a.kind === "entry")).toBe(false);
-    const restarted = h.restart(); await restarted.start();
+    const restarted = h.restart(); await restarted.reconcile();
     expect(await restarted.execute(entry())).toMatchObject({ placed: false });
     expect(h.mock.placeOrder).toHaveBeenCalledTimes(1);
     expect(await restarted.execute(entry({ clientId: "entry-b" }))).toMatchObject({ placed: true });
@@ -459,15 +534,21 @@ describe("protected perp executor", () => {
     expect(h.alerts.send.mock.calls.filter(([a]) => a.kind === "exit")).toHaveLength(1);
   });
 
-  it("keeps an ambiguous exit reserved across restart and never submits a second exit", async () => {
+  it("keeps an ambiguous exit reserved across restart, then submits a fresh reduce-only exit once the reservation lapses", async () => {
     const h = harness(); await h.executor.resume(); await h.executor.execute(entry());
     h.fillEntry("entry-a", 3); await h.executor.reconcile();
     h.mock.placeOrder.mockRejectedValueOnce(new Error("transport timed out after submission"));
     await expect(h.executor.execute({ kind: "exit", marketRef: "xyz:AAPL", fraction: 1, postOnly: true, reason: "median_crossed_entry" })).rejects.toThrow("timed out");
-    h.advance(600_000); const restarted = h.restart(); await restarted.reconcile();
-    expect(await restarted.status()).toMatchObject({ halted: true, haltReason: "submission-unknown" });
-    await expect(restarted.resume()).rejects.toThrow("unresolved");
+    h.advance(300_000); const restarted = h.restart(); await restarted.reconcile();
+    expect(await restarted.status()).toMatchObject({ halted: false, reconcilingMarkets: ["xyz:AAPL"] });
     expect(h.mock.placeOrder.mock.calls.filter(([, i]) => i.purpose?.endsWith("exit"))).toHaveLength(1);
+    expect([...h.orders.values()].some(isProtectiveOrder)).toBe(true);
+    expect(await restarted.execute(entry({ clientId: "entry-b", marketRef: "xyz:MSFT", themes: ["independent"] }))).toMatchObject({ placed: true });
+    h.advance(300_000); await restarted.reconcile();
+    // The position is still open, so the exit is retried; reduce-only bounds it to the position.
+    const exits = h.mock.placeOrder.mock.calls.filter(([, i]) => i.purpose?.endsWith("exit"));
+    expect(exits).toHaveLength(2);
+    expect(exits[1]![1]).toMatchObject({ reduceOnly: true, marketRef: "xyz:AAPL" });
     expect([...h.orders.values()].some(isProtectiveOrder)).toBe(true);
   });
 
@@ -499,13 +580,14 @@ describe("protected perp executor", () => {
     expect(await h.executor.status()).toMatchObject({ highWaterEquity: 900, halted: false, drawdownPct: 0 });
   });
 
-  it("an incomplete cash-flow interval halts additions while still protecting filled exposure", async () => {
+  it("an incomplete cash-flow interval pauses additions while still protecting filled exposure", async () => {
     const h = harness(); await h.executor.resume(); await h.executor.execute(entry()); h.fillEntry("entry-a", 1);
     h.setComplete(false); await h.executor.reconcile();
-    expect(await h.executor.status()).toMatchObject({ halted: true, cashFlowsComplete: false });
+    expect(await h.executor.status()).toMatchObject({ halted: false, entriesPaused: "cash-flow-incomplete", cashFlowsComplete: false });
     expect(h.mock.placePerpStop).toHaveBeenCalledTimes(1);
     expect(await h.executor.execute(entry({ marketRef: "xyz:MSFT", clientId: "entry-b" }))).toEqual({ placed: false });
-    await expect(h.executor.resume()).rejects.toThrow("cash-flow");
+    h.setComplete(true); await h.executor.reconcile();
+    expect(await h.executor.execute(entry({ marketRef: "xyz:MSFT", clientId: "entry-b", themes: ["independent"] }))).toMatchObject({ placed: true });
   });
 
   it("reserves pending gross exposure and sizes subsequent orders dynamically from NAV", async () => {
@@ -533,20 +615,23 @@ describe("protected perp executor", () => {
     expect((await h.executor.status()).cycles[0]).toMatchObject({ initialStopPx: 95, stopPx: 96, anchorAt: NOW + 3 * 86_400_000 });
   });
 
-  it("halts on unmanaged exposure without claiming ownership or placing an entry", async () => {
+  it("pauses only the market with unmanaged exposure, without claiming ownership of it", async () => {
     const h = harness(); await h.executor.resume();
     h.positions.push({ marketRef: "xyz:OTHER", side: "LONG", size: 1, avgPrice: 100, currentPrice: 100, marginMode: "isolated", leverage: 5 });
     await h.executor.reconcile();
-    expect(await h.executor.status()).toMatchObject({ halted: true, haltReason: "unmanaged-exposure" });
+    expect(await h.executor.status()).toMatchObject({ halted: false, unmanagedMarkets: ["xyz:OTHER"] });
     expect(h.mock.placePerpStop).not.toHaveBeenCalled();
-    expect(await h.executor.execute(entry())).toEqual({ placed: false });
+    expect(await h.executor.execute(entry({ marketRef: "xyz:OTHER", clientId: "entry-o" }))).toEqual({ placed: false });
+    expect(await h.executor.execute(entry())).toMatchObject({ placed: true });
   });
 
-  it("rejects fresh unmanaged exposure that appears after the previous reconciliation", async () => {
+  it("refuses an entry into a market whose unmanaged exposure appeared after the previous reconciliation", async () => {
     const h = harness(); await h.executor.resume();
     h.positions.push({ marketRef: "xyz:OTHER", side: "LONG", size: 20, avgPrice: 100, currentPrice: 100, marginMode: "isolated", leverage: 5 });
-    expect(await h.executor.execute(entry())).toEqual({ placed: false });
+    expect(await h.executor.execute(entry({ marketRef: "xyz:OTHER", clientId: "entry-o" }))).toEqual({ placed: false });
+    expect(h.log.warn).toHaveBeenCalledWith("perp entry refused for xyz:OTHER: unmanaged venue exposure in this market");
     expect(h.mock.placeOrder).not.toHaveBeenCalled();
+    expect(await h.executor.execute(entry())).toMatchObject({ placed: true });
   });
 
   it("blocks a drawdown that occurs between reconciliation and entry submission", async () => {
@@ -563,13 +648,20 @@ describe("protected perp executor", () => {
     expect(h.mock.placeOrder.mock.calls.some(c => c[1].reduceOnly === true)).toBe(true);
   });
 
-  it("does not confirm an acknowledged protective order that covers the wrong quantity", async () => {
+  it("does not confirm an acknowledged protective order that covers the wrong quantity, and replaces it on the next pass", async () => {
     const h = harness(); await h.executor.resume(); await h.executor.execute(entry()); h.fillEntry("entry-a", 3);
     const place = h.mock.placePerpStop.getMockImplementation()!;
     h.mock.placePerpStop.mockImplementationOnce((account, request) => place(account, { ...request, size: request.size / 2 }));
     await h.executor.reconcile();
-    expect(await h.executor.status()).toMatchObject({ halted: true, haltReason: "protection-failed" });
-    expect(h.mock.placeOrder.mock.calls.some(c => c[1].reduceOnly === true)).toBe(true);
+    expect(await h.executor.status()).toMatchObject({ halted: false, reconcilingMarkets: ["xyz:AAPL"] });
+    expect((await h.executor.status()).cycles[0]!.stopConfirmedAt).toBeUndefined();
+    expect(h.mock.placeOrder.mock.calls.some(c => c[1].reduceOnly === true && c[1].purpose !== "target")).toBe(false);
+    h.advance(); await h.executor.reconcile();
+    expect(h.mock.placePerpStop).toHaveBeenCalledTimes(2);
+    expect((await h.executor.status()).cycles[0]!.stopConfirmedAt).toBeDefined();
+    expect([...h.orders.values()].filter(isProtectiveOrder)).toHaveLength(1);
+    expect([...h.orders.values()].find(isProtectiveOrder)!.size).toBe(3);
+    expect(await h.executor.status()).toMatchObject({ halted: false, reconcilingMarkets: undefined });
   });
 
   it("recovers a lost native-stop acknowledgement without labeling its hashed CLOID unmanaged", async () => {
@@ -619,48 +711,43 @@ describe("protected perp executor", () => {
     } finally { vi.useRealTimers(); }
   });
 
-  it("allows resume once a cycle that failed protection has been exited and closed", async () => {
+  it("replaces a stop whose venue geometry does not match, and exits that cycle alone only when the deadline passes", async () => {
     const h = harness(); await h.executor.resume(); await h.executor.execute(entry()); h.fillEntry("entry-a", 3);
     const place = h.mock.placePerpStop.getMockImplementation()!;
-    // The venue acknowledges the stop but the index reports a mismatched geometry: protection fails, the position is exited.
-    h.mock.placePerpStop.mockImplementationOnce(async (account, request) => place(account, { ...request, stopPx: request.stopPx * 0.9 }));
+    // Every acknowledged stop rests with the wrong trigger: protection never confirms.
+    h.mock.placePerpStop.mockImplementation(async (account, request) => place(account, { ...request, stopPx: request.stopPx * 0.9 }));
     await h.executor.reconcile();
-    expect(await h.executor.status()).toMatchObject({ halted: true, haltReason: "protection-failed" });
-    expect(h.mock.placeOrder.mock.calls.some(c => c[1].reduceOnly === true && c[1].purpose !== "target")).toBe(true);
+    expect(await h.executor.status()).toMatchObject({ halted: false, reconcilingMarkets: ["xyz:AAPL"] });
+    expect(h.mock.placeOrder.mock.calls.some(c => c[1].reduceOnly === true && c[1].purpose !== "target")).toBe(false);
+    h.advance(120_000); await h.executor.reconcile();
+    expect((await h.executor.status()).cycles[0]!.status).toBe("open");
+    h.advance(60_000); await h.executor.reconcile();
+    expect((await h.executor.status()).cycles[0]).toMatchObject({ status: "exiting", exitReason: "protection-failed" });
     const exit = [...h.orders.values()].find(o => o.reduceOnly && !o.isTrigger && o.marketRef === "xyz:AAPL" && o.status === "open");
     expect(exit).toBeDefined();
     h.fillOrder(exit!.id, exit!.size);
     h.advance(6 * 60_000); await h.executor.reconcile(); h.advance(6 * 60_000); await h.executor.reconcile();
     const closed = (await h.executor.status()).cycles.find(c => c.marketRef === "xyz:AAPL");
     expect(closed?.status).toBe("closed");
-    await h.executor.resume();
-    expect((await h.executor.status()).halted).toBe(false);
+    expect(await h.executor.status()).toMatchObject({ halted: false, reconcilingMarkets: undefined });
+    expect(await h.executor.execute(entry({ clientId: "entry-b" }))).toMatchObject({ placed: true });
   });
 
-  it("resumes a sizing-only configuration change with exposure and refuses a protection change", async () => {
+  it("accepts sizing and protection configuration changes with exposure; open cycles keep their recorded stop", async () => {
     const h = harness(); await h.executor.resume(); await h.executor.execute(entry()); h.fillEntry("entry-a", 3);
     await h.executor.reconcile();
-    const sized = h.restart({ maxPositions: 9, singleMarginPct: 10, totalMarginPct: 90 });
-    await sized.resume();
+    const sized = h.restart({ maxPositions: 9, singleMarginPct: 10, totalMarginPct: 90 }); await sized.reconcile();
     expect(await sized.status()).toMatchObject({ halted: false });
     expect((await sized.status()).cycles[0]).toMatchObject({ status: "open" });
-    const tighter = h.restart({ maxPositions: 9, stopSigmaMultiple: 2 });
-    await expect(tighter.resume()).rejects.toThrow("active exposure");
-    const hold = h.restart({ maxHoldHours: 24 });
-    await expect(hold.resume()).rejects.toThrow("active exposure");
-  });
-
-  it("refuses a configuration change with exposure when the ledger predates protection tracking", async () => {
-    const h = harness(); await h.executor.resume(); await h.executor.execute(entry()); h.fillEntry("entry-a", 3);
-    await h.executor.reconcile();
+    const tighter = h.restart({ maxPositions: 9, stopSigmaMultiple: 2 }); await tighter.reconcile();
+    expect(await tighter.status()).toMatchObject({ halted: false });
+    expect((await tighter.status()).cycles[0]).toMatchObject({ status: "open", stopPx: 95 });
+    expect(h.log.info).toHaveBeenCalledWith("perp configuration changed; accepted", { exposed: true, protectionChanged: true });
     const s = JSON.parse((await h.store.get(PERP_EXECUTION_KEY))!);
-    delete s.protectionHash;
-    await h.store.set(PERP_EXECUTION_KEY, JSON.stringify(s));
-    await expect(h.restart({ maxPositions: 9 }).resume()).rejects.toThrow("active exposure");
-    // Running under the enabled configuration backfills the record on the next save.
-    await h.executor.reconcile();
+    delete s.protectionHash; await h.store.set(PERP_EXECUTION_KEY, JSON.stringify(s));
+    const untracked = h.restart({ maxHoldHours: 24 }); await untracked.reconcile();
+    expect(await untracked.status()).toMatchObject({ halted: false });
     expect(JSON.parse((await h.store.get(PERP_EXECUTION_KEY))!).protectionHash).toBeDefined();
-    await h.restart({ maxPositions: 9 }).resume();
   });
 
   it("recognizes earlier protective tick rounding without replacing a correct stop every cycle", async () => {
@@ -710,13 +797,115 @@ describe("protected perp executor", () => {
     expect(h.orders.has(stop.id)).toBe(true);
   });
 
-  it("continues native fill protection when the cash-flow or fill-history read fails", async () => {
+  it("continues native fill protection when the cash-flow or fill-history read fails, and only pauses entries", async () => {
     const h = harness(); await h.executor.resume(); await h.executor.execute(entry()); h.fillEntry("entry-a", 1);
     h.mock.perpCashFlows.mockRejectedValue(new Error("ledger unavailable"));
     h.mock.fills.mockRejectedValue(new Error("fills unavailable"));
     await h.executor.reconcile();
     expect(h.mock.placePerpStop).toHaveBeenCalledTimes(1);
-    expect(await h.executor.status()).toMatchObject({ halted: true, cashFlowsComplete: false });
+    expect(await h.executor.status()).toMatchObject({ halted: false, entriesPaused: "fill-history-deferred", cashFlowsComplete: true });
+    expect(h.log.warn).toHaveBeenCalledWith("perp cash-flow read failed; entries wait until it succeeds", expect.anything());
+    expect(h.log.warn).toHaveBeenCalledWith("perp fills read failed; entries wait until it succeeds", expect.anything());
+    expect(await h.executor.execute(entry({ clientId: "entry-b", marketRef: "xyz:NVDA" }))).toEqual({ placed: false });
+  });
+
+  it.each(["perpCashFlows", "fills"] as const)("recovers a deferred %s read while protecting fills and pausing new entries", async (method) => {
+    const h = harness(); await h.executor.reconcile(); await h.executor.execute(entry()); h.fillEntry("entry-a", 1);
+    const read = h.mock[method].getMockImplementation()!;
+    h.mock[method].mockRejectedValue(new HyperliquidInfoDeferredError("queue-expired", 10_000));
+    await h.executor.reconcile();
+    const reason = method === "fills" ? "fill-history-deferred" : "cash-flow-deferred";
+    expect(await h.executor.status()).toMatchObject({ halted: false, entriesPaused: reason });
+    expect(h.mock.placePerpStop).toHaveBeenCalledTimes(1);
+    expect([...h.orders.values()].filter(o => !o.reduceOnly)).toHaveLength(0);
+    expect(await h.executor.execute(entry({ clientId: "entry-b", marketRef: "xyz:NVDA" }))).toEqual({ placed: false });
+    h.mock[method].mockImplementation(read);
+    h.advance(15_000); await h.executor.reconcile();
+    expect(await h.executor.status()).toMatchObject({ halted: false, entriesPaused: undefined, cashFlowsComplete: true });
+    expect(await h.executor.execute(entry({ clientId: "entry-b", marketRef: "xyz:NVDA" }))).toMatchObject({ placed: true });
+  });
+
+  it("restores entries after a deferred fill read without an operator resume", async () => {
+    const h = harness(); await h.executor.reconcile(); await h.executor.execute(entry()); h.fillEntry("entry-a", 3);
+    h.mock.fills.mockRejectedValueOnce(new HyperliquidInfoDeferredError("cooldown", 30_000));
+    await h.executor.reconcile();
+    expect(await h.executor.status()).toMatchObject({ halted: false, entriesPaused: "fill-history-deferred" });
+    h.advance(30_000); await h.executor.reconcile();
+    expect(await h.executor.status()).toMatchObject({ halted: false, entriesPaused: undefined });
+    expect(await h.executor.execute(entry({ clientId: "entry-b", marketRef: "xyz:NVDA" }))).toMatchObject({ placed: true });
+  });
+
+  it("retries a first-pass read deferral without creating a startup halt", async () => {
+    const h = harness();
+    h.mock.perpCashFlows.mockRejectedValueOnce(new HyperliquidInfoDeferredError("queue-expired", 10_000));
+    await h.executor.reconcile();
+    expect(await h.executor.status()).toMatchObject({ halted: false, entriesPaused: "cash-flow-deferred" });
+    expect(await h.executor.execute(entry())).toEqual({ placed: false });
+    h.advance(15_000); await h.executor.reconcile();
+    expect(await h.executor.status()).toMatchObject({ halted: false, entriesPaused: undefined });
+    expect(await h.executor.execute(entry())).toMatchObject({ placed: true });
+  });
+
+  it("retries a deferred account snapshot after restart without latching anything", async () => {
+    const h = harness(); await h.executor.reconcile();
+    const restarted = h.restart();
+    h.mock.perpAccountSnapshot.mockRejectedValueOnce(new HyperliquidInfoDeferredError("queue-expired", 10_000));
+    await expect(restarted.reconcile()).rejects.toBeInstanceOf(HyperliquidInfoDeferredError);
+    expect(await restarted.execute(entry())).toEqual({ placed: false });
+    h.advance(15_000); await restarted.reconcile();
+    expect(await restarted.execute(entry())).toMatchObject({ placed: true });
+  });
+
+  it.each(["operator", "drawdown"] as const)("preserves a %s halt when deferred reads recover across restart", async (reason) => {
+    const h = harness(); await h.executor.reconcile();
+    if (reason === "operator") await h.executor.halt(); else { h.setEquity(700); await h.executor.reconcile(); }
+    h.mock.perpCashFlows.mockRejectedValueOnce(new HyperliquidInfoDeferredError("queue-expired", 10_000));
+    await h.executor.reconcile();
+    const restarted = h.restart(); h.advance(15_000); await restarted.reconcile();
+    expect(await restarted.status()).toMatchObject({ halted: true, haltReason: reason });
+    expect(await restarted.execute(entry())).toEqual({ placed: false });
+  });
+
+  it("does not treat a withdrawal during a deferred cash-flow read as drawdown", async () => {
+    const h = harness(); await h.executor.reconcile(); h.advance();
+    h.setEquity(500); h.flows.push({ id: "withdrawal", ts: h.time(), amount: -500 });
+    h.mock.perpCashFlows.mockRejectedValueOnce(new HyperliquidInfoDeferredError("queue-expired", 10_000));
+    await h.executor.reconcile();
+    expect(await h.executor.status()).toMatchObject({ halted: false, entriesPaused: "cash-flow-deferred", highWaterEquity: 1000, drawdownPct: 0 });
+    h.advance(15_000); await h.executor.reconcile();
+    expect(await h.executor.status()).toMatchObject({ halted: false, highWaterEquity: 500, drawdownPct: 0 });
+    await h.executor.reconcile();
+    expect(await h.executor.status()).toMatchObject({ highWaterEquity: 500, drawdownPct: 0 });
+    expect(await h.executor.execute(entry({ notional: 100 }))).toMatchObject({ placed: true });
+  });
+
+  it("retains a flat cycle through deferred final fills and records its take-profit after recovery", async () => {
+    const h = harness(); await h.executor.reconcile(); await h.executor.execute(entry()); h.fillEntry("entry-a", 3);
+    await h.executor.reconcile(); h.advance(600_000);
+    h.fillOrder(h.targets()[0]!.id, 3);
+    const read = h.mock.fills.getMockImplementation()!;
+    h.mock.fills.mockRejectedValue(new HyperliquidInfoDeferredError("queue-expired", 10_000));
+    await h.executor.reconcile(); h.advance(15_000); await h.executor.reconcile();
+    expect((await h.executor.status()).cycles[0]!.status).not.toBe("closed");
+    h.mock.fills.mockImplementation(read);
+    const restarted = h.restart(); await restarted.reconcile(); h.advance(15_000); await restarted.reconcile();
+    expect(await restarted.status()).toMatchObject({ halted: false, cycles: [{ status: "closed", exitReason: "target", targetFilledSize: 3 }] });
+    expect(h.alerts.send.mock.calls.map(c => c[0])).toEqual(expect.arrayContaining([expect.objectContaining({ kind: "fill", data: expect.objectContaining({ reason: "target" }) })]));
+    expect(await restarted.execute(entry({ clientId: "entry-b" }))).toMatchObject({ placed: true });
+  });
+
+  it("restores entries on its own once a failed fill-history read succeeds", async () => {
+    const h = harness(); await h.executor.reconcile(); await h.executor.execute(entry()); h.fillEntry("entry-a", 3);
+    const read = h.mock.fills.getMockImplementation()!;
+    h.mock.fills.mockRejectedValue(new Error("fills unavailable"));
+    await h.executor.reconcile();
+    expect(await h.executor.status()).toMatchObject({ halted: false, entriesPaused: "fill-history-deferred" });
+    expect(await h.executor.execute(entry({ clientId: "entry-b", marketRef: "xyz:NVDA" }))).toEqual({ placed: false });
+    h.mock.fills.mockImplementation(read);
+    await h.executor.reconcile();
+    expect(await h.executor.status()).toMatchObject({ halted: false, entriesPaused: undefined });
+    expect(h.log.info).toHaveBeenCalledWith("perp fills read recovered");
+    expect(await h.executor.execute(entry({ clientId: "entry-b", marketRef: "xyz:NVDA" }))).toMatchObject({ placed: true });
   });
 
   it("includes adverse remaining funding when checking the actual liquidation buffer", async () => {
@@ -908,8 +1097,8 @@ describe("executor-owned take-profit", () => {
     await h.executor.cancelWorkingOrders();
     expect(h.orders.has(target.id)).toBe(true);
     expect([...h.orders.values()].filter(isProtectiveOrder)).toHaveLength(1);
-    expect(await h.executor.status()).toMatchObject({ halted: true, haltReason: "shutdown-complete" });
-    const restarted = h.restart(); await restarted.start();
+    expect(await h.executor.status()).toMatchObject({ halted: false });
+    const restarted = h.restart(); await restarted.reconcile();
     expect(await restarted.status()).toMatchObject({ halted: false });
     expect(h.targetPlacements()).toHaveLength(1);
   });
@@ -939,5 +1128,145 @@ describe("executor-owned take-profit", () => {
     h.advance(61_000); await h.executor.reconcile();
     expect(h.targets()).toHaveLength(1); expect(h.targetPlacements()).toHaveLength(2);
     expect(h.targetPlacements()[1]![1].clientId).toBe("entry-a-tp-2");
+  });
+});
+
+describe("venue read outages", () => {
+  const deferred = () => Object.assign(new Error("Hyperliquid info deferred: queue-expired; retry after 10s"),
+    { name: "HyperliquidInfoDeferredError", retryable: true, retryAfterMs: 10_000 });
+  const ledger = async (h: ReturnType<typeof harness>) => JSON.parse((await h.store.get(PERP_EXECUTION_KEY))!);
+  const nvda = () => entry({ clientId: "entry-b", marketRef: "xyz:NVDA" });
+  /** A ready executor holding one protected position, with the logger spies cleared. */
+  async function exposed() {
+    const h = harness(); await h.executor.reconcile(); await h.executor.execute(entry()); h.fillEntry("entry-a", 3);
+    h.advance(); await h.executor.reconcile();
+    expect((await h.executor.status()).cycles[0]).toMatchObject({ status: "open", fundingStressHourly: 0 });
+    h.log.warn.mockClear(); h.log.info.mockClear();
+    return h;
+  }
+
+  it("defers a transient fill read without a halt and warns once per outage", async () => {
+    const h = await exposed();
+    h.mock.fills.mockRejectedValue(deferred());
+    h.advance(15_000); await h.executor.reconcile();
+    const started = h.time();
+    const first = await ledger(h);
+    expect(first.halted).toBe(false);
+    expect(first.readOutages.fills).toEqual({ since: started, lastAt: started, error: expect.stringContaining("queue-expired") });
+    expect(h.log.warn).toHaveBeenCalledTimes(1);
+    expect(h.log.warn).toHaveBeenCalledWith("perp fills read deferred; retrying next pass",
+      { error: expect.stringContaining("queue-expired"), retryAfterMs: 10_000 });
+    h.advance(15_000); await h.executor.reconcile();
+    expect(h.log.warn).toHaveBeenCalledTimes(1);
+    expect((await ledger(h)).readOutages.fills).toMatchObject({ since: started, lastAt: h.time() });
+    expect((await h.executor.status()).readOutages?.fills).toMatchObject({ since: started });
+    expect(h.mock.placePerpStop).toHaveBeenCalledTimes(1);
+  });
+
+  it("never turns a long transient fill outage into a halt; entries wait and resume when reads recover", async () => {
+    const h = await exposed();
+    const read = h.mock.fills.getMockImplementation()!;
+    h.mock.fills.mockRejectedValue(deferred());
+    for (let pass = 0; pass < 4; pass++) { h.advance(15_000); await h.executor.reconcile(); }
+    expect(await ledger(h)).toMatchObject({ halted: false });
+    h.advance(10 * 60_000); await h.executor.reconcile();
+    expect(await ledger(h)).toMatchObject({ halted: false, deferredRead: "fill-history-deferred" });
+    expect(await h.executor.status()).toMatchObject({ halted: false, entriesPaused: "fill-history-deferred" });
+    expect(await h.executor.execute(nvda())).toEqual({ placed: false });
+    expect(h.mock.placePerpStop).toHaveBeenCalledTimes(1);
+    h.mock.fills.mockImplementation(read);
+    h.advance(15_000); await h.executor.reconcile();
+    const recovered = await ledger(h);
+    expect(recovered.halted).toBe(false);
+    expect(recovered.haltReason).toBeUndefined();
+    expect(recovered.readOutages).toBeUndefined();
+    expect(h.log.info).toHaveBeenCalledWith("perp fills read recovered");
+    expect(await h.executor.execute(nvda())).toMatchObject({ placed: true });
+  });
+
+  it("keeps an open cycle open through a deferred funding read", async () => {
+    const h = await exposed();
+    h.mock.fundingRate.mockRejectedValue(deferred());
+    h.advance(15_000); await h.executor.reconcile();
+    const s = await ledger(h);
+    expect(s.cycles[0]).toMatchObject({ status: "open", fundingStressHourly: 0 });
+    expect(s.cycles[0].exitReason).toBeUndefined();
+    expect(s.halted).toBe(false);
+    expect(s.readOutages.funding).toBeDefined();
+    expect(h.mock.placeOrder.mock.calls.some(c => c[1].reduceOnly === true && c[1].purpose !== "target")).toBe(false);
+    expect(await h.executor.status()).toMatchObject({ halted: false });
+  });
+
+  it("pauses entries on a fill read failure that is not transient and lifts the pause on its own when the read succeeds", async () => {
+    const h = await exposed();
+    const read = h.mock.fills.getMockImplementation()!;
+    h.mock.fills.mockRejectedValue(new Error("schema mismatch"));
+    h.advance(15_000); await h.executor.reconcile();
+    expect(await ledger(h)).toMatchObject({ halted: false, deferredRead: "fill-history-deferred", readOutages: { fills: { error: "Error: schema mismatch" } } });
+    expect(h.log.warn).toHaveBeenCalledWith("perp fills read failed; entries wait until it succeeds", expect.anything());
+    expect(await h.executor.execute(nvda())).toEqual({ placed: false });
+    h.mock.fills.mockImplementation(read);
+    h.advance(15_000); await h.executor.reconcile();
+    expect(await ledger(h)).toMatchObject({ halted: false });
+    expect((await ledger(h)).readOutages).toBeUndefined();
+    expect(await h.executor.status()).toMatchObject({ halted: false, entriesPaused: undefined });
+    expect(await h.executor.execute(nvda())).toMatchObject({ placed: true });
+  });
+
+  it("never clears an operator halt, with healthy reads or through a sustained outage", async () => {
+    const h = await exposed();
+    await h.executor.halt();
+    for (let pass = 0; pass < 3; pass++) { h.advance(15_000); await h.executor.reconcile(); }
+    expect(await ledger(h)).toMatchObject({ halted: true, haltReason: "operator" });
+    const read = h.mock.fills.getMockImplementation()!;
+    h.mock.fills.mockRejectedValue(deferred());
+    h.advance(15_000); await h.executor.reconcile();
+    h.advance(10 * 60_000); await h.executor.reconcile();
+    expect(await ledger(h)).toMatchObject({ halted: true, haltReason: "operator" });
+    h.mock.fills.mockImplementation(read);
+    h.advance(15_000); await h.executor.reconcile();
+    expect(await ledger(h)).toMatchObject({ halted: true, haltReason: "operator" });
+    expect(await h.executor.execute(nvda())).toEqual({ placed: false });
+  });
+
+  it("keeps the previous cash-flow verdict through a deferred cash-flow read", async () => {
+    const h = await exposed();
+    h.mock.perpCashFlows.mockRejectedValue(deferred());
+    h.advance(15_000); await h.executor.reconcile();
+    const s = await ledger(h);
+    expect(s).toMatchObject({ halted: false, cashFlowsComplete: true });
+    expect(s.readOutages.cashFlows).toBeDefined();
+    expect(h.log.warn).toHaveBeenCalledWith("perp cash-flow read deferred; retrying next pass", expect.objectContaining({ retryAfterMs: 10_000 }));
+    // Entries stay paused while the ledger interval is unknown; the pause lifts on the next complete read.
+    expect(await h.executor.status()).toMatchObject({ halted: false, entriesPaused: "cash-flow-deferred" });
+    expect(await h.executor.execute(nvda())).toEqual({ placed: false });
+  });
+
+  it("restarts through an outage and trades again once reads recover, with no operator step", async () => {
+    const h = await exposed();
+    const read = h.mock.fills.getMockImplementation()!;
+    h.mock.fills.mockRejectedValue(deferred());
+    h.advance(15_000); await h.executor.reconcile();
+    h.advance(10 * 60_000); await h.executor.reconcile();
+    expect(await ledger(h)).toMatchObject({ halted: false, deferredRead: "fill-history-deferred" });
+    const restarted = h.restart(); await restarted.reconcile();
+    expect(await ledger(h)).toMatchObject({ halted: false, deferredRead: "fill-history-deferred" });
+    expect(await restarted.execute(nvda())).toEqual({ placed: false });
+    h.mock.fills.mockImplementation(read);
+    h.advance(15_000); await restarted.reconcile();
+    expect(await ledger(h)).toMatchObject({ halted: false });
+    expect(await restarted.execute(nvda())).toMatchObject({ placed: true });
+  });
+
+  it("names the reason each time an entry is refused, once per market until it changes", async () => {
+    const h = harness(); await h.executor.reconcile();
+    expect(await h.executor.execute(entry({ leverage: 20 }))).toEqual({ placed: false });
+    expect(h.log.warn).toHaveBeenCalledWith("perp entry refused for xyz:AAPL: liquidation buffer too thin for the stop");
+    const before = h.log.warn.mock.calls.length;
+    await h.executor.execute(entry({ leverage: 20 }));
+    expect(h.log.warn).toHaveBeenCalledTimes(before);
+    h.advance(5 * 60_000); await h.executor.reconcile(); await h.executor.execute(entry({ leverage: 20 }));
+    expect(h.log.warn).toHaveBeenCalledTimes(before + 1);
+    expect(await h.executor.execute(entry({ notional: 100 }))).toMatchObject({ placed: true });
   });
 });

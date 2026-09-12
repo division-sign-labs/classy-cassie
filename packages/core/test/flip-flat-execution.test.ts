@@ -1,5 +1,5 @@
 // packages/core/test/flip-flat-execution.test.ts
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { silentLogger, type Order, type PredictionExecutionMarket, type Signal, type StrategyContext } from "@quotient-forecasting/cassie-core";
 import { FlipFlatStrategy, PENDING_ENTRIES_MEMORY_KEY, DAILY_BUDGET_MEMORY_KEY, SCENARIO_EXIT_MEMORY_KEY } from "../../../strategies/flip-flat/dist/index.js";
 
@@ -113,6 +113,56 @@ describe("signals strategy adaptive accounting", () => {
     ctx.execution!.parents[0] = parent({ filledSize: 20, filledNotionalUsd: 10, firstFillAt });
     await strategy.tick(ctx);
     expect(memory.get(HOLD_STARTS_MEMORY_KEY)).toEqual({ byMarket: { a: firstFillAt } });
+  });
+});
+
+describe("signals strategy fill-receipt reconciliation", () => {
+  const ACCOUNTING_KEY = "adaptive-execution-accounting";
+
+  it("treats a sub-unit residue between fill receipts and the position index as absorbed", async () => {
+    const { ctx, memory, signals, strategy } = setup();
+    const info = vi.fn(); const warn = vi.fn();
+    ctx.log = { ...silentLogger, info, warn };
+    // The receipt carries five decimals, the venue position index four.
+    ctx.execution!.parents = [parent({ status: "completed", filledSize: 17.71715, filledNotionalUsd: 8, firstFillAt: NOW - 30_000,
+      lastFillAt: NOW - 30_000, terminalAt: NOW - 25_000, reservedNotionalUsd: 0, remainingSize: 0, reservedSize: 0 })];
+    ctx.positions = [{ marketRef: "a", side: "YES", size: 17.7171, avgPrice: 0.45 }];
+    signals.push(signal("a"));
+    const actions = await strategy.tick(ctx);
+    expect(actions).toContainEqual(expect.objectContaining({ kind: "enter", marketRef: "a" }));
+    expect(info.mock.calls.some(([message]) => String(message).includes("entry handoff pending"))).toBe(false);
+    expect(warn).not.toHaveBeenCalled();
+    expect((memory.get(ACCOUNTING_KEY) as { byParent: Record<string, { absorbedSize: number }> }).byParent["parent-a"]!.absorbedSize).toBe(17.71715);
+  });
+
+  it("releases a finished entry whose receipts never appeared in the venue position after the reservation window, once", async () => {
+    const { ctx, memory, signals, strategy } = setup({ pendingEntryReservationSec: 900 });
+    const info = vi.fn(); const warn = vi.fn();
+    ctx.log = { ...silentLogger, info, warn };
+    ctx.execution!.parents = [parent({ status: "completed", filledSize: 20, filledNotionalUsd: 10, firstFillAt: NOW - 902_000,
+      lastFillAt: NOW - 902_000, terminalAt: NOW - 901_000, reservedNotionalUsd: 0, remainingSize: 0, reservedSize: 0 })];
+    ctx.positions = [];
+    signals.push(signal("a"));
+    const actions = await strategy.tick(ctx);
+    expect(warn).toHaveBeenCalledTimes(1);
+    expect(String(warn.mock.calls[0]![0])).toMatch(/adaptive entry parent-a for a released after 901s: 20\.0000 shares from fill receipts never appeared/);
+    expect((memory.get(ACCOUNTING_KEY) as { byParent: Record<string, { absorbedSize: number }> }).byParent["parent-a"]!.absorbedSize).toBe(20);
+    expect(actions).toContainEqual(expect.objectContaining({ kind: "enter", marketRef: "a" }));
+    await strategy.tick(ctx);
+    expect(warn).toHaveBeenCalledTimes(1);
+  });
+
+  it("keeps a finished entry reserved while its receipts are recent and unobserved", async () => {
+    const { ctx, signals, strategy } = setup({ pendingEntryReservationSec: 900 });
+    const info = vi.fn();
+    ctx.log = { ...silentLogger, info };
+    ctx.execution!.parents = [parent({ status: "completed", filledSize: 20, filledNotionalUsd: 10, firstFillAt: NOW - 30_000,
+      lastFillAt: NOW - 30_000, terminalAt: NOW - 25_000, reservedNotionalUsd: 0, remainingSize: 0, reservedSize: 0 })];
+    ctx.positions = [];
+    signals.push(signal("a"));
+    const actions = await strategy.tick(ctx);
+    expect(actions).not.toContainEqual(expect.objectContaining({ kind: "enter", marketRef: "a" }));
+    expect(info.mock.calls.some(([message]) => String(message).includes("entry handoff pending for a"))).toBe(true);
   });
 });
 

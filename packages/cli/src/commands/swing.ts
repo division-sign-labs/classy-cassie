@@ -76,7 +76,7 @@ export async function swingDryRun(botId: string): Promise<void> {
 export async function swingHalt(botId: string): Promise<void> {
   print(await swingControl(requireSwing(botId), "/swing/halt", "POST"));
   console.log("Entries halted; working entries canceled.");
-  console.log("Position supervision and native stops remain active.");
+  console.log("Position supervision and native stops remain active. Resume with: cassie swing resume <botId>");
 }
 export async function swingResume(botId: string, opts: { acknowledgeLossReset?: boolean } = {}): Promise<void> {
   const cfg = requireSwing(botId);

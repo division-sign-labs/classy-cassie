@@ -81,6 +81,12 @@ export type AlertsConfig = z.output<typeof AlertsConfigSchema>;
 export const PredictionExecutionConfigSchema = z.object({
   mode: z.enum(["adaptive", "legacy"]).default("adaptive"),
   entryDeadlineSec: z.number().positive().max(3600).default(120),
+  /**
+   * After `entryDeadlineSec`, take the offer inside the entry's price bound with a
+   * marketable limit for this long; any remainder rests at the bound until the window
+   * closes. 0 keeps entries maker-only.
+   */
+  entryCrossingSec: z.number().nonnegative().max(3600).default(60),
   exitPassiveSec: z.number().nonnegative().max(3600).default(60),
 });
 export type PredictionExecutionConfig = z.output<typeof PredictionExecutionConfigSchema>;

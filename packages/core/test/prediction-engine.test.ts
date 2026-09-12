@@ -130,7 +130,7 @@ class PredictionVenue implements VenueAdapter {
   }
 }
 
-function harness(options: { side?: "YES" | "NO"; legacy?: boolean; maxHoldDays?: number } = {}) {
+function harness(options: { side?: "YES" | "NO"; legacy?: boolean; maxHoldDays?: number; entryCrossingSec?: number } = {}) {
   const clock = { now: START };
   const venue = new PredictionVenue(clock);
   const side = options.side ?? "YES";
@@ -141,7 +141,8 @@ function harness(options: { side?: "YES" | "NO"; legacy?: boolean; maxHoldDays?:
   const signals: SignalSource = { latest: async () => published, refreshedAt: () => refreshedAt };
   const state = new MemoryStateStore();
   const config = parseBotConfig({ id: "prediction-engine", venue: "polymarket",
-    ...(options.legacy ? { execution: { mode: "legacy" } } : {}),
+    ...(options.legacy || options.entryCrossingSec !== undefined
+      ? { execution: { ...(options.legacy ? { mode: "legacy" } : {}), ...(options.entryCrossingSec !== undefined ? { entryCrossingSec: options.entryCrossingSec } : {}) } } : {}),
     strategy: { id: "flip-flat", config: { allocationMode: "portfolio-kelly", minExitDepth2cUsd: 0, maxHoldDays: options.maxHoldDays ?? null,
       convergenceExitPp: null, signalPollIntervalMin: 1 } },
     risk: { slippagePct: 10, depthCapPct: 100, minDailyVolume: 0, minViableNotional: 1, maxOrderNotional: 1000 },
@@ -238,7 +239,7 @@ describe("Engine adaptive prediction wiring", () => {
     expect(h.engine.adaptivePredictionExecution).toBe(true);
     expect((await h.engine.tick()).errors).toBe(0);
     expect(h.venue.placements).toHaveLength(1);
-    expect(h.venue.placements[0]!.intent).toMatchObject({ side: "BUY", tif: "GTC", postOnly: true, limitPrice: .49 });
+    expect(h.venue.placements[0]!.intent).toMatchObject({ side: "BUY", tif: "GTC", postOnly: true, limitPrice: .51 });
     await h.advance(h.engine);
     expect((await h.engine.tick()).errors).toBe(0);
     expect(h.venue.placements).toHaveLength(1);
@@ -250,7 +251,7 @@ describe("Engine adaptive prediction wiring", () => {
     const h = harness({ side: "NO" });
     expect((await h.engine.tick()).errors).toBe(0);
     expect(h.venue.placements).toHaveLength(1);
-    expect(h.venue.placements[0]!.intent).toMatchObject({ tokenId: "a:NO", outcome: "NO", side: "BUY", limitPrice: .25, postOnly: true });
+    expect(h.venue.placements[0]!.intent).toMatchObject({ tokenId: "a:NO", outcome: "NO", side: "BUY", limitPrice: .27, postOnly: true });
     expect(h.venue.marketsRead).not.toContain("YES");
   });
 
@@ -281,7 +282,7 @@ describe("Engine adaptive prediction wiring", () => {
   });
 
   it("persists the signal-refresh restriction after the entry deadline and across restart", async () => {
-    const h = harness();
+    const h = harness({ entryCrossingSec: 0 });
     await h.engine.tick();
     await h.advance(h.engine, 120000);
     await h.advance(h.engine);
@@ -327,7 +328,8 @@ describe("Engine adaptive prediction wiring", () => {
   it("retains a trigger before a resting entry fills, then exits authenticated inventory despite public lag", async () => {
     const h = harness();
     await h.engine.tick();
-    await h.state.set(StateKeys.triggers, JSON.stringify([{ marketRef: "a", outcome: "YES", posSide: "YES", kind: "stop", level: .5, armedAt: START }]));
+    // The fixture book shows our own resting maker order (one tick inside the ask) as the best bid.
+    await h.state.set(StateKeys.triggers, JSON.stringify([{ marketRef: "a", outcome: "YES", posSide: "YES", kind: "stop", level: .51, armedAt: START }]));
     h.venue.hidePositions = true;
     await h.engine.checkTriggers();
     expect(await h.engine.hasArmedTriggers()).toBe(true);

@@ -62,7 +62,7 @@ swing.command("configure <botId>").option("--config <file>", "strategy JSON")
 swing.command("status <botId>").description("NAV, risk, research, and protection").action(wrap(swingStatus));
 swing.command("dry-run <botId>").description("refresh research and preview decisions without orders").action(wrap(swingDryRun));
 swing.command("halt <botId>").description("halt additions; keep native stops and exit supervision").action(wrap(swingHalt));
-swing.command("resume <botId>").option("--acknowledge-loss-reset", "request a separately confirmed drawdown reset").description("resume after an operator or execution halt").action(wrap(swingResume));
+swing.command("resume <botId>").option("--acknowledge-loss-reset", "request a separately confirmed drawdown reset").description("resume after an operator halt or the drawdown stop").action(wrap(swingResume));
 swing.command("replay <botId>").option("--from <iso>", "inclusive recording start").option("--until <iso>", "inclusive recording end")
   .option("--costs <multiplier>", "fee/slippage stress multiplier, minimum 1", "1").option("--fill-model <model>", "cross or touch", "cross")
   .description("replay recorded market data").action(wrap(swingReplay));
@@ -206,8 +206,9 @@ alerts.command("test <botId>").description("send a Telegram test ping").action(w
 program
   .command("strategy <botId>")
   .description("view or change strategy settings")
-  .option("--execution <adaptive|legacy>", "Polymarket signals: managed post-only limits or legacy crossing limits")
-  .option("--entry-deadline-seconds <seconds>", "Polymarket signals: deadline for an adaptive entry (default 120)")
+  .option("--execution <adaptive|legacy>", "Polymarket signals: maker-first managed limits or legacy crossing limits")
+  .option("--entry-deadline-seconds <seconds>", "Polymarket signals: maker phase of an adaptive entry (default 120)")
+  .option("--entry-crossing-seconds <seconds>", "Polymarket signals: after the deadline, take the offer inside the price bound for this long (default 60; 0 keeps entries maker-only)")
   .option("--exit-passive-seconds <seconds>", "Polymarket signals: passive exit phase before bounded immediate execution (default 60; 0 skips)")
   .option("--top <n|unlimited>", "optional signal-position cap; widest eligible edges enter first")
   .option("--allocation-mode <mode>", "portfolio-kelly or daily-budget")

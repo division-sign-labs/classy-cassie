@@ -109,10 +109,17 @@ export interface PerpCycle {
 
 export interface PerpExecutionState {
   cycles: PerpCycle[];
+  /** The two deliberate stops: an operator halt or the configured drawdown limit. */
   halted: boolean;
   haltReason?: string;
   highWaterEquity: number;
   drawdownPct: number;
   lastReconciledAt?: number;
   cashFlowsComplete: boolean;
+  /** Why entries wait without a halt; clears on its own when the read succeeds. */
+  entriesPaused?: string;
+  /** Markets with venue exposure the ledger does not own; entries there wait. */
+  unmanagedMarkets?: string[];
+  /** Markets whose cycle or submission is being resolved from venue evidence. */
+  reconcilingMarkets?: string[];
 }

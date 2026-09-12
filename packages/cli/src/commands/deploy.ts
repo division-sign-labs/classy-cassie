@@ -8,8 +8,9 @@ import { join } from "node:path";
 import pc from "picocolors";
 import { MarketMakeConfigSchema } from "@quotient-forecasting/strategy-market-make";
 import { QuotientSwingConfigSchema } from "@quotient-forecasting/strategy-quotient-swing";
-import { KeyRoles, QUOTIENT_POLYMARKET_FEE_DISCLOSURE, type BotConfig } from "@quotient-forecasting/cassie-core";
-import { buildRuntimeCreds, confirm, getKeystoreSecret } from "../context.js";
+import { QUOTIENT_POLYMARKET_FEE_DISCLOSURE, type BotConfig } from "@quotient-forecasting/cassie-core";
+import { buildRuntimeCreds, confirm } from "../context.js";
+import { describeTelegramSettings, resolveTelegramSettings } from "../telegram-settings.js";
 import { atomicWritePrivateFile, dirs, loadBotConfig, saveBotConfig } from "../paths.js";
 import { resolveQuotientToken } from "../quotient-token.js";
 import { resolveSurplusApiKey, verifySurplusApiKey } from "../surplus-config.js";
@@ -579,7 +580,8 @@ export async function runDeploy(botId: string, opts: DeployOpts = {}): Promise<v
     console.log(pc.green("Surplus API key verified locally"));
     surplusApiKey = resolvedSurplus.value;
   }
-  const telegramToken = process.env.TELEGRAM_BOT_TOKEN ?? (await getKeystoreSecret(botId, KeyRoles.telegramToken));
+  const telegram = await resolveTelegramSettings(botId, cfg.alerts.telegram);
+  console.log(pc.dim(describeTelegramSettings(telegram)));
 
   const dashboard = await resolveDashboardConfig(cfg, opts);
   if (dashboard.passwordOrigin) console.log(pc.dim(`dashboard password: ${dashboard.passwordOrigin}`));
@@ -759,7 +761,8 @@ export async function runDeploy(botId: string, opts: DeployOpts = {}): Promise<v
     ["CASSIE_AUTOSTART", workspaceArtifact ? "0" : runtimeAutostartBeforePreflights(deployedCfg)],
     ["CASSIE_REQUIRED_REGION", droplet.region.slug],
     ["QUOTIENT_API_TOKEN", quotientToken],
-    ["TELEGRAM_BOT_TOKEN", telegramToken],
+    ["TELEGRAM_BOT_TOKEN", telegram.token ?? null],
+    ["TELEGRAM_CHAT_ID", telegram.chatId ?? null],
     ["SURPLUS_API_KEY", surplusApiKey],
     ...dashboardEnvLines(deployedCfg),
   ];
@@ -908,11 +911,14 @@ export async function runDeploy(botId: string, opts: DeployOpts = {}): Promise<v
     return;
   }
   if (deployedCfg.strategy.id === "quotient-swing") {
+    const execution = startup.swingStatus?.execution as Record<string, unknown> | undefined;
     if (startup.swingStatus?.halted) {
-      const execution = startup.swingStatus.execution as Record<string, unknown> | undefined;
       console.log(`${botId} running; entries halted.`);
-      console.log(`Reason: ${String(startup.swingStatus.startupError ?? execution?.haltReason ?? "account or execution checks require attention")}`);
+      console.log(`Reason: ${String(execution?.haltReason ?? "operator or drawdown halt")}`);
+      console.log(`cassie swing resume ${botId}`);
       console.log("Position protection remains active.");
+    } else if (execution?.entriesPaused) {
+      console.log(`${botId} running on ${name}; entries wait: ${String(execution.entriesPaused)} (clears on its own).`);
     } else {
       console.log(`${botId} live on ${name}.`);
     }

@@ -43,6 +43,7 @@ import {
   QuotientResearchClient,
   SurplusClient,
   createMarketLister,
+  isTransientVenueError,
 } from "@quotient-forecasting/cassie-core";
 import { FlipFlatStrategy } from "@quotient-forecasting/strategy-flip-flat";
 import {
@@ -112,6 +113,8 @@ export interface BotRuntimeOptions {
   buildId?: string;
   quotientToken?: string;
   telegramToken?: string;
+  /** Overrides the saved chat id; deploy forwards TELEGRAM_CHAT_ID from the operator's .local.env. */
+  telegramChatId?: string;
   /** Surplus Intelligence key (inf_…). Required by the agent strategy only. */
   surplusApiKey?: string;
   /** Shared call counters; defaults to the process-wide registry. */
@@ -259,7 +262,7 @@ export function buildAlerter(opts: BotRuntimeOptions, log: Logger, counters?: En
   // Counting sits inside SafeAlerter so a swallowed delivery failure is still counted.
   const count = (sink: Alerter): Alerter => (counters ? new CountingAlerter(sink, counters) : sink);
   const sinks: Alerter[] = [];
-  const chatId = opts.config.alerts.telegram?.chatId;
+  const chatId = opts.telegramChatId ?? opts.config.alerts.telegram?.chatId;
   if (opts.telegramToken && chatId) {
     sinks.push(new SafeAlerter(count(new TelegramAlerter(opts.telegramToken, chatId)), log));
   }
@@ -288,6 +291,7 @@ export class BotService {
   private triggerTimer?: NodeJS.Timeout;
   private perpSupervisionPending = false;
   private perpSupervisionError?: { message: string; at: number };
+  private predictionSupervisionError?: { message: string; at: number };
   private predictionTimer?: NodeJS.Timeout;
   private predictionSupervision?: Promise<void>;
   private predictionHeartbeat?: Promise<void>;
@@ -530,8 +534,17 @@ export class BotService {
           if (this.terminating || this.predictionSupervision) return;
           this.predictionSupervision = engine.supervisePredictions()
             .then(() => engine.checkTriggers())
-            .then(async () => { this.predictionExecution = await engine.predictionStatus(); })
-            .catch(error => this.log.error(`prediction execution failed: ${(error as Error).message}`))
+            .then(async () => { this.predictionExecution = await engine.predictionStatus(); this.predictionSupervisionError = undefined; })
+            .catch(error => {
+              // A throttled or slow venue defers supervision; the executor keeps its orders and retries.
+              // Log that once a minute per message rather than every five seconds.
+              const message = (error as Error).message;
+              if (!isTransientVenueError(error)) { this.log.error(`prediction execution failed: ${message}`); return; }
+              if (this.predictionSupervisionError?.message !== message || Date.now() - this.predictionSupervisionError.at >= 60_000) {
+                this.log.warn(`prediction supervision deferred; retrying: ${message}`);
+                this.predictionSupervisionError = { message, at: Date.now() };
+              }
+            })
             .finally(() => { this.predictionSupervision = undefined; });
         }, HEARTBEAT_MS);
       }

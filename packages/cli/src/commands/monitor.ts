@@ -227,12 +227,16 @@ export async function showStatus(botId: string): Promise<void> {
   if (runtime?.execution) {
     const execution = runtime.execution;
     const working = execution.parents.filter(parent => parent.status === "active").length;
-    const pending = execution.parents.filter(parent => parent.status === "canceling" || parent.status === "blocked").length;
+    const pending = execution.parents.filter(parent => parent.status === "canceling").length;
+    const reconciling = execution.reconcilingMarkets?.length ?? 0;
+    const unowned = execution.unownedMarkets?.length ?? 0;
     const filled = execution.parents.reduce((sum, parent) => sum + parent.filledNotionalUsd, 0);
     const fees = execution.parents.reduce((sum, parent) => sum + parent.feeUsd, 0);
     row("execution", execution.blocked
-      ? `blocked: ${execution.haltReason ?? "reconciliation required"}`
-      : `adaptive, ${working} working, ${pending} reconciling; fills ${money(filled)}, fees ${money(fees)}`);
+      ? `paused (${execution.haltReason ?? "operator"})`
+      : `adaptive, ${working} working, ${pending} canceling; fills ${money(filled)}, fees ${money(fees)}`
+        + (reconciling ? `; ${reconciling} market${reconciling === 1 ? "" : "s"} reconciling` : "")
+        + (unowned ? `; ${unowned} market${unowned === 1 ? "" : "s"} with unowned orders` : ""));
     const makerShares = execution.parents.reduce((sum, parent) => sum + (parent.metrics?.makerFillSize ?? 0), 0);
     const takerShares = execution.parents.reduce((sum, parent) => sum + (parent.metrics?.takerFillSize ?? 0), 0);
     if (makerShares + takerShares > 0) {

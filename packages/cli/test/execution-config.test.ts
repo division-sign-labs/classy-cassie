@@ -49,22 +49,32 @@ describe("directional execution settings", () => {
 
     expect(loadBotConfig(before.id)).toEqual({
       ...before,
-      execution: { mode: "adaptive", entryDeadlineSec: 180, exitPassiveSec: 30 },
+      execution: { mode: "adaptive", entryDeadlineSec: 180, entryCrossingSec: 60, exitPassiveSec: 30 },
     });
     expect(output.join("\n")).toMatch(/execution:\s+adaptive/);
     expect(output.join("\n")).toMatch(/entry deadline:\s+180 sec/);
     expect(output.join("\n")).toMatch(/exit passive phase:\s+30 sec/);
   });
 
+  it("sets and disables the entry crossing window", async () => {
+    const before = bot({ execution: { mode: "adaptive", entryDeadlineSec: 120, exitPassiveSec: 60 } });
+    await runStrategy(before.id, { entryCrossingSeconds: "45" });
+    expect(loadBotConfig(before.id).execution).toEqual({ mode: "adaptive", entryDeadlineSec: 120, entryCrossingSec: 45, exitPassiveSec: 60 });
+    expect(output.join("\n")).toMatch(/entry crossing:\s+45 sec marketable limit inside the price bound after the deadline/);
+    await runStrategy(before.id, { entryCrossingSeconds: "0" });
+    expect(loadBotConfig(before.id).execution!.entryCrossingSec).toBe(0);
+    expect(output.join("\n")).toMatch(/entry crossing:\s+off \(maker-only entries\)/);
+  });
+
   it("preserves saved deadlines when switching mode and permits an immediate exit phase", async () => {
     const before = bot({ execution: { mode: "adaptive", entryDeadlineSec: 240, exitPassiveSec: 90 } });
 
     await runStrategy(before.id, { execution: "legacy" });
-    expect(loadBotConfig(before.id).execution).toEqual({ mode: "legacy", entryDeadlineSec: 240, exitPassiveSec: 90 });
+    expect(loadBotConfig(before.id).execution).toEqual({ mode: "legacy", entryDeadlineSec: 240, entryCrossingSec: 60, exitPassiveSec: 90 });
     expect(output.join("\n")).toMatch(/exit passive phase:\s+90 sec \(inactive in legacy mode\)/);
 
     await runStrategy(before.id, { exitPassiveSeconds: "0" });
-    expect(loadBotConfig(before.id).execution).toEqual({ mode: "legacy", entryDeadlineSec: 240, exitPassiveSec: 0 });
+    expect(loadBotConfig(before.id).execution).toEqual({ mode: "legacy", entryDeadlineSec: 240, entryCrossingSec: 60, exitPassiveSec: 0 });
   });
 
   it.each(["signals", "flip-flat"])("reports adaptive defaults for Polymarket %s without writing an execution block", async (id) => {
@@ -98,7 +108,7 @@ describe("directional execution settings", () => {
 
     await runStrategy(before.id, { entryDeadlineSeconds: "150" });
 
-    expect(loadBotConfig(before.id)).toEqual({ ...before, execution: { mode: "adaptive", entryDeadlineSec: 150, exitPassiveSec: 60 } });
+    expect(loadBotConfig(before.id)).toEqual({ ...before, execution: { mode: "adaptive", entryDeadlineSec: 150, entryCrossingSec: 60, exitPassiveSec: 60 } });
     expect(JSON.parse(readFileSync(botConfigPath(before.id), "utf8"))).not.toHaveProperty("reporting");
   });
 
@@ -133,6 +143,9 @@ describe("directional execution settings", () => {
     { exitPassiveSeconds: "-1" },
     { exitPassiveSeconds: "3601" },
     { exitPassiveSeconds: "NaN" },
+    { entryCrossingSeconds: "-1" },
+    { entryCrossingSeconds: "3601" },
+    { entryCrossingSeconds: "NaN" },
   ])("rejects invalid settings %j without writing", async (opts) => {
     const before = bot();
     const persisted = readFileSync(botConfigPath(before.id), "utf8");

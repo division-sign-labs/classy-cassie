@@ -3,9 +3,10 @@
 
 import { join } from "node:path";
 import pc from "picocolors";
-import { KeyRoles, consoleLogger } from "@quotient-forecasting/cassie-core";
+import { consoleLogger } from "@quotient-forecasting/cassie-core";
 import { runLocal } from "@quotient-forecasting/cassie-runtime-node";
-import { buildRuntimeCreds, getKeystoreSecret, requireAccount } from "../context.js";
+import { buildRuntimeCreds, requireAccount } from "../context.js";
+import { describeTelegramSettings, resolveTelegramSettings } from "../telegram-settings.js";
 import { dirs, loadBotConfig, statePath } from "../paths.js";
 import { resolveQuotientToken } from "../quotient-token.js";
 import { resolveSurplusApiKey } from "../surplus-config.js";
@@ -28,8 +29,8 @@ export async function runBot(botId: string, opts: RunOpts): Promise<void> {
   const polymarketGaslessAuth = await resolvePolymarketGaslessAuth(cfg);
   const twoSidedMaker = cfg.strategy.id === "market-make" && Boolean(cfg.strategy.config.two_sided) && !MarketMakeConfigSchema.parse(cfg.strategy.config).two_sided?.adaptive;
   const quotientToken = twoSidedMaker ? undefined : (await resolveQuotientToken(botId))?.token;
-  const telegramToken =
-    process.env.TELEGRAM_BOT_TOKEN ?? (await getKeystoreSecret(botId, KeyRoles.telegramToken)) ?? undefined;
+  const telegram = await resolveTelegramSettings(botId, cfg.alerts.telegram);
+  console.log(pc.dim(describeTelegramSettings(telegram)));
   let surplusApiKey: string | undefined;
   if (cfg.strategy.id === "agent") {
     const resolved = await resolveSurplusApiKey(botId);
@@ -77,7 +78,8 @@ export async function runBot(botId: string, opts: RunOpts): Promise<void> {
     statePath: statePath(botId),
     controlSocket: join(dirs.run(), `${botId}.sock`),
     quotientToken,
-    telegramToken,
+    telegramToken: telegram.token,
+    telegramChatId: telegram.chatId,
     surplusApiKey,
     log: consoleLogger(botId, opts.debug ? "debug" : "info"),
   });

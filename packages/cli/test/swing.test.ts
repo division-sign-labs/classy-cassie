@@ -287,7 +287,8 @@ function telegramSetup() {
   return {
     ask: vi.fn().mockResolvedValueOnce("test-token").mockResolvedValueOnce("42"),
     confirm: vi.fn().mockResolvedValue(true),
-    select: vi.fn().mockResolvedValue("skip"),
+    // The step now opens with a choice; "enter" takes the typed-in path these cases exercise.
+    select: vi.fn().mockResolvedValueOnce("enter").mockResolvedValue("skip"),
     print: (message: string) => messages.push(message), messages,
     send: vi.fn().mockResolvedValue(undefined), saveToken: vi.fn(),
   };
@@ -328,7 +329,7 @@ describe("Telegram setup failure recovery", () => {
     const d = telegramSetup();
     d.send.mockRejectedValue(new Error("chat not found"));
     await expect(configureInitTelegram({ chatId: "previous" }, d)).resolves.toBeUndefined();
-    expect(d.select).toHaveBeenCalledOnce();
+    expect(d.select).toHaveBeenCalledTimes(2);
     expect(d.saveToken).not.toHaveBeenCalled();
     expect(d.messages).toContain("Telegram alerts skipped.");
     expect(d.messages).not.toContain("Telegram test sent.");
@@ -336,7 +337,7 @@ describe("Telegram setup failure recovery", () => {
 
   it("leaves existing alerts unchanged when setup is declined", async () => {
     const d = telegramSetup();
-    d.confirm.mockResolvedValue(false);
+    d.select.mockReset().mockResolvedValue("none");
     await expect(configureInitTelegram({ chatId: "previous" }, d)).resolves.toEqual({ chatId: "previous" });
     expect(d.ask).not.toHaveBeenCalled();
     expect(d.send).not.toHaveBeenCalled();
@@ -345,7 +346,7 @@ describe("Telegram setup failure recovery", () => {
 
   it("labels a deliberately skipped test as untested", async () => {
     const d = telegramSetup();
-    d.confirm.mockResolvedValueOnce(true).mockResolvedValueOnce(false);
+    d.confirm.mockResolvedValueOnce(false);
     await expect(configureInitTelegram(undefined, d)).resolves.toEqual({ chatId: "42" });
     expect(d.send).not.toHaveBeenCalled();
     expect(d.messages).toContain("Telegram saved without a test.");
@@ -356,7 +357,7 @@ describe("Telegram setup failure recovery", () => {
     const d = telegramSetup();
     d.saveToken.mockImplementation(() => { throw new Error("keystore unavailable"); });
     await expect(configureInitTelegram(undefined, d)).rejects.toThrow("keystore unavailable");
-    expect(d.select).not.toHaveBeenCalled();
+    expect(d.select).toHaveBeenCalledTimes(1);
     expect(d.messages).not.toContain("Telegram test sent.");
   });
 });

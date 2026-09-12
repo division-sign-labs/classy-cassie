@@ -6,6 +6,7 @@
 
 import { z } from "zod";
 import {
+  INVENTORY_DUST_SHARES,
   isSignalFresh,
   marketForecastFromSignal,
   mirrorBookForNo,
@@ -203,7 +204,7 @@ interface AdaptiveAccountingState {
 const ADAPTIVE_ACCOUNTING_MEMORY_KEY = "adaptive-execution-accounting";
 
 function activeExecution(parent: NonNullable<StrategyContext["execution"]>["parents"][number]): boolean {
-  return parent.status === "active" || parent.status === "canceling" || parent.status === "blocked";
+  return parent.status === "active" || parent.status === "canceling";
 }
 
 function managedOrderIds(ctx: StrategyContext): Set<string> {
@@ -609,7 +610,7 @@ export class FlipFlatStrategy implements Strategy {
     });
     const now = ctx.now();
     const reservations = await this.syncPendingEntries(ctx, cfg, now);
-    await this.syncAdaptiveEntries(ctx, reservations);
+    await this.syncAdaptiveEntries(ctx, cfg, reservations, now);
     const holdStarts = await this.syncHoldStarts(ctx, now, reservations.markets);
     let remainingBudgetUsd = Number.POSITIVE_INFINITY;
     if (cfg.allocationMode === "daily-budget") {
@@ -690,6 +691,7 @@ export class FlipFlatStrategy implements Strategy {
     // is stable, so their relative order is unchanged.
     const ranked = [...latestByMarket.entries()].sort((a, b) => edgePpOf(b[1]) - edgePpOf(a[1]));
 
+    if (ctx.execution?.blocked && ranked.length) ctx.log.info(`entries paused: ${ctx.execution.haltReason ?? "operator pause"}`);
     for (const [marketRef, sig] of ranked) {
       if (ctx.execution?.blocked) continue;
       if (entryBlockedMarkets.has(marketRef)) continue;
@@ -1430,7 +1432,8 @@ export class FlipFlatStrategy implements Strategy {
       const open = ctx.openOrders.find(
         (order) => order.id === orderId || (reservation.clientId !== undefined && order.clientId === reservation.clientId),
       );
-      if (absorbedFraction >= 1 - 1e-6) {
+      // Receipts carry five decimals and the position index four; a sub-unit residue is rounding.
+      if (absorbedFraction >= 1 - 1e-6 || reservation.reservedSize - absorbedSize <= INVENTORY_DUST_SHARES) {
         ctx.log.info(`pending entry ${orderId} for ${reservation.marketRef} absorbed by the venue position; reservation released`);
         changed = true;
         continue;
@@ -1459,7 +1462,7 @@ export class FlipFlatStrategy implements Strategy {
   }
 
   /** Parent receipts own adaptive accounting; child replacements cannot spend or reserve twice. */
-  private async syncAdaptiveEntries(ctx: StrategyContext, reservations: ReservationSync): Promise<void> {
+  private async syncAdaptiveEntries(ctx: StrategyContext, cfg: FlipFlatConfig, reservations: ReservationSync, now: number): Promise<void> {
     if (!ctx.execution) return;
     const saved = await ctx.memory.get<AdaptiveAccountingState>(ADAPTIVE_ACCOUNTING_MEMORY_KEY);
     const state: AdaptiveAccountingState = { byParent: { ...(saved?.byParent ?? {}) } };
@@ -1469,12 +1472,23 @@ export class FlipFlatStrategy implements Strategy {
       const previous = state.byParent[parent.id] ?? { entryRecorded: false, absorbedSize: 0 };
       const visibleSize = ctx.positions.filter((position) => position.marketRef === parent.marketRef && position.side === parent.outcome)
         .reduce((sum, position) => sum + Math.max(0, position.size), 0);
-      const absorbedSize = Math.max(previous.absorbedSize, Math.min(parent.filledSize, Math.max(0, visibleSize - parent.priorMarketSize)));
+      let absorbedSize = Math.max(previous.absorbedSize, Math.min(parent.filledSize, Math.max(0, visibleSize - parent.priorMarketSize)));
       // Absorption is monotonic: a subsequent exit must not resurrect an old entry reservation.
+      // Receipts carry five decimals and the position index four; a sub-unit residue is rounding, not missing inventory.
+      if (parent.filledSize - absorbedSize <= INVENTORY_DUST_SHARES) absorbedSize = parent.filledSize;
+      const anchor = parent.terminalAt ?? parent.lastFillAt ?? parent.admittedAt;
+      if (!activeExecution(parent) && absorbedSize < parent.filledSize && now - anchor >= cfg.pendingEntryReservationSec * 1_000) {
+        // The venue index never showed these shares; hold the market no longer than a legacy reservation would.
+        ctx.log.warn(
+          `adaptive entry ${parent.id} for ${parent.marketRef} released after ${((now - anchor) / 1_000).toFixed(0)}s: ` +
+            `${(parent.filledSize - absorbedSize).toFixed(4)} shares from fill receipts never appeared in the venue position; treating them as absorbed`,
+        );
+        absorbedSize = parent.filledSize;
+      }
       const unobservedSize = Math.max(0, parent.filledSize - absorbedSize);
       const unobservedCost = parent.filledSize > 0 ? unobservedSize / parent.filledSize * parent.filledNotionalUsd : 0;
       const exposure = parent.reservedNotionalUsd + unobservedCost;
-      if (activeExecution(parent) || unobservedSize > 1e-6) reservations.markets.add(parent.marketRef);
+      if (activeExecution(parent) || unobservedSize > INVENTORY_DUST_SHARES) reservations.markets.add(parent.marketRef);
       if (exposure > 0) {
         reservations.contributionUsdByMarket.set(parent.marketRef, (reservations.contributionUsdByMarket.get(parent.marketRef) ?? 0) + exposure);
       }

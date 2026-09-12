@@ -44,10 +44,6 @@ export class SwingController {
   private readonly marketFailures = new Map<string, { error: string; failures: number; retryAt: number; deferred?: true }>();
   private lastMarketFailureSummary = "";
   private lastMarketFailureLogAt = 0;
-  private lastStartupError?: string;
-  private startupFailures = 0;
-  private startupRetryAt = 0;
-  private autoStart = false;
   private stopped = false;
   private lastReport?: SwingReduction;
   private execution?: PerpExecutionState;
@@ -68,10 +64,9 @@ export class SwingController {
       state: d.state, alerter: d.alerter, log: d.log, now: this.now });
   }
 
-  /** Running the controller authorizes automatic startup; read-only checks never call this. */
+  /** Starts research and market polling; execution needs no separate startup step. */
   start(): void {
     if (this.stopped || this.researchTimer) return;
-    this.autoStart = true;
     void this.refreshResearch();
     this.researchTimer = setInterval(() => { void this.refreshResearch(); }, this.config.signalPollIntervalMin * 60_000);
     this.marketTimer = setInterval(() => { void this.refreshMarkets(); }, 15_000);
@@ -207,11 +202,13 @@ export class SwingController {
     await this.engine.supervisePerps(); this.execution = await this.engine.perpStatus();
     this.reportExecutionHalt();
   }
+  /** One line when entries stop or wait, repeated at most every five minutes, and one when they flow again. */
   private reportExecutionHalt(): void {
-    if (this.execution?.halted) {
-      const reason = this.execution.haltReason ?? "execution_halted";
+    const halted = this.execution?.halted ? (this.execution.haltReason ?? "execution_halted") : undefined;
+    const reason = halted ?? this.execution?.entriesPaused;
+    if (reason) {
       if (reason !== this.lastExecutionHaltReason || this.now() - this.lastExecutionHaltLogAt >= 5 * 60_000) {
-        this.d.log.warn(`swing entries halted: ${reason}`);
+        this.d.log.warn(halted ? `swing entries halted: ${reason}` : `swing entries wait: ${reason}`);
         this.lastExecutionHaltLogAt = this.now();
       }
       this.lastExecutionHaltReason = reason;
@@ -220,31 +217,8 @@ export class SwingController {
       this.lastExecutionHaltReason = undefined;
     }
   }
-  private startupDataReady(): boolean {
-    const now = this.now();
-    return !this.lastResearchError && this.lastResearchAt > 0 && this.lastResearchAt <= now + 5000 &&
-      now - this.lastResearchAt <= this.config.signalPollIntervalMin * 2 * 60_000 &&
-      this.markets.some(m => m.active && m.book.ts <= now + 5000 && now - m.book.ts <= this.config.maxBookAgeSec * 1000);
-  }
   async tick(tickId?: number): Promise<TickResult> {
     if (this.stopped) return { seq: tickId ?? this.now(), skipped: true, actions: 0, ordersPlaced: 0, errors: 0 };
-    if (this.autoStart && this.now() >= this.startupRetryAt && this.startupDataReady()) {
-      try {
-        await this.engine.startPerps();
-        // startPerps may deliberately preserve an operator/safety halt. Either
-        // way, one successful startup check ends automatic startup authority.
-        this.autoStart = false; this.lastStartupError = undefined;
-        this.startupFailures = 0; this.startupRetryAt = 0;
-      }
-      catch (error) {
-        const message = (error as Error).message;
-        if (this.lastStartupError !== message) this.d.log.warn(`swing startup remains halted: ${message}`);
-        this.lastStartupError = message;
-        this.startupFailures++;
-        this.startupRetryAt = this.now() + Math.min(15 * 60_000, 60_000 * 2 ** Math.min(4, this.startupFailures - 1));
-      }
-    }
-    // Startup refusal must not block reconciliation, protective stops or exits.
     const result = await this.engine.tick(tickId === undefined ? {} : { tickId });
     this.execution = await this.engine.perpStatus();
     this.reportExecutionHalt();
@@ -271,8 +245,7 @@ export class SwingController {
     const rejectionCounts: Record<string, number> = {};
     for (const rejection of this.lastReport?.rejected ?? []) rejectionCounts[rejection.reason] = (rejectionCounts[rejection.reason] ?? 0) + 1;
     return { strategy: "quotient-swing", mode: this.config.mode, configHash: this.configHash,
-      halted: this.execution?.halted ?? true, execution: this.execution, startupError: this.lastStartupError,
-      startupRetryAt: this.startupRetryAt || undefined,
+      halted: this.execution?.halted ?? true, execution: this.execution, entriesPaused: this.execution?.entriesPaused,
       research: { lastAt: this.lastResearchAt, error: this.lastResearchError, assets: q?.assets.length ?? 0, markets: this.markets.length,
         outlooks: q?.outlooks.length ?? 0, eligibleOutlooks: this.eligibleOutlooks(q), rejectionCounts,
         excludedOutlooks: q?.excluded.length ?? 0, excludedExamples: q?.excluded.slice(0, 10) ?? [],
@@ -280,13 +253,10 @@ export class SwingController {
       lastReport: this.lastReport };
   }
   async halt(): Promise<void> {
-    await this.engine.haltPerps("operator"); this.execution = await this.engine.perpStatus();
+    await this.engine.haltPerps(); this.execution = await this.engine.perpStatus();
   }
   async resume(acknowledgeLossReset = false): Promise<void> {
-    if (!this.startupDataReady()) throw new Error("resuming trading requires current research and venue data");
     await this.engine.resumePerps(acknowledgeLossReset); this.execution = await this.engine.perpStatus();
-    this.autoStart = false; this.lastStartupError = undefined;
-    this.startupFailures = 0; this.startupRetryAt = 0;
   }
   replay(options: { from?: number; until?: number; costMultiplier?: number; fillModel?: "cross" | "touch" } = {}) {
     return replaySwing(this.recordings.read(this.configHash, "live", options.from, options.until), this.config,
@@ -304,7 +274,6 @@ export class SwingController {
   async shutdown(cancelWorking: boolean): Promise<void> {
     if (cancelWorking) await this.prepareShutdown();
     this.stopped = true;
-    this.autoStart = false;
     if (this.researchTimer) clearInterval(this.researchTimer);
     if (this.marketTimer) clearInterval(this.marketTimer);
     // Each research write checks stopped; in-flight HTTP work cannot write after this close.

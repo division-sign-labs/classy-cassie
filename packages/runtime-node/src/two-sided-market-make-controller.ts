@@ -6,6 +6,7 @@ import type {
   Fill, Logger, MarketMakeQuotientClient, MarketMakeSignalRow, Order, OrderBook, OrderIntent, PolymarketCatalogClient,
   PolymarketMarketCatalog, Position, RealtimeSubscription, StateStore, VenueAccount, VenueAdapter,
 } from "@quotient-forecasting/cassie-core";
+import { isTransientVenueError, retryAfterMs as sharedRetryAfterMs } from "@quotient-forecasting/cassie-core";
 import {
   MarketMakeConfigSchema, categoryFamily, marketMakeConfigForBankroll, marketMakeConfigHash, planTwoSidedQuotes, planAdaptiveQuotes,
   type AdaptiveForecast, type AdaptiveMovement, type MarketMakeConfig, type TwoSidedPlan, type TwoSidedQuote,
@@ -137,20 +138,9 @@ function digest(value: unknown): string { return createHash("sha256").update(JSO
 function fillIdentity(fill: Fill): string {
   return `${fill.id}:${fill.makerOrderId ?? fill.orderId ?? "none"}`;
 }
-function transientVenueError(error: unknown): boolean {
-  const row = error as { name?: string; status?: number; cause?: unknown } | undefined;
-  if (row?.status === 429 || (row?.status !== undefined && row.status >= 500 && row.status <= 599)) return true;
-  if (row?.status !== undefined && row.status >= 400 && row.status < 500) return false;
-  if (["VenueCooldownError", "RateLimitError", "TimeoutError", "TransportError", "ConnectionLostError"].includes(row?.name ?? "")) return true;
-  return /\b429\b|\b5\d\d\b|rate.?limit|timeout|timed out|fetch failed|ECONN|ENET|EAI_AGAIN|socket|network|heartbeat exceeded/i.test(String(error))
-    || (row?.cause !== undefined && row.cause !== error && transientVenueError(row.cause));
-}
-function retryAfterMs(error: unknown): number {
-  const row = error as { retryAfterMs?: number; retryAfter?: number } | undefined;
-  // The pinned Polymarket SDK exposes retryAfter in seconds.
-  const ms = Number(row?.retryAfterMs ?? (row?.retryAfter === undefined ? 0 : row.retryAfter * 1_000));
-  return Number.isFinite(ms) && ms > 0 ? ms : 0;
-}
+const transientVenueError = isTransientVenueError;
+/** The shared helper returns undefined when the venue gave no hint; this lane treats that as no delay. */
+function retryAfterMs(error: unknown): number { return sharedRetryAfterMs(error) ?? 0; }
 
 export class TwoSidedMarketMakeController {
   private readonly config: MarketMakeConfig;

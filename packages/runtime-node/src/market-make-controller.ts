@@ -1,7 +1,7 @@
 // packages/runtime-node/src/market-make-controller.ts
 
 import { createHash } from "node:crypto";
-import { executableLiquidationValue } from "@quotient-forecasting/cassie-core";
+import { executableLiquidationValue, isTransientVenueError } from "@quotient-forecasting/cassie-core";
 import type {
   Alerter,
   AlertKind,
@@ -86,25 +86,7 @@ const VENUE_READ_RETRY_BASE_DELAY_MS = 250;
 // hundreds of events in a poll was the runtime’s dominant CPU and disk cost.
 const REDUCER_SNAPSHOT_MIN_INTERVAL_MS = 5_000;
 
-function isTransientVenueReadError(error: unknown): boolean {
-  const candidate = error as { status?: unknown; retryAfter?: unknown; code?: unknown; name?: unknown } | null;
-  if (candidate && typeof candidate === "object") {
-    if (candidate.retryAfter !== undefined) return true;
-    // The Polymarket SDK surfaces a client-side deadline as a TimeoutError
-    // ("Request timed out: GET …"), which matches none of the wire-level
-    // patterns below. A read that ran out of time is the most transient
-    // failure there is; treating it as fatal degraded the bot on one slow book.
-    if (candidate.name === "TimeoutError" || candidate.name === "AbortError") return true;
-    if ([429, 500, 502, 503, 504].includes(Number(candidate.status))) return true;
-    if (typeof candidate.code === "string" &&
-      ["ECONNRESET", "ETIMEDOUT", "ECONNREFUSED", "EAI_AGAIN", "UND_ERR_SOCKET", "UND_ERR_CONNECT_TIMEOUT"].includes(candidate.code)) {
-      return true;
-    }
-  }
-  const message = error instanceof Error ? error.message : String(error);
-  return /rate limited|too many requests|internal server error|bad gateway|service unavailable|gateway time-?out|request timed out|timed out|timeout|fetch failed|ECONNRESET|ETIMEDOUT|socket hang up/i
-    .test(message);
-}
+const isTransientVenueReadError = isTransientVenueError;
 
 function catalogAcceptsEntries(catalog: MarketCatalogSnapshot): boolean {
   return catalog.active && !catalog.closed && !catalog.archived && catalog.acceptingOrders && catalog.orderbookEnabled;

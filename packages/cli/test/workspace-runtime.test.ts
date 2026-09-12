@@ -154,6 +154,15 @@ describe("workspace runtime artifact", () => {
     expect(JSON.parse(built.files.get("packages/runtime-node/workspace-build.json")!.toString())).toEqual({ id: built.id, dependencyId: built.dependencyId });
   });
 
+  it("ships the dashboard's static UI from the runtime's built tree", () => {
+    const h = fixture();
+    h.write("packages/runtime-node/dist/dashboard/ui/index.html", "<!doctype html><title>fixture</title>\n");
+    h.write("packages/runtime-node/dist/dashboard/ui/app.css", "body{margin:0}\n");
+    h.write("packages/runtime-node/dist/dashboard/ui/app.js", "console.log('ui');\n");
+    const built = collectWorkspaceRuntime(h.root);
+    for (const file of ["index.html", "app.css", "app.js"]) expect(built.files.has(`packages/runtime-node/dist/dashboard/ui/${file}`)).toBe(true);
+  });
+
   it("excludes credentials, environments, source, databases and local dependency trees", () => {
     const h = fixture();
     const original = collectWorkspaceRuntime(h.root);

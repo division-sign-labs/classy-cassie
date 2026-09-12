@@ -1,11 +1,13 @@
 // packages/core/src/engine/prediction-execution.ts
 // Durable directional prediction execution; strategy output never signs or places orders.
 import type { BotConfig } from "../config.js";
-import type { Action, Alerter, Fill, Logger, Order, OrderBook, OrderIntent, Position, PredictionCancellationResult, PredictionExecutionMarket, Signal, StateStore, StrategyActionResult, VenueAccount, VenueAdapter } from "../types.js";
+import type { Action, Alerter, Balance, Fill, Logger, Order, OrderBook, OrderIntent, Position, PredictionCancellationResult, PredictionExecutionMarket, Signal, StateStore, StrategyActionResult, VenueAccount, VenueAdapter } from "../types.js";
 import { getJson, setJson } from "../state.js";
+import { isTransientVenueError, retryAfterMs } from "../venues/transient.js";
 import { checkCapacity } from "../risk/capacity.js";
 import { derivePredictionExecutionMetrics, type PredictionExecutionMetrics } from "./prediction-execution-metrics.js";
 import { positionMarketValue } from "../portfolio.js";
+import { RefusalLog } from "./refusal-log.js";
 
 export const PREDICTION_EXECUTION_KEY = "prediction:execution:v1";
 
@@ -25,8 +27,26 @@ const EPS = 1e-8;
 const BOOK_AGE_MS = 10_000;
 const MINIMUM_REST_MS = 10_000;
 const FILL_OVERLAP_MS = 300_000;
+/** A venue that cannot be read for this long stops resting orders gracefully; shorter outages only defer. */
+const SUPERVISION_STALE_MS = 60_000;
+const SNAPSHOT_TIMEOUT_MS = 8_000;
+/** Cold starts resolve market metadata for every token in the settlement history before the caches warm. */
+const COLD_START_TIMEOUT_MS = 30_000;
+const SNAPSHOT_REUSE_MS = 3_000;
+const DEFAULT_DEFER_MS = 5_000;
+const DEFER_LOG_INTERVAL_MS = 30_000;
+/** An ambiguous POST is resolved from venue evidence; after this long with no trace it is treated as never landed. */
+const AMBIGUOUS_RESOLVE_MS = 30_000;
+const KALSHI_CROSSING_WINDOW_MS = 30_000;
+/** Taker fee allowance on free cash for a crossing entry: protocol rate × p(1−p) plus the builder fee. */
+const ENTRY_TAKER_FEE_ALLOWANCE = 0.02;
+/**
+ * One CLOB size unit. Fill receipts carry five decimals and the position index four,
+ * so any smaller residue between them is rounding, never missing inventory.
+ */
+export const INVENTORY_DUST_SHARES = 0.01;
 type DirectionalAction = Extract<Action, { kind: "enter" | "exit" }>;
-type ParentStatus = "active" | "canceling" | "completed" | "canceled" | "blocked";
+type ParentStatus = "active" | "canceling" | "completed" | "canceled";
 type ChildStatus = "reserved" | "signed" | "unknown" | "open" | "canceling" | "terminal" | "rejected";
 
 export interface PredictionExecutionParentSummary {
@@ -58,7 +78,17 @@ export interface PredictionExecutionParentSummary {
   urgent: boolean;
   arrivalBid?: number;
   arrivalAsk?: number;
+  /** End of the marketable-limit window that follows the maker deadline (Polymarket entries). */
+  crossingDeadlineAt?: number;
+  cancelReason?: string;
   metrics?: PredictionExecutionMetrics;
+}
+
+export interface PredictionSupervisionDeferral {
+  deferredSince: number;
+  until: number;
+  stage: string;
+  reason: string;
 }
 
 export interface PredictionExecutionSnapshot {
@@ -66,10 +96,17 @@ export interface PredictionExecutionSnapshot {
   blocked: boolean;
   queuedExitCount?: number;
   unsettledFillCount?: number;
+  /** Present only while the operator pause is latched. */
   haltReason?: string;
+  /** Markets whose latest submission is being resolved from venue evidence. */
+  reconcilingMarkets?: string[];
+  /** Markets holding a resting order this executor did not place; entries there wait. */
+  unownedMarkets?: string[];
   refreshedAt?: number;
   entryCooldowns: Record<string, { admittedAt: number; refreshedAt: number }>;
   dailySpentUsd: Record<string, number>;
+  /** Present while venue reads are being retried instead of canceling orders. */
+  supervision?: PredictionSupervisionDeferral;
 }
 
 interface Parent extends Omit<PredictionExecutionParentSummary, "reservedNotionalUsd" | "reservedSize" | "remainingSize" | "childOrderIds"> {
@@ -83,7 +120,9 @@ interface Parent extends Omit<PredictionExecutionParentSummary, "reservedNotiona
   lastExitDecision?: "hold" | "normal" | "urgent";
   lastExitEvaluationAt?: number;
   fakSubmitted?: boolean;
-  cancelReason?: string;
+  /** Set when the single marketable-limit crossing child is reserved; never cross twice. */
+  crossingAt?: number;
+  minOrderSize?: number;
   inventoryObserved?: boolean;
   lastValidatedBookAt?: number;
 }
@@ -108,7 +147,23 @@ interface Child {
   notOpenAt?: number;
   nextCancelAt?: number;
   reconciliationError?: string;
+  reconciliationErrorSince?: number;
+  reconciliationTransient?: boolean;
+  /** A settlement record that contradicts this order; stops its parent, never the account. */
+  settlementError?: string;
   error?: string;
+  /** Set when a signed POST failed ambiguously; cleared by adoption or rejection. */
+  unknownSince?: number;
+  unknownPasses?: number;
+}
+
+/** One venue view per supervision pass; SELL sizing never reads inventory from here. */
+interface PortfolioSnapshot {
+  balances: Balance[];
+  cash: number;
+  positions: Position[];
+  tokenBalances: Map<string, number>;
+  observedAt: number;
 }
 
 interface Settlement {
@@ -130,7 +185,6 @@ interface Checkpoint {
   entryCooldowns: PredictionExecutionSnapshot["entryCooldowns"];
   dailySpentUsd: Record<string, number>;
   refreshedAt?: number;
-  haltReason?: string;
   initializedAt: number;
   lastSettlementScanAt?: number;
   queuedExits: Record<string, { action: Extract<Action, { kind: "exit" }>; evaluatedAt: number }>;
@@ -156,7 +210,7 @@ export interface PredictionSupervisionOptions {
 }
 
 function working(child: Child): boolean { return child.status !== "terminal" && child.status !== "rejected"; }
-function active(parent: Parent): boolean { return ["active", "canceling", "blocked"].includes(parent.status); }
+function active(parent: Parent): boolean { return ["active", "canceling"].includes(parent.status); }
 function finitePositive(value: number): boolean { return Number.isFinite(value) && value > 0; }
 function floorTick(value: number, tick: number): number { return Number((Math.floor((value + EPS) / tick) * tick).toFixed(8)); }
 function ceilTick(value: number, tick: number): number { return Number((Math.ceil((value - EPS) / tick) * tick).toFixed(8)); }
@@ -173,10 +227,22 @@ export class PredictionExecutor {
   private operatorPaused = false;
   private stopping = false;
   private signals?: Signal[];
-  private heartbeatHaltReason?: string;
   private lastReconciledAt?: number;
+  private readonly startedAt: number;
+  private portfolio?: PortfolioSnapshot;
+  private deferral?: { since: number; until: number; stage: string; reason: string; loggedAt: number };
+  private readonly refusals: RefusalLog;
+  /** Resting orders this executor did not place, and the markets they sit in. In memory: a restart re-observes them. */
+  private unownedOrderIds = new Set<string>();
+  private unownedMarkets = new Set<string>();
+  private heartbeatFailureLoggedAt = 0;
+  /** Set while the venue's dead-man renewal fails; new orders would be cancelled by it within seconds. In memory. */
+  private heartbeatFailing = false;
 
-  constructor(private readonly d: PredictionExecutorDeps) { this.now = d.now ?? Date.now; }
+  constructor(private readonly d: PredictionExecutorDeps) {
+    this.now = d.now ?? Date.now; this.startedAt = this.now();
+    this.refusals = new RefusalLog(d.log, this.now);
+  }
 
   private serial<T>(fn: () => Promise<T>): Promise<T> {
     const pending = this.queue.then(fn, fn);
@@ -189,7 +255,10 @@ export class PredictionExecutor {
     let timer: ReturnType<typeof setTimeout> | undefined;
     try {
       return await Promise.race([operation(), new Promise<never>((_, reject) => {
-        timer = setTimeout(() => { onTimeout?.(); reject(new Error(`${label} exceeded ${timeoutMs === 4000 ? "four" : timeoutMs / 1000} seconds`)); }, timeoutMs);
+        timer = setTimeout(() => {
+          onTimeout?.();
+          reject(Object.assign(new Error(`${label} exceeded ${timeoutMs === 4000 ? "four" : timeoutMs / 1000} seconds`), { name: "TimeoutError" }));
+        }, timeoutMs);
         timer.unref?.();
       })]);
     } finally { if (timer) clearTimeout(timer); }
@@ -200,6 +269,12 @@ export class PredictionExecutor {
     this.loading ??= (async () => {
       const saved = await getJson<Checkpoint>(this.d.state, PREDICTION_EXECUTION_KEY);
       if (saved && saved.version !== 1) throw new Error("unsupported prediction execution checkpoint");
+      if (saved) {
+        // Earlier runtimes latched an account-wide halt in the checkpoint; every market now resolves on its own.
+        const legacy = saved as Checkpoint & { haltReason?: string };
+        if (legacy.haltReason) { this.d.log.warn("legacy prediction halt ignored; execution resolves per market", { reason: legacy.haltReason }); delete legacy.haltReason; }
+        for (const parent of Object.values(saved.parents)) if ((parent.status as string) === "blocked") parent.status = "active";
+      }
       this.checkpoint = saved ?? { version: 1, sequence: 0, parents: {}, children: {}, settlements: {}, entryCooldowns: {}, dailySpentUsd: {}, initializedAt: this.now(), queuedExits: {} };
       this.checkpoint.queuedExits ??= {};
       return this.checkpoint;
@@ -222,6 +297,53 @@ export class PredictionExecutor {
   }
   private get entryDuration(): number { return (this.d.config.execution?.entryDeadlineSec ?? (this.commodities ? this.strategyNumber("entryDeadlineSec", 20) : 120)) * 1000; }
   private get exitDuration(): number { return (this.d.config.execution?.exitPassiveSec ?? (this.commodities ? this.strategyNumber("exitPassiveSec", 20) : 60)) * 1000; }
+  /** Polymarket entries only: how long a marketable limit may work after the maker deadline. */
+  private get entryCrossingDuration(): number { return this.commodities ? 0 : (this.d.config.execution?.entryCrossingSec ?? 60) * 1000; }
+  private entryPhase(p: Parent): "maker" | "taker" | "expired" {
+    const now = this.now();
+    if (now < p.deadlineAt) return "maker";
+    return p.crossingDeadlineAt !== undefined && now < p.crossingDeadlineAt ? "taker" : "expired";
+  }
+
+  private deferring(): boolean { return this.deferral !== undefined && this.now() < this.deferral.until; }
+  /** A transient venue failure keeps orders and retries; the log line repeats at most every thirty seconds. */
+  private defer(stage: string, error: unknown, minMs = 0): void {
+    const now = this.now();
+    const until = now + Math.max(minMs, retryAfterMs(error) ?? DEFAULT_DEFER_MS);
+    const current = this.deferral;
+    const announce = !current || current.stage !== stage || now - current.loggedAt >= DEFER_LOG_INTERVAL_MS;
+    if (announce) {
+      this.d.log.warn("prediction supervision deferred", { stage, retryAfterMs: until - now, error: String(error), ...(current ? { deferredMs: now - current.since } : {}) });
+    }
+    this.deferral = { since: current?.since ?? now, until: Math.max(until, current?.until ?? 0), stage, reason: String(error), loggedAt: announce ? now : current!.loggedAt };
+  }
+  private clearDeferral(): void {
+    if (!this.deferral) return;
+    this.d.log.info("prediction supervision resumed", { deferredMs: this.now() - this.deferral.since });
+    this.deferral = undefined;
+  }
+
+  /** One account view per pass. Reused within a few seconds; dropped on every fill or acknowledgement. */
+  private async portfolioSnapshot(maxAgeMs: number): Promise<PortfolioSnapshot> {
+    const cached = this.portfolio;
+    if (cached && this.now() - cached.observedAt <= maxAgeMs) return cached;
+    const c = this.checkpoint!;
+    const observedAt = this.now();
+    const [balances, positions] = await this.rpc("portfolio", () => Promise.all([this.d.adapter.balances(this.d.account), this.d.adapter.positions(this.d.account)]), undefined, SNAPSHOT_TIMEOUT_MS);
+    const cash = balances.filter(b => ["pUSD", "USDC", "USD"].includes(b.asset)).reduce((sum, b) => sum + b.total, 0);
+    if (!Number.isFinite(cash) || cash < 0) throw new Error("invalid collateral snapshot");
+    // Authenticated token balances supply inventory the public position index has not caught up
+    // with. Only tokens with an active parent, a recent settlement, or an unobserved fill can lag.
+    const tokens = new Set(Object.values(c.parents)
+      .filter(p => active(p) || (p.filledSize > 0 && !p.inventoryObserved) || this.now() - (p.terminalAt ?? p.admittedAt) < FILL_OVERLAP_MS)
+      .map(p => p.tokenId));
+    const tokenBalances = new Map(await Promise.all([...tokens].map(async tokenId =>
+      [tokenId, await this.rpc("token balance", () => this.d.adapter.tokenBalance!(this.d.account, tokenId), undefined, SNAPSHOT_TIMEOUT_MS)] as const)));
+    for (const quantity of tokenBalances.values()) if (!Number.isFinite(quantity) || quantity < 0) throw new Error("invalid authenticated inventory snapshot");
+    const snapshot: PortfolioSnapshot = { balances, cash, positions, tokenBalances, observedAt };
+    this.portfolio = snapshot;
+    return snapshot;
+  }
   private get commodities(): boolean { return this.d.config.strategy.id === "kalshi-commodities" && this.d.adapter.id === "kalshi"; }
   private entryUnitCost(price: number, provenance?: Record<string, unknown>): number {
     if (!this.commodities) return price;
@@ -245,14 +367,16 @@ export class PredictionExecutor {
       for (const child of Object.values(c.children)) {
         if (child.status === "reserved") child.status = "rejected";
         else if (child.status === "signed") {
-          child.status = "unknown";
-          c.haltReason = `submission ${child.id} requires reconciliation`;
+          // A POST interrupted by the restart is resolved from venue evidence like any other.
+          child.status = "unknown"; child.unknownSince = this.now(); child.unknownPasses = 0;
         }
       }
       await this.save();
-      await this.reconcile();
+      await this.reconcile(COLD_START_TIMEOUT_MS);
       for (const p of Object.values(c.parents).filter(active)) {
-        if (p.side === "BUY" && this.now() >= p.deadlineAt) await this.stopParent(p, "entry deadline elapsed during restart");
+        if (p.side === "BUY" && this.now() >= (p.crossingDeadlineAt ?? p.deadlineAt)) {
+          await this.stopParent(p, p.crossingDeadlineAt === undefined ? "entry deadline elapsed during restart" : "entry crossing window elapsed during restart");
+        }
       }
       await this.save();
     });
@@ -262,10 +386,24 @@ export class PredictionExecutor {
     return this.serial(() => this.admitInternal(action, positions));
   }
 
+  /** Every refused admission names its reason once per market; a silent gate hid a nine-hour outage. */
+  private refuse(action: DirectionalAction, reason: string, data?: Record<string, unknown>): StrategyActionResult {
+    this.refusals.refuse(`admit:${action.marketRef}`, `${action.kind} refused for ${action.marketRef}: ${reason}`, data);
+    return { placed: false };
+  }
+
   private async admitInternal(action: DirectionalAction, positions: Position[], exitEvaluatedAt = this.now()): Promise<StrategyActionResult> {
       this.requireSupport();
       const c = await this.load();
-      await this.reconcile();
+      // A supervision pass moments ago already applied every settlement; admission reuses it.
+      if (this.now() - (this.lastReconciledAt ?? 0) > SNAPSHOT_REUSE_MS) {
+        try { await this.reconcile(); }
+        catch (error) {
+          if (!isTransientVenueError(error)) throw error;
+          this.defer("reconcile", error);
+          return this.refuse(action, "supervision deferred (reconcile)");
+        }
+      }
       const existing = Object.values(c.parents).find(p => p.marketRef === action.marketRef && active(p));
       if (existing) {
         if (action.kind === "exit") {
@@ -284,24 +422,37 @@ export class PredictionExecutor {
         }
         return { placed: false, executionId: existing.id };
       }
-      if (this.paused || this.stopping || c.haltReason) return { placed: false };
+      if (this.stopping) return this.refuse(action, "shutting down");
+      if (this.paused) return this.refuse(action, "execution paused");
+      if (this.deferring()) return this.refuse(action, `supervision deferred (${this.deferral!.stage})`);
+      if (this.heartbeatFailing && action.kind === "enter") return this.refuse(action, "venue heartbeat failing");
+      if (action.kind === "enter" && this.unownedMarkets.has(action.marketRef)) return this.refuse(action, "an order this executor did not place rests in this market");
       if (this.commodities && action.kind === "enter" && Object.values(c.parents).some(p => active(p) && p.marketRef !== action.marketRef
-        && p.provenance?.asset === action.provenance?.asset)) return { placed: false };
+        && p.provenance?.asset === action.provenance?.asset)) return this.refuse(action, "another market of the same asset is working");
       const held = positions.filter(p => p.marketRef === action.marketRef && p.size > EPS);
       const outcome = action.kind === "enter" ? action.side : held[0]?.outcome ?? held[0]?.side;
-      if (outcome !== "YES" && outcome !== "NO") return { placed: false };
-      if (held.some(p => (p.outcome ?? p.side) !== outcome)) return { placed: false };
+      if (outcome !== "YES" && outcome !== "NO") return this.refuse(action, "no held outcome to act on");
+      if (held.some(p => (p.outcome ?? p.side) !== outcome)) return this.refuse(action, "mixed outcomes held");
       if (action.kind === "enter") {
         const previous = c.entryCooldowns[action.marketRef];
         const cooldown = this.strategyNumber("signalPollIntervalMin", 5) * 60_000;
-        if (previous && (this.now() - previous.admittedAt < cooldown || (c.refreshedAt ?? 0) <= previous.refreshedAt)) return { placed: false };
-        if (!c.refreshedAt) return { placed: false };
+        if (previous && (this.now() - previous.admittedAt < cooldown || (c.refreshedAt ?? 0) <= previous.refreshedAt)) return this.refuse(action, "entry cooldown until the next signal refresh");
+        if (!c.refreshedAt) return this.refuse(action, "no refreshed signals yet");
       } else {
         const lastAttempt = Object.values(c.parents).filter(p => p.marketRef === action.marketRef && p.side === "SELL" && p.fakSubmitted && p.terminalAt !== undefined)
           .reduce((latest, p) => Math.max(latest, p.terminalAt!), 0);
-        if (lastAttempt && this.now() - lastAttempt < this.strategyNumber("exitRetrySec", 300) * 1000) return { placed: false };
+        if (lastAttempt && this.now() - lastAttempt < this.strategyNumber("exitRetrySec", 300) * 1000) return this.refuse(action, "exit retry cooldown");
       }
-      const market = await this.rpc("execution market", () => this.d.adapter.executionMarket!(action.marketRef, outcome));
+      let market: PredictionExecutionMarket;
+      let snapshot: PortfolioSnapshot | undefined;
+      try {
+        market = await this.rpc("execution market", () => this.d.adapter.executionMarket!(action.marketRef, outcome));
+        snapshot = action.kind === "enter" ? await this.portfolioSnapshot(SNAPSHOT_REUSE_MS) : undefined;
+      } catch (error) {
+        if (!isTransientVenueError(error)) throw error;
+        this.defer("admission", error);
+        return this.refuse(action, "supervision deferred (admission)");
+      }
       this.validateMarket(market, action.marketRef, outcome, action.kind === "exit" && (action.urgent === true || this.exitDuration === 0));
       const external = this.externalBook(market.book, market.tokenId);
       const bid = external.bids[0]!.price;
@@ -310,13 +461,12 @@ export class PredictionExecutor {
       const latestSignal = this.latestSignal(action.marketRef);
       const rawQ = provenance?.qHeld ?? (latestSignal?.side === outcome ? latestSignal.prob : undefined);
       const minimumEdge = this.strategyNumber("entrySpreadPp", 10) / 100;
-      if (action.kind === "enter" && !probability(rawQ)) return { placed: false };
+      if (action.kind === "enter" && !probability(rawQ)) return this.refuse(action, "no usable Q probability");
       const maximumPrice = action.kind === "enter"
         ? floorTick(Math.min(ask, (rawQ as number) - minimumEdge, action.limitPrice ?? 1), market.tickSize)
         : 1;
-      if (!(maximumPrice > 0) || (action.kind === "enter" && maximumPrice + EPS < bid)) return { placed: false };
-      const balances = await this.rpc("balances", () => this.d.adapter.balances(this.d.account));
-      const cash = balances.filter(b => b.asset === "pUSD" || b.asset === "USDC" || b.asset === "USD").reduce((sum, b) => sum + b.total, 0);
+      if (!(maximumPrice > 0) || (action.kind === "enter" && maximumPrice + EPS < bid)) return this.refuse(action, "price bound below the best bid", { maximumPrice, bid, ask });
+      const cash = snapshot?.cash ?? 0;
       const reserved = Object.values(c.parents).filter(p => active(p) && p.side === "BUY").reduce((sum, p) => sum + this.remaining(p) * p.maximumPrice, 0);
       const budget = action.kind === "enter" ? Math.min(action.notional, this.d.config.risk.maxOrderNotional, Math.max(0, cash - reserved)) : 0;
       const heldSize = held.reduce((sum, p) => sum + p.size, 0);
@@ -324,15 +474,26 @@ export class PredictionExecutor {
       const cap = checkCapacity({ side: action.kind === "enter" ? "BUY" : "SELL", desiredSize, refPrice: action.kind === "enter" ? maximumPrice : bid, book: external,
         quote: { ...market.quote, bid, ask, mid: (bid + ask) / 2 }, risk: action.kind === "exit" ? { ...this.d.config.risk, minDailyVolume: 0 } : this.d.config.risk,
         minimumNotional: action.kind === "enter" ? action.minNotional : undefined, enforceMinimumNotional: action.kind === "enter" });
-      if (!cap.ok) return { placed: false };
+      if (!cap.ok) return this.refuse(action, `capacity: ${cap.skipReasons.join("; ")}`);
       let size = this.normalize(cap.size);
-      if (action.kind === "exit") size = this.normalize(Math.min(size, await this.rpc("token balance", () => this.d.adapter.tokenBalance!(this.d.account, market.tokenId))));
-      if (!(size > EPS) || (action.kind === "enter" && size + EPS < market.minOrderSize)) return { placed: false };
+      if (action.kind === "exit") {
+        let balance: number;
+        try { balance = await this.rpc("token balance", () => this.d.adapter.tokenBalance!(this.d.account, market.tokenId, { refresh: true })); }
+        catch (error) {
+          if (!isTransientVenueError(error)) throw error;
+          this.defer("admission", error);
+          return this.refuse(action, "supervision deferred (inventory)");
+        }
+        size = this.normalize(Math.min(size, balance));
+      }
+      if (!(size > EPS) || (action.kind === "enter" && size + EPS < market.minOrderSize)) return this.refuse(action, "size below the venue minimum", { size, minOrderSize: market.minOrderSize });
       const now = this.now();
       const id = `prediction:${this.d.botId}:${++c.sequence}`;
       const p: Parent = { id, marketRef: action.marketRef, tokenId: market.tokenId, conditionId: market.conditionId, outcome,
         side: action.kind === "enter" ? "BUY" : "SELL", status: "active", admittedAt: now,
         deadlineAt: now + (action.kind === "enter" ? this.entryDuration : this.exitDuration), targetSize: size, maximumPrice,
+        ...(action.kind === "enter" && this.entryCrossingDuration > 0 ? { crossingDeadlineAt: now + this.entryDuration + this.entryCrossingDuration } : {}),
+        minOrderSize: market.minOrderSize,
         ...(action.kind === "exit" && action.limitPrice !== undefined ? { minimumPrice: action.limitPrice } : {}), budgetUsd: budget,
         minimumEdge, minimumNotional: action.kind === "enter" ? Math.max(this.d.config.risk.minViableNotional, action.minNotional ?? 0) : 0,
         filledSize: 0, filledNotionalUsd: 0, feeUsd: 0, children: [], priorMarketSize: heldSize,
@@ -343,9 +504,10 @@ export class PredictionExecutor {
         ...(probability(rawQ) ? { qHeld: rawQ } : {}), ...(provenance ? { provenance } : {}),
         ...(action.kind === "exit" ? { lastExitDecision: action.urgent ? "urgent" as const : "normal" as const, lastExitEvaluationAt: exitEvaluatedAt } : {}) };
       c.parents[id] = p;
+      this.refusals.resolve(`admit:${action.marketRef}`);
       if (p.side === "BUY") c.entryCooldowns[p.marketRef] = { admittedAt: now, refreshedAt: c.refreshedAt ?? 0 };
       await this.save();
-      await this.workParent(p, market);
+      await this.workParent(p, market, snapshot);
       return { placed: false, executionId: id };
   }
 
@@ -356,7 +518,7 @@ export class PredictionExecutor {
     return this.serial(async () => {
       this.requireSupport();
       const c = await this.load();
-      this.paused = this.stopping || this.operatorPaused || Boolean(this.heartbeatHaltReason);
+      this.paused = this.stopping || this.operatorPaused;
       if (options.signals) this.signals = options.signals;
       if (options.refreshedAt !== undefined && Number.isFinite(options.refreshedAt) && options.refreshedAt > (c.refreshedAt ?? 0)) c.refreshedAt = options.refreshedAt;
       for (const p of Object.values(c.parents).filter(active)) {
@@ -376,10 +538,16 @@ export class PredictionExecutor {
           const freshness = Math.min(60_000, this.d.config.tickIntervalMin * 60_000);
           if (!action.urgent && (!decision || this.now() - queued.evaluatedAt > freshness)) continue;
         }
-        if (this.paused || c.haltReason || Object.values(c.parents).some(p => p.marketRef === marketRef && active(p))) continue;
+        if (this.paused || this.deferring() || Object.values(c.parents).some(p => p.marketRef === marketRef && active(p))) continue;
         const prior = Object.values(c.parents).filter(p => p.marketRef === marketRef && p.side === "BUY").sort((a, b) => b.admittedAt - a.admittedAt)[0];
         if (!prior) { delete c.queuedExits[marketRef]; continue; }
-        const quantity = await this.rpc("token balance", () => this.d.adapter.tokenBalance!(this.d.account, prior.tokenId));
+        let quantity: number;
+        try { quantity = await this.rpc("token balance", () => this.d.adapter.tokenBalance!(this.d.account, prior.tokenId)); }
+        catch (error) {
+          if (!isTransientVenueError(error)) throw error;
+          this.defer("queued exit", error);
+          continue;
+        }
         if (!(quantity > EPS)) { delete c.queuedExits[marketRef]; continue; }
         const positions: Position[] = [{ marketRef, tokenId: prior.tokenId, conditionId: prior.conditionId, outcome: prior.outcome, side: prior.outcome,
           size: quantity, avgPrice: prior.filledSize > 0 ? prior.filledNotionalUsd / prior.filledSize : 0 }];
@@ -390,27 +558,51 @@ export class PredictionExecutor {
         }
       }
       await this.save();
+      let snapshot: PortfolioSnapshot | undefined;
       try { await this.reconcile(); }
       catch (error) {
-        await this.cancelForReadFailure(`authoritative execution read failed: ${String(error)}`);
+        const anchor = Math.max(this.lastReconciledAt ?? 0, c.lastSettlementScanAt ?? 0, this.startedAt);
+        if (isTransientVenueError(error) && this.now() - anchor <= SUPERVISION_STALE_MS) {
+          // Orders stay resting; the engine skips new actions until a pass succeeds.
+          this.defer("reconcile", error);
+          await this.save();
+          throw error;
+        }
+        // A persistent read failure keeps orders resting and retries; parents stop one at a
+        // time through their own reconciliation-age and stale-supervision rules.
+        this.defer("reconcile", error, DEFER_LOG_INTERVAL_MS);
+        await this.save();
         throw error;
       }
-      await this.recoverTransientHalt();
-      // A timed-out POST may arrive later. Keep draining the account until its
-      // receipt is resolved; one cancellation at timeout is insufficient.
-      if (c.haltReason) await this.rpc("halted account cancellation", () => this.d.adapter.cancelAll(this.d.account))
-        .catch(error => this.d.log.error("halted prediction cancellation failed", { error: String(error) }));
+      try { snapshot = await this.portfolioSnapshot(0); }
+      catch (error) {
+        if (!isTransientVenueError(error)) throw error;
+        this.defer("snapshot", error);
+      }
+      let skipped = false;
       for (const p of Object.values(c.parents).filter(active)) {
-        if (this.paused || c.haltReason) await this.stopParent(p, this.paused ? "execution paused" : c.haltReason!);
-        else if (this.children(p).some(child => working(child) && child.reconciliationError)) {
+        const pending = this.children(p).filter(child => working(child) && (child.reconciliationError || child.settlementError));
+        if (this.paused) await this.stopParent(p, "execution paused");
+        else if (pending.some(child => child.settlementError || !child.reconciliationTransient || this.now() - (child.reconciliationErrorSince ?? this.now()) > SUPERVISION_STALE_MS)) {
           await this.stopParent(p, "order reconciliation pending");
-        } else if (p.status === "canceling" || p.status === "blocked") {
+        } else if (pending.length) {
+          // A throttled order read keeps the order resting; nothing is re-quoted from a partial view.
+          skipped = true;
+        } else if (p.status === "canceling") {
           await this.stopParent(p, p.cancelReason ?? "order cancellation pending");
         } else {
-          try { await this.workParent(p); }
-          catch (error) { await this.stopParent(p, `execution book unavailable: ${String(error)}`); }
+          try { await this.workParent(p, undefined, snapshot); }
+          catch (error) {
+            if (isTransientVenueError(error) && this.now() - Math.max(p.lastValidatedBookAt ?? p.admittedAt, this.startedAt) <= SUPERVISION_STALE_MS) {
+              this.defer("work", error);
+              skipped = true;
+              continue;
+            }
+            await this.stopParent(p, `execution book unavailable: ${String(error)}`);
+          }
         }
       }
+      if (snapshot && !skipped) this.clearDeferral();
       await this.save();
     });
   }
@@ -438,20 +630,22 @@ export class PredictionExecutor {
     return { ...book, bids: bids.filter(l => l.size > EPS), asks: asks.filter(l => l.size > EPS) };
   }
 
-  private async workParent(p: Parent, supplied?: PredictionExecutionMarket): Promise<void> {
+  private async workParent(p: Parent, supplied?: PredictionExecutionMarket, snapshot?: PortfolioSnapshot): Promise<void> {
     const children = this.children(p);
     const current = children.find(working);
-    if (p.status === "canceling" || p.status === "blocked") {
+    if (p.status === "canceling") {
       if (current) await this.cancel(current, p.cancelReason ?? "parent stopped");
-      else this.finish(p, p.filledSize + EPS >= p.targetSize ? "completed" : "canceled");
+      else this.finishParent(p);
       return;
     }
     const entryCross = this.commodities && p.side === "BUY" && (this.d.config.strategy.config.entryStyle !== "adaptive" || this.now() >= p.deadlineAt);
-    if (p.side === "BUY" && this.now() >= p.deadlineAt && !entryCross) { await this.stopParent(p, "entry deadline"); return; }
-    if (entryCross && this.now() > p.deadlineAt + 30_000) { await this.stopParent(p, "entry crossing window expired"); return; }
+    const polymarketEntry = !this.commodities && p.side === "BUY";
+    const phase = polymarketEntry ? this.entryPhase(p) : undefined;
+    if (phase === "expired") { await this.stopParent(p, p.crossingDeadlineAt === undefined ? "entry deadline" : "entry crossing window expired"); return; }
+    if (entryCross && this.now() > p.deadlineAt + KALSHI_CROSSING_WINDOW_MS) { await this.stopParent(p, "entry crossing window expired"); return; }
     if (p.side === "SELL" && !p.urgent && p.lastExitDecision === "hold") { await this.stopParent(p, "exit condition cleared"); return; }
     if (this.remaining(p) <= EPS) { if (!current) this.finish(p, "completed"); return; }
-    if (p.fakSubmitted && !current) { this.finish(p, p.filledSize + EPS >= p.targetSize ? "completed" : "canceled"); return; }
+    if ((p.fakSubmitted || p.crossingAt !== undefined) && !current) { this.finishParent(p); return; }
     if (current?.status === "canceling" || current?.status === "unknown" || current?.status === "signed") return;
     if (p.side === "BUY" && this.signals) {
       const signal = this.latestSignal(p.marketRef);
@@ -466,13 +660,19 @@ export class PredictionExecutor {
       p.maximumPrice = Math.min(p.maximumPrice, signal.prob - p.minimumEdge);
     }
     const m = supplied ?? await this.rpc("execution market", () => this.d.adapter.executionMarket!(p.marketRef, p.outcome));
-    const crossing = entryCross || (p.side === "SELL" && (p.urgent || this.now() >= p.deadlineAt || this.remaining(p) + EPS < m.minOrderSize));
+    const crossing = entryCross || phase === "taker" || (p.side === "SELL" && (p.urgent || this.now() >= p.deadlineAt || this.remaining(p) + EPS < m.minOrderSize));
     this.validateMarket(m, p.marketRef, p.outcome, crossing && p.side === "SELL");
     if (m.tokenId !== p.tokenId || m.conditionId !== p.conditionId) throw new Error("execution token identity changed");
     const b = this.externalBook(m.book, m.tokenId);
-    if (!b.bids.length || (!crossing && !b.asks.length)) { await this.stopParent(p, "no external executable book"); return; }
+    if (!b.bids.length || ((!crossing || p.side === "BUY") && !b.asks.length)) { await this.stopParent(p, "no external executable book"); return; }
     const bid = b.bids[0]!.price, ask = b.asks[0]?.price ?? bid, tick = m.tickSize;
     p.lastValidatedBookAt = Math.min(m.book.ts, m.observedAt);
+    if (polymarketEntry && !current && this.remaining(p) + EPS < m.minOrderSize) { this.finish(p, "completed"); return; }
+    if (phase === "taker" && p.crossingAt !== undefined && current) {
+      // The crossing remainder rests at the bound until the window closes; it is never chased.
+      if (current.intent.limitPrice > p.maximumPrice + EPS) await this.cancel(current, "price bound moved below the crossing remainder");
+      return;
+    }
     if (p.side === "BUY") {
       const latestSignal = this.latestSignal(p.marketRef);
       const signalQ = latestSignal?.side === p.outcome ? latestSignal.prob : this.signals ? undefined : p.qHeld;
@@ -497,8 +697,10 @@ export class PredictionExecutor {
       if (this.commodities && this.remaining(p) * p.maximumPrice > Math.min(exitDepth, (b.asks[0]?.size ?? 0) * ask) * this.strategyNumber("depthParticipationPct", 2) / 100 + EPS) {
         await this.stopParent(p, "commodity depth participation exceeded after book change"); return;
       }
-      const headroom = await this.entryHeadroom(p, m);
-      if (this.remaining(p) * p.maximumPrice > headroom + EPS) { await this.stopParent(p, "parent commitment exceeds refreshed portfolio capacity"); return; }
+      if (snapshot) {
+        const headroom = await this.entryHeadroom(p, m, snapshot);
+        if (this.remaining(p) * p.maximumPrice > headroom + EPS) { await this.stopParent(p, "parent commitment exceeds refreshed portfolio capacity"); return; }
+      }
     }
     const age = this.now() - p.admittedAt;
     if (crossing && p.side === "SELL" && !p.urgent) {
@@ -510,12 +712,17 @@ export class PredictionExecutor {
       }
     }
     let price: number;
-    if (p.side === "BUY" && crossing) {
+    if (p.side === "BUY" && crossing && this.commodities) {
       price = floorTick(Math.min(ask, p.maximumPrice), tick);
       if (price < ask - EPS) { await this.stopParent(p, "marketable entry exceeds original price bound"); return; }
+    } else if (p.side === "BUY" && crossing) {
+      // Take every offer inside the bound; the remainder rests there at the top of the book.
+      if (ask > p.maximumPrice + EPS) { await this.stopParent(p, "entry deadline reached with ask above price limit"); return; }
+      price = floorTick(p.maximumPrice, tick);
     } else if (p.side === "BUY") {
-      const phase = age / this.entryDuration;
-      const requested = phase < .25 ? Math.min(bid + tick, ask - tick) : phase < .5 ? floorTick((bid + ask) / 2, tick) : ask - tick;
+      // Polymarket rests at the most aggressive maker price; Kalshi keeps its three-phase ladder.
+      const ladder = age / this.entryDuration;
+      const requested = !this.commodities ? ask - tick : ladder < .25 ? Math.min(bid + tick, ask - tick) : ladder < .5 ? floorTick((bid + ask) / 2, tick) : ask - tick;
       price = floorTick(Math.min(requested, ask - tick, p.maximumPrice), tick);
       if (price + EPS < bid || !(price > 0)) { await this.stopParent(p, "entry price bound is no longer competitive"); return; }
     } else if (crossing) {
@@ -530,25 +737,32 @@ export class PredictionExecutor {
     if (current) {
       if (current.intent.postOnly === !crossing && Math.abs(current.intent.limitPrice - price) + EPS < tick) return;
       const safety = crossing || (p.side === "BUY" && current.intent.limitPrice > p.maximumPrice + EPS);
-      if (!safety && this.now() - current.createdAt < MINIMUM_REST_MS) return;
-      await this.cancel(current, crossing ? "passive exit transitioning to FAK" : "quote phase or external book changed");
+      // Without a portfolio view a resting order cannot be replaced, so it is not canceled for a phase change.
+      if (!safety && (this.now() - current.createdAt < MINIMUM_REST_MS || (polymarketEntry && !snapshot))) return;
+      await this.cancel(current, crossing ? (p.side === "BUY" ? "passive entry transitioning to marketable limit" : "passive exit transitioning to FAK") : "quote phase or external book changed");
       return;
     }
     if (Object.values(this.checkpoint!.children).some(c => working(c) && this.checkpoint!.parents[c.parentId]?.marketRef === p.marketRef)) return;
+    if (this.heartbeatFailing) { this.refusals.refuse("heartbeat", "no new orders while the venue heartbeat is failing; resting orders expire on the venue"); return; }
     let size = this.normalize(this.remaining(p));
     if (p.side === "BUY") {
-      const balances = await this.rpc("balances", () => this.d.adapter.balances(this.d.account));
-      const cash = balances.filter(balance => ["pUSD", "USDC", "USD"].includes(balance.asset)).reduce((sum, balance) => sum + balance.total, 0);
+      if (!snapshot) return; // no new commitment while the account view is being retried
+      const cash = snapshot.cash;
       const otherReserved = Object.values(this.checkpoint!.parents).filter(other => other.id !== p.id && active(other) && other.side === "BUY")
         .reduce((sum, other) => sum + this.remaining(other) * other.maximumPrice, 0);
       const unitCost = this.entryUnitCost(price, p.provenance);
-      size = this.normalize(Math.min(size, Math.max(0, p.budgetUsd - p.filledNotionalUsd - p.feeUsd) / unitCost, Math.max(0, cash - otherReserved) / unitCost));
-      const cap = checkCapacity({ side: "BUY", desiredSize: size, refPrice: price, book: b, quote: m.quote, risk: this.d.config.risk, enforceMinimumNotional: false });
-      if (!cap.ok) { await this.stopParent(p, "entry no longer passes volume or depth checks"); return; }
-      size = this.normalize(cap.size);
+      const cashUnitCost = unitCost * (polymarketEntry && crossing ? 1 + ENTRY_TAKER_FEE_ALLOWANCE : 1);
+      size = this.normalize(Math.min(size, Math.max(0, p.budgetUsd - p.filledNotionalUsd - p.feeUsd) / unitCost, Math.max(0, cash - otherReserved) / cashUnitCost));
+      // The crossing child is bounded by the target that passed capacity at admission; its
+      // remainder rests as a maker, so the visible-depth participation cap does not apply.
+      if (!(polymarketEntry && crossing)) {
+        const cap = checkCapacity({ side: "BUY", desiredSize: size, refPrice: price, book: b, quote: m.quote, risk: this.d.config.risk, enforceMinimumNotional: false });
+        if (!cap.ok) { await this.stopParent(p, "entry no longer passes volume or depth checks"); return; }
+        size = this.normalize(cap.size);
+      }
       if (size + EPS < m.minOrderSize) { await this.stopParent(p, "remaining entry is below venue minimum"); return; }
     } else {
-      const balance = await this.rpc("token balance", () => this.d.adapter.tokenBalance!(this.d.account, p.tokenId));
+      const balance = await this.rpc("token balance", () => this.d.adapter.tokenBalance!(this.d.account, p.tokenId, { refresh: true }));
       if (!Number.isFinite(balance) || balance < 0) throw new Error("invalid authenticated token balance");
       size = this.normalize(Math.min(size, balance));
       if (crossing) {
@@ -558,8 +772,12 @@ export class PredictionExecutor {
     }
     if (!(size > EPS)) { await this.stopParent(p, crossing ? "exit has no executable size inside price bound" : "no free order size"); return; }
     if (!crossing && size + EPS < m.minOrderSize) { await this.stopParent(p, "order remainder is below venue minimum"); return; }
+    if (polymarketEntry && crossing) {
+      this.d.log.info("prediction entry crossing", { executionId: p.id, ask, cap: p.maximumPrice, price, size, windowEndsAt: p.crossingDeadlineAt });
+    }
     await this.place(p, { marketRef: p.marketRef, tokenId: p.tokenId, conditionId: p.conditionId, outcome: p.outcome, side: p.side, size, limitPrice: price,
-      tif: crossing ? "FAK" : "GTC", postOnly: !crossing, ...(this.commodities && !crossing ? { expiration: Math.ceil(Math.max(this.now() + 1000, p.deadlineAt) / 1000) } : {}),
+      tif: crossing ? (this.commodities || p.side === "SELL" ? "FAK" : "GTC") : "GTC", postOnly: !crossing,
+      ...(this.commodities && !crossing ? { expiration: Math.ceil(Math.max(this.now() + 1000, p.deadlineAt) / 1000) } : {}),
       purpose: p.side === "BUY" ? "entry" : p.urgent ? "urgent-exit" : "normal-exit", clientId: "" }, m);
   }
 
@@ -571,11 +789,13 @@ export class PredictionExecutor {
     const child: Child = { id, parentId: p.id, intent, status: "reserved", createdAt: this.now(), observedMatched: 0, confirmedSize: 0, failedSize: 0 };
     c.children[id] = child; p.children.push(id);
     if (intent.tif === "FAK") p.fakSubmitted = true;
+    if (!this.commodities && intent.side === "BUY" && !intent.postOnly) p.crossingAt = this.now();
     await this.save();
     let stoppedBeforePost = false;
     try {
       const ack = await this.rpc("order submission", () => this.d.adapter.placeOrderWithLifecycle!(this.d.account, intent, { onPrepared: async meta => {
-        if (this.paused || this.stopping || c.haltReason || generation !== this.safetyGeneration || p.status !== "active" || this.now() - m.book.ts > BOOK_AGE_MS || (p.side === "BUY" && this.now() >= p.deadlineAt + (this.commodities && intent.tif === "FAK" ? 30_000 : 0))) {
+        const horizon = intent.postOnly ? p.deadlineAt : this.commodities ? p.deadlineAt + KALSHI_CROSSING_WINDOW_MS : (p.crossingDeadlineAt ?? p.deadlineAt);
+        if (this.paused || this.stopping || generation !== this.safetyGeneration || p.status !== "active" || this.now() - m.book.ts > BOOK_AGE_MS || (p.side === "BUY" && this.now() >= horizon)) {
           stoppedBeforePost = true; throw new Error("execution authorization or book expired before POST");
         }
         if (meta.tokenId !== p.tokenId || (meta.conditionId && meta.conditionId !== p.conditionId)) { stoppedBeforePost = true; throw new Error("prepared token identity mismatch"); }
@@ -592,6 +812,7 @@ export class PredictionExecutor {
       child.status = ack.status === "rejected" ? "rejected" : "open";
       if (!ack.orderId && child.status !== "rejected") throw new Error("venue acknowledgement omitted order id");
       if (ack.status === "canceled") { child.status = "canceling"; child.cancelRequestedAt = this.now(); }
+      this.portfolio = undefined;
       await this.save();
       this.d.log.info("prediction order acknowledged", { executionId: p.id, orderId: child.venueId, side: p.side, outcome: p.outcome, size: child.intent.size, price: child.intent.limitPrice, postOnly: intent.postOnly });
       if (generation !== this.safetyGeneration || this.paused) await this.cancel(child, "acknowledgement arrived after stop");
@@ -599,20 +820,18 @@ export class PredictionExecutor {
       const rejected = stoppedBeforePost || (error as { submissionRejected?: boolean })?.submissionRejected === true || !child.preparedHash;
       child.status = rejected ? "rejected" : "unknown";
       child.error = String(error);
-      if (!rejected) { p.status = "blocked"; c.haltReason = `ambiguous submission ${id}; reconciliation required`; this.heartbeatHaltReason = c.haltReason; }
+      // An ambiguous POST reserves only this market until the venue shows whether it landed.
+      if (!rejected) { child.unknownSince = this.now(); child.unknownPasses = 0; }
       await this.save();
-      if (!rejected) await this.rpc("account cancellation", () => this.d.adapter.cancelAll(this.d.account)).catch(cancelError => this.d.log.error("ambiguous prediction submission could not be canceled", { error: String(cancelError) }));
-      this.d.log.warn("prediction submission failed", { executionId: p.id, ambiguous: !rejected, error: String(error) });
+      this.d.log.warn("prediction submission failed", { executionId: p.id, marketRef: p.marketRef, ambiguous: !rejected, error: String(error) });
     }
-    if (working(child)) await this.heartbeat();
+    if (working(child)) await this.heartbeat().catch(() => undefined);
   }
 
   /** Recheck portfolio caps without mistaking a delayed public position for free risk. */
-  private async entryHeadroom(parent: Parent, market: PredictionExecutionMarket): Promise<number> {
+  private async entryHeadroom(parent: Parent, market: PredictionExecutionMarket, snapshot: PortfolioSnapshot): Promise<number> {
     const c = this.checkpoint!;
-    const [balances, positions] = await this.rpc("portfolio", () => Promise.all([this.d.adapter.balances(this.d.account), this.d.adapter.positions(this.d.account)]));
-    const cash = balances.filter(b => ["pUSD", "USDC", "USD"].includes(b.asset)).reduce((sum, b) => sum + b.total, 0);
-    if (!Number.isFinite(cash) || cash < 0) throw new Error("invalid collateral snapshot");
+    const { cash, positions } = snapshot;
     const exposure = new Map<string, number>();
     let positionValue = 0;
     for (const position of positions) {
@@ -621,13 +840,13 @@ export class PredictionExecutor {
       positionValue += positionMarketValue(position);
     }
     // Authenticated token balances supply inventory that the public position index has not caught up with.
-    const knownTokens = new Map(Object.values(c.parents).filter(p => active(p) || !p.inventoryObserved || this.now() - (p.terminalAt ?? p.admittedAt) < FILL_OVERLAP_MS || positions.some(position => position.tokenId === p.tokenId)).map(p => [p.tokenId, p]));
-    const tokenBalances = await Promise.all([...knownTokens].map(async ([tokenId, p]) => ({ tokenId, p, quantity: await this.rpc("token balance", () => this.d.adapter.tokenBalance!(this.d.account, tokenId)) })));
-    for (const { tokenId, p, quantity } of tokenBalances) {
-      if (!Number.isFinite(quantity) || quantity < 0) throw new Error("invalid authenticated inventory snapshot");
+    for (const [tokenId, quantity] of snapshot.tokenBalances) {
+      const tracked = Object.values(c.parents).filter(candidate => candidate.tokenId === tokenId);
+      const p = tracked.sort((a, b) => b.admittedAt - a.admittedAt)[0];
+      if (!p) continue;
       const visible = positions.filter(position => position.tokenId === tokenId || (position.marketRef === p.marketRef && (position.outcome ?? position.side) === p.outcome));
       const invisible = Math.max(0, quantity - visible.reduce((sum, position) => sum + position.size, 0));
-      if (invisible <= EPS) for (const tracked of Object.values(c.parents).filter(parent => parent.tokenId === tokenId)) tracked.inventoryObserved = true;
+      if (invisible <= INVENTORY_DUST_SHARES + EPS) for (const candidate of tracked) candidate.inventoryObserved = true;
       const average = p.filledSize > 0 ? p.filledNotionalUsd / p.filledSize : visible[0]?.avgPrice ?? p.maximumPrice;
       exposure.set(p.marketRef, (exposure.get(p.marketRef) ?? 0) + invisible * average);
       positionValue += invisible * (p.tokenId === market.tokenId ? market.quote.mid : average);
@@ -684,38 +903,116 @@ export class PredictionExecutor {
     return headroom;
   }
 
-  private async reconcile(): Promise<void> {
+  private async reconcile(timeoutMs = SNAPSHOT_TIMEOUT_MS): Promise<void> {
     const c = await this.load();
     const oldest = Math.min(c.lastSettlementScanAt ?? c.initializedAt, ...Object.values(c.children).filter(working).map(child => child.createdAt),
       ...Object.values(c.settlements).filter(settlement => !["CONFIRMED", "FAILED"].includes(settlement.status)).map(settlement => settlement.ts));
     const scanStartedAt = this.now();
-    const fills = await this.rpc("trade settlements", () => this.d.adapter.tradeSettlements!(this.d.account, Math.max(0, oldest - FILL_OVERLAP_MS)));
-    for (const fill of fills) this.applyFill(fill);
-    const orders = await this.rpc("open orders", () => this.d.adapter.openOrders(this.d.account));
+    const fills = await this.rpc("trade settlements", () => this.d.adapter.tradeSettlements!(this.d.account, Math.max(0, oldest - FILL_OVERLAP_MS)), undefined, timeoutMs);
+    for (const fill of fills) this.applySettlement(fill);
+    const orders = await this.rpc("open orders", () => this.d.adapter.openOrders(this.d.account), undefined, timeoutMs);
     const owned = new Set(Object.values(c.children).flatMap(child => child.venueId ? [child.venueId] : []));
-    if (orders.some(order => !owned.has(order.id))) c.haltReason = "unowned open orders require reconciliation before adaptive execution";
+    for (const child of Object.values(c.children).filter(child => child.status === "unknown")) await this.resolveUnknown(child, orders, fills, owned);
+    this.noteUnownedOrders(orders, owned);
     await Promise.all(Object.values(c.children).filter(working).map(async child => {
       if (!child.venueId) return;
       try {
         await this.reconcileChild(child, orders);
         child.reconciliationError = undefined;
+        child.reconciliationErrorSince = undefined;
+        child.reconciliationTransient = undefined;
       } catch (error) {
         const message = String(error);
         if (child.reconciliationError !== message) this.d.log.warn("prediction order reconciliation pending", { orderId: child.venueId, error: message });
         child.reconciliationError = message;
+        child.reconciliationErrorSince ??= this.now();
+        child.reconciliationTransient = isTransientVenueError(error);
         this.resetTerminalObservations(child);
       }
     }));
     for (const p of Object.values(c.parents).filter(active)) {
       if (!this.children(p).some(working)) {
-        if (p.status === "canceling") this.finish(p, p.filledSize + EPS >= p.targetSize ? "completed" : "canceled");
-        else if (p.filledSize + EPS >= p.targetSize || p.fakSubmitted) this.finish(p, p.filledSize + EPS >= p.targetSize ? "completed" : "canceled");
+        if (p.status === "canceling" || p.filledSize + EPS >= p.targetSize || p.fakSubmitted || p.crossingAt !== undefined) this.finishParent(p);
       }
     }
     this.lastReconciledAt = scanStartedAt;
     c.lastSettlementScanAt = scanStartedAt;
     await this.save();
     await this.alertConfirmedFills();
+  }
+
+  /** One bad settlement record pins its own order; it no longer aborts the pass for every market. */
+  private applySettlement(fill: Fill): void {
+    const c = this.checkpoint!;
+    const child = Object.values(c.children).find(o => o.venueId === (fill.makerOrderId ?? fill.orderId));
+    try { this.applyFill(fill); if (child) delete child.settlementError; }
+    catch (error) {
+      const message = String(error);
+      if (!child) { this.refusals.refuse(`settlement:${fill.id}`, "prediction settlement could not be applied", { fillId: fill.id, error: message }); return; }
+      if (child.settlementError !== message) this.d.log.warn("prediction settlement inconsistent with its order", { orderId: child.venueId, error: message });
+      child.settlementError = message;
+      this.resetTerminalObservations(child);
+    }
+  }
+
+  /**
+   * A signed POST whose answer was lost is resolved from what the venue shows: an unowned
+   * order with the signed terms is adopted, an unowned settlement on the parent's token is
+   * adopted, and an unchanged inventory after a short wait means the order never landed.
+   * Only this market waits meanwhile.
+   */
+  private async resolveUnknown(child: Child, orders: Order[], fills: Fill[], owned: Set<string>): Promise<void> {
+    const c = this.checkpoint!;
+    const p = c.parents[child.parentId]!;
+    const since = child.createdAt - 5_000;
+    const adopt = (venueId: string, how: string): void => {
+      child.venueId = venueId; child.status = "open"; owned.add(venueId);
+      child.unknownSince = undefined; child.unknownPasses = undefined;
+      this.refusals.resolve(`unknown:${child.id}`);
+      this.d.log.info(`prediction submission adopted ${how}`, { executionId: p.id, orderId: venueId, marketRef: p.marketRef });
+    };
+    const order = orders.find(o => !owned.has(o.id) && o.tokenId === child.intent.tokenId && o.side === child.intent.side
+      && Math.abs(o.price - child.intent.limitPrice) <= EPS && Math.abs(o.size - child.intent.size) <= .011 && (o.createdAt === undefined || o.createdAt >= since));
+    if (order) { adopt(order.id, "from the venue's open orders"); child.observedMatched = Math.max(child.observedMatched, order.filledSize); return; }
+    const settled = fills.find(f => { const id = f.makerOrderId ?? f.orderId; return id !== undefined && !owned.has(id) && f.tokenId === p.tokenId && f.side === p.side && f.ts >= since; });
+    if (settled) {
+      const venueId = (settled.makerOrderId ?? settled.orderId)!;
+      adopt(venueId, "from a settlement");
+      for (const fill of fills) if ((fill.makerOrderId ?? fill.orderId) === venueId) this.applySettlement(fill);
+      return;
+    }
+    child.unknownPasses = (child.unknownPasses ?? 0) + 1;
+    const unknownFor = this.now() - (child.unknownSince ?? child.createdAt);
+    if (child.unknownPasses < 2 || unknownFor < AMBIGUOUS_RESOLVE_MS) return;
+    let quantity: number;
+    try { quantity = await this.rpc("ambiguous-order token balance", () => this.d.adapter.tokenBalance!(this.d.account, p.tokenId, { refresh: true })); }
+    catch (error) { this.refusals.refuse(`unknown:${child.id}`, "ambiguous submission awaits an inventory read", { executionId: p.id, marketRef: p.marketRef, error: String(error) }); return; }
+    const expected = p.priorMarketSize + (p.side === "BUY" ? 1 : -1) * p.filledSize;
+    if (Number.isFinite(quantity) && Math.abs(quantity - expected) <= INVENTORY_DUST_SHARES + EPS) {
+      child.status = "rejected"; child.error = "no order, settlement or inventory change observed after an ambiguous submission";
+      this.refusals.resolve(`unknown:${child.id}`);
+      this.d.log.info("prediction submission resolved as not placed", { executionId: p.id, marketRef: p.marketRef, unknownForMs: unknownFor });
+      return;
+    }
+    if (unknownFor >= FILL_OVERLAP_MS) {
+      child.status = "terminal"; child.error = "ambiguous submission released after the settlement window with unattributed inventory";
+      this.refusals.resolve(`unknown:${child.id}`);
+      this.d.log.warn("prediction submission released with unattributed inventory", { executionId: p.id, marketRef: p.marketRef, quantity, expected });
+      return;
+    }
+    this.refusals.refuse(`unknown:${child.id}`, "ambiguous submission has unattributed inventory; awaiting settlement", { executionId: p.id, marketRef: p.marketRef, quantity, expected });
+  }
+
+  /** Orders this executor did not place (an operator's manual order, a lost receipt) pause entries in their market only. */
+  private noteUnownedOrders(orders: Order[], owned: Set<string>): void {
+    const unowned = orders.filter(order => !owned.has(order.id));
+    const ids = new Set(unowned.map(order => order.id));
+    for (const order of unowned) {
+      if (!this.unownedOrderIds.has(order.id)) this.d.log.warn("unowned open order; entries in its market wait until it clears", { orderId: order.id, marketRef: order.marketRef, side: order.side, price: order.price, size: order.size });
+    }
+    for (const id of this.unownedOrderIds) if (!ids.has(id)) this.d.log.info("unowned open order cleared", { orderId: id });
+    this.unownedOrderIds = ids;
+    this.unownedMarkets = new Set(unowned.map(order => order.marketRef));
   }
 
   private resetTerminalObservations(child: Child): void {
@@ -753,11 +1050,11 @@ export class PredictionExecutor {
         // and reconcile every known match before releasing it.
         if (child.notOpenAt !== undefined && child.cancelAcceptedAt === undefined) {
           const parent = this.checkpoint!.parents[child.parentId]!;
-          const quantity = await this.rpc("missing-order token balance", () => this.d.adapter.tokenBalance!(this.d.account, parent.tokenId));
+          const quantity = await this.rpc("missing-order token balance", () => this.d.adapter.tokenBalance!(this.d.account, parent.tokenId, { refresh: true }));
           const expected = parent.priorMarketSize + (parent.side === "BUY" ? 1 : -1) * parent.filledSize;
           // A missing trade or external inventory change keeps this market
           // reserved. Never manufacture a fill from the inventory difference.
-          if (!Number.isFinite(quantity) || Math.abs(quantity - expected) > .011) {
+          if (!Number.isFinite(quantity) || Math.abs(quantity - expected) > INVENTORY_DUST_SHARES + EPS) {
             this.resetTerminalObservations(child);
             return;
           }
@@ -825,6 +1122,8 @@ export class PredictionExecutor {
     parent.firstFillAt = Math.min(parent.firstFillAt ?? fill.ts, fill.ts);
     parent.lastFillAt = Math.max(parent.lastFillAt ?? fill.ts, fill.ts);
     parent.inventoryObserved = false;
+    this.portfolio = undefined;
+    this.d.adapter.invalidateTokenBalance?.(parent.tokenId);
     if (parent.filledSize > parent.targetSize + EPS) throw new Error(`fills exceed parent target ${parent.id}`);
     if (parent.side === "BUY") {
       const day = new Date(fill.ts).toISOString().slice(0, 10);
@@ -836,7 +1135,7 @@ export class PredictionExecutor {
   private async cancel(child: Child, reason: string): Promise<void> {
     if (!working(child)) return;
     // Reconciliation clears this acknowledgement if the order is observed live.
-    if (child.cancelAcceptedAt !== undefined || child.notOpenAt !== undefined || child.confirmedSize + EPS >= child.intent.size) return;
+    if (child.cancelAcceptedAt !== undefined || child.notOpenAt !== undefined || child.confirmedSize + EPS >= child.intent.size || child.observedMatched + EPS >= child.intent.size) return;
     if (child.nextCancelAt !== undefined && this.now() < child.nextCancelAt) return;
     if (child.status === "reserved") { child.status = "rejected"; await this.save(); return; }
     if (child.status !== "unknown") child.status = "canceling";
@@ -849,11 +1148,6 @@ export class PredictionExecutor {
       this.d.log.info("prediction cancellation requested", { executionId: child.parentId, orderId: child.venueId, reason, confirmed: result.status === "canceled", ...(result.notOpen ? { notOpen: true } : {}) });
     } catch (error) { child.error = String(error); child.cancelFailures = (child.cancelFailures ?? 0) + 1; this.d.log.warn("prediction cancellation remains pending", { orderId: child.venueId, error: String(error) }); }
     if (child.cancelFailures) child.nextCancelAt = this.now() + Math.min(60_000, 5000 * 2 ** Math.min(child.cancelFailures - 1, 4));
-    if (child.cancelFailures === 3) {
-      // Escalate once, retaining this market's full reservation. An order-level
-      // cancellation failure must not latch a permanent account-wide halt.
-      await this.rpc("account cancellation", () => this.d.adapter.cancelAll(this.d.account)).catch(error => this.d.log.error("prediction cancellation escalation failed", { error: String(error) }));
-    }
     await this.save();
   }
 
@@ -867,47 +1161,25 @@ export class PredictionExecutor {
     }
   }
 
-  /** Recover connectivity/cancellation halts after a clean account audit. */
-  private async recoverTransientHalt(): Promise<void> {
-    const c = this.checkpoint!;
-    if (this.stopping || this.operatorPaused || !c.haltReason ||
-      !/^(?:heartbeat safety halt:|repeated cancellation failure for )/.test(c.haltReason)) return;
-    if (Object.values(c.children).some(child => child.status === "signed" || child.status === "unknown")) return;
-    const generation = this.safetyGeneration;
-    try {
-      const [orders, balances, positions] = await this.rpc("recovery account snapshot", () => Promise.all([
-        this.d.adapter.openOrders(this.d.account), this.d.adapter.balances(this.d.account), this.d.adapter.positions(this.d.account),
-      ]), undefined, 30_000);
-      if (orders.length || balances.some(balance => !Number.isFinite(balance.total) || balance.total < 0) ||
-        positions.some(position => !Number.isFinite(position.size) || position.size < 0)) return;
-      if ((await this.rpc("recovery final open orders", () => this.d.adapter.openOrders(this.d.account))).length) return;
-      if (this.stopping || this.operatorPaused || generation !== this.safetyGeneration) return;
-      const reason = c.haltReason;
-      c.haltReason = undefined;
-      this.heartbeatHaltReason = undefined;
-      this.paused = false;
-      await this.save();
-      this.d.log.info("prediction execution recovered after account reconciliation", { reason });
-    } catch (error) {
-      this.d.log.warn("prediction recovery awaits a fresh account snapshot", { error: String(error) });
-    }
-  }
-
   private async stopParent(parent: Parent, reason: string): Promise<void> {
     if (!active(parent)) return;
-    if (parent.status !== "blocked") parent.status = "canceling";
+    parent.status = "canceling";
     parent.cancelReason = reason;
     await this.save();
     for (const child of this.children(parent).filter(working)) await this.cancel(child, reason);
-    if (!this.children(parent).some(working)) this.finish(parent, parent.filledSize + EPS >= parent.targetSize ? "completed" : "canceled");
+    if (!this.children(parent).some(working)) this.finishParent(parent);
     await this.save();
   }
 
   private finish(p: Parent, status: "completed" | "canceled"): void { p.status = status; p.terminalAt ??= this.now(); }
-  private async cancelForReadFailure(reason: string): Promise<void> {
-    for (const p of Object.values(this.checkpoint!.parents).filter(active)) await this.stopParent(p, reason);
+  /** A parent that crossed is complete once nothing tradable remains; otherwise it ends as canceled-with-partial. */
+  private finishParent(p: Parent): void {
+    const remaining = this.remaining(p);
+    const untradable = p.crossingAt !== undefined && p.minOrderSize !== undefined && remaining + EPS < p.minOrderSize;
+    const status = remaining <= EPS || untradable ? "completed" : "canceled";
+    this.finish(p, status);
+    if (p.crossingAt !== undefined) this.d.log.info("prediction entry crossing finished", { executionId: p.id, filledSize: p.filledSize, remaining, status });
   }
-
   cancelMarket(marketRef: string, reason: string): Promise<void> {
     this.safetyGeneration += 1;
     return this.serial(async () => { const c = await this.load(); delete c.queuedExits[marketRef]; for (const p of Object.values(c.parents).filter(p => active(p) && p.marketRef === marketRef)) await this.stopParent(p, reason); });
@@ -926,49 +1198,39 @@ export class PredictionExecutor {
     return this.cancelAll("runtime shutting down");
   }
 
-  /** Operator resume may clear a recovered connectivity halt; unknown POSTs require explicit recovery. */
+  /** Operator resume clears the pause; order state is resolved by ordinary reconciliation. */
   resume(): Promise<void> {
     return this.serial(async () => {
       if (this.stopping) throw new Error("prediction execution is shutting down");
-      const c = await this.load();
-      await this.reconcile();
-      if (Object.values(c.children).some(working)) throw new Error("prediction execution has unresolved orders or settlements; resume after reconciliation");
-      // Cold startup resolves metadata for every held token. With no managed
-      // orders outstanding, this account audit can take longer than a live quote read.
-      const [orders, balances, positions] = await this.rpc("resume account snapshot", () => Promise.all([this.d.adapter.openOrders(this.d.account), this.d.adapter.balances(this.d.account), this.d.adapter.positions(this.d.account)]), undefined, 30_000);
-      if (orders.length) throw new Error("unowned resting orders require cancellation before prediction execution can resume");
-      if (balances.some(balance => !Number.isFinite(balance.total) || balance.total < 0) || positions.some(position => !Number.isFinite(position.size) || position.size < 0)) throw new Error("invalid account snapshot prevents prediction execution resume");
-      if ((await this.rpc("resume final open orders", () => this.d.adapter.openOrders(this.d.account))).length) throw new Error("open orders changed during account audit; prediction execution remains paused");
-      c.haltReason = undefined;
-      this.heartbeatHaltReason = undefined;
+      await this.load();
       this.operatorPaused = false;
       this.paused = false;
+      try { await this.reconcile(COLD_START_TIMEOUT_MS); }
+      catch (error) {
+        if (!isTransientVenueError(error)) throw error;
+        this.defer("reconcile", error);
+      }
       await this.save();
     });
-  }
-
-  private async emergencyStop(reason: string): Promise<void> {
-    this.paused = true; this.safetyGeneration += 1;
-    this.heartbeatHaltReason = reason;
-    const c = this.checkpoint!;
-    c.haltReason = reason;
-    // Stop renewing the venue dead-man switch even when cancellation is unavailable.
-    await this.rpc("emergency account cancellation", () => this.d.adapter.cancelAll(this.d.account))
-      .catch(error => this.d.log.error("prediction emergency cancellation failed", { error: String(error) }));
-    void this.serial(async () => { await this.save(); await this.cancelForReadFailure(reason); })
-      .catch(error => this.d.log.error("prediction safety halt persistence failed", { error: String(error) }));
   }
 
   /** Independent safety lane: never queues a heartbeat behind slow strategy or venue reads. */
   async heartbeat(): Promise<boolean> {
     const c = await this.load();
-    if (this.heartbeatHaltReason || !Object.values(c.children).some(working)) return false;
+    // With nothing resting there is nothing to renew, except to learn that a failing venue heartbeat has recovered.
+    if (!Object.values(c.children).some(working) && !this.heartbeatFailing) return false;
     if (this.heartbeatPending) return this.heartbeatPending;
     const pending = (async () => {
-      const passive = Object.values(c.children).filter(child => working(child) && child.intent.postOnly &&
-        child.confirmedSize + EPS < child.intent.size && child.cancelAcceptedAt === undefined && child.notOpenAt === undefined &&
+      const resting = Object.values(c.children).filter(child => working(child) && child.intent.tif === "GTC" &&
+        child.confirmedSize + EPS < child.intent.size && child.observedMatched + EPS < child.intent.size &&
+        child.cancelAcceptedAt === undefined && child.notOpenAt === undefined &&
         (child.nextCancelAt === undefined || this.now() >= child.nextCancelAt));
-      const expired = passive.filter(child => this.now() >= c.parents[child.parentId]!.deadlineAt);
+      // A post-only child expires at the maker deadline; a crossing remainder at the end of its window.
+      const horizon = (child: Child): number => {
+        const parent = c.parents[child.parentId]!;
+        return child.intent.postOnly ? parent.deadlineAt : (parent.crossingDeadlineAt ?? parent.deadlineAt);
+      };
+      const expired = resting.filter(child => this.now() >= horizon(child));
       if (expired.length) {
         // Ordinary deadlines cancel immediately without turning a scheduled expiry
         // into a permanent account halt. Suppress this beat until cancellation is known.
@@ -978,7 +1240,10 @@ export class PredictionExecutor {
         void this.serial(async () => {
           for (const { child, result } of results) {
             const parent = c.parents[child.parentId]!;
-            if (parent.side === "BUY" && !this.commodities) { parent.status = "canceling"; parent.cancelReason = "entry deadline"; }
+            // A maker child expiring with a crossing window ahead is only canceled; the supervise lane crosses.
+            if (parent.side === "BUY" && !this.commodities && this.now() >= (parent.crossingDeadlineAt ?? parent.deadlineAt)) {
+              parent.status = "canceling"; parent.cancelReason = parent.crossingDeadlineAt === undefined ? "entry deadline" : "entry crossing window expired";
+            }
             if (working(child) && child.venueId) {
               child.status = "canceling"; child.cancelRequestedAt ??= this.now();
               if (result) this.recordCancellation(child, result);
@@ -988,16 +1253,45 @@ export class PredictionExecutor {
         }).catch(error => this.d.log.error("prediction deadline persistence failed", { error: String(error) }));
         return false;
       }
-      for (const child of passive) {
+      const stale = resting.filter(child => {
         const parent = c.parents[child.parentId]!;
-        if (this.now() - (parent.lastValidatedBookAt ?? child.createdAt) > BOOK_AGE_MS || this.now() - (this.lastReconciledAt ?? child.createdAt) > BOOK_AGE_MS) {
-          throw new Error("prediction supervision exceeded ten-second freshness limit");
-        }
+        return this.now() - Math.max(parent.lastValidatedBookAt ?? child.createdAt, this.startedAt) > SUPERVISION_STALE_MS
+          || this.now() - Math.max(this.lastReconciledAt ?? child.createdAt, this.startedAt) > SUPERVISION_STALE_MS;
+      });
+      if (stale.length) {
+        // The venue has been unreadable for a minute: cancel what rests, per parent, without
+        // latching an account halt. A failed cancellation leaves the dead-man's switch to expire.
+        this.safetyGeneration += 1;
+        const results = await Promise.all(stale.map(async child => ({ child, result: child.venueId
+          ? await this.rpc("stale cancellation", () => this.d.adapter.cancelOrderChecked!(this.d.account, child.venueId!)).catch((error: unknown) => { child.error = String(error); return undefined; })
+          : undefined })));
+        this.d.log.warn("prediction supervision stale; canceling resting orders without halting the account", {
+          orderIds: stale.map(child => child.venueId), staleForMs: SUPERVISION_STALE_MS });
+        void this.serial(async () => {
+          for (const { child, result } of results) {
+            const parent = c.parents[child.parentId]!;
+            if (active(parent)) { parent.status = "canceling"; parent.cancelReason = "supervision stale for more than 60 seconds"; }
+            if (working(child) && child.venueId) {
+              child.status = "canceling"; child.cancelRequestedAt ??= this.now();
+              if (result) this.recordCancellation(child, result);
+            }
+          }
+          await this.save();
+        }).catch(error => this.d.log.error("prediction stale-supervision persistence failed", { error: String(error) }));
+        return false;
       }
       if (this.d.adapter.heartbeat) await this.rpc("prediction heartbeat", () => this.d.adapter.heartbeat!(this.d.account));
+      if (this.heartbeatFailing) { this.heartbeatFailing = false; this.refusals.resolve("heartbeat", "venue heartbeat recovered; new orders resume"); }
       return true;
-    })().catch(async error => {
-      await this.emergencyStop(`heartbeat safety halt: ${String(error)}`);
+    })().catch(error => {
+      // The venue's dead-man switch cancels resting orders if renewals lapse, and reconciliation
+      // observes that per order. New orders wait for a successful renewal; nothing is halted.
+      const now = this.now();
+      this.heartbeatFailing = true;
+      if (now - this.heartbeatFailureLoggedAt >= DEFER_LOG_INTERVAL_MS) {
+        this.heartbeatFailureLoggedAt = now;
+        this.d.log.warn("prediction heartbeat failed; resting orders expire on the venue if renewals keep failing", { error: String(error) });
+      }
       throw error;
     }).finally(() => { this.heartbeatPending = undefined; });
     this.heartbeatPending = pending;
@@ -1010,7 +1304,8 @@ export class PredictionExecutor {
       const parents = Object.values(c.parents).map((p): PredictionExecutionParentSummary => {
         const remaining = this.remaining(p);
         const { targetSize: _target, maximumPrice: _max, minimumPrice: _min, budgetUsd: _budget, minimumEdge: _edge, minimumNotional: _minimum,
-          children: _children, lastExitDecision: _decision, lastExitEvaluationAt: _evaluated, fakSubmitted: _fak, cancelReason: _reason, inventoryObserved: _inventory, lastValidatedBookAt: _bookTime, ...summary } = p;
+          children: _children, lastExitDecision: _decision, lastExitEvaluationAt: _evaluated, fakSubmitted: _fak, crossingAt: _crossing, minOrderSize: _minSize,
+          inventoryObserved: _inventory, lastValidatedBookAt: _bookTime, ...summary } = p;
         return { ...summary, remainingSize: remaining, reservedNotionalUsd: active(p) && p.side === "BUY" ? remaining * p.maximumPrice : 0,
           reservedSize: active(p) && p.side === "SELL" ? remaining : 0, childOrderIds: this.children(p).flatMap(child => child.venueId ? [child.venueId] : []),
           metrics: derivePredictionExecutionMetrics({ targetSize: p.targetSize, side: p.side, arrivalBid: p.arrivalBid, arrivalAsk: p.arrivalAsk,
@@ -1020,9 +1315,14 @@ export class PredictionExecutor {
               .map(fill => ({ size: fill.quantity, price: fill.price, fee: fill.fee, ts: fill.ts, postOnly: c.children[fill.childId]!.intent.postOnly === true })),
           }) };
       });
-      return structuredClone({ parents, blocked: Boolean(c.haltReason), queuedExitCount: Object.keys(c.queuedExits).length,
+      const deferral = this.deferral;
+      const reconcilingMarkets = [...new Set(Object.values(c.children).filter(child => child.status === "unknown").map(child => c.parents[child.parentId]!.marketRef))];
+      return structuredClone({ parents, blocked: this.operatorPaused, queuedExitCount: Object.keys(c.queuedExits).length,
         unsettledFillCount: Object.values(c.settlements).filter(fill => !["CONFIRMED", "FAILED"].includes(fill.status)).length,
-        ...(c.haltReason ? { haltReason: c.haltReason } : {}), ...(c.refreshedAt ? { refreshedAt: c.refreshedAt } : {}), entryCooldowns: c.entryCooldowns, dailySpentUsd: c.dailySpentUsd });
+        ...(this.operatorPaused ? { haltReason: "operator pause" } : {}),
+        ...(reconcilingMarkets.length ? { reconcilingMarkets } : {}), ...(this.unownedMarkets.size ? { unownedMarkets: [...this.unownedMarkets] } : {}),
+        ...(c.refreshedAt ? { refreshedAt: c.refreshedAt } : {}), entryCooldowns: c.entryCooldowns, dailySpentUsd: c.dailySpentUsd,
+        ...(deferral ? { supervision: { deferredSince: deferral.since, until: deferral.until, stage: deferral.stage, reason: deferral.reason } } : {}) });
     });
   }
 }

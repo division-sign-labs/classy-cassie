@@ -174,7 +174,7 @@ describe("runtime preserves source and account contract facts", () => {
     expect(recorded().markets[0]).not.toHaveProperty("calendarVerifiedUntil");
     expect(recorded().markets[0]).not.toHaveProperty("sessionOpen");
     expect(recorded().markets[0]).not.toHaveProperty("events");
-    expect(fixtures.start).toHaveBeenCalledOnce(); expect(fixtures.resume).not.toHaveBeenCalled();
+    expect(fixtures.resume).not.toHaveBeenCalled();
     expect(await controller.check()).not.toHaveProperty("calendarConfigured");
   });
   it("marks an observation unusable when no current outlook remains, without any audit predicate", async () => {
@@ -184,12 +184,12 @@ describe("runtime preserves source and account contract facts", () => {
     expect(fixtures.record.mock.lastCall![3]).toBe(false);
     expect(recorded().markets[0]!.outlooks[0]).not.toHaveProperty("sourceAudit");
   });
-  it("still refuses operator recovery when research has failed", async () => {
+  it("clears an operator halt on resume whatever the research state; the strategy itself needs fresh data to enter", async () => {
     const { controller, data } = setup();
     data.refresh.mockRejectedValueOnce(new Error("Q unavailable"));
     await controller.refreshResearch();
-    await expect(controller.resume()).rejects.toThrow("resuming trading requires current research and venue data");
-    expect(fixtures.resume).not.toHaveBeenCalled();
+    await controller.resume();
+    expect(fixtures.resume).toHaveBeenCalledOnce();
   });
   it("maps signed hourly funding, actual book/funding timestamps, volume, fees and original forecast fields exactly", async () => {
     const { controller, m } = setup(); await controller.refreshResearch(); await controller.tick();

@@ -180,6 +180,7 @@ export async function elicitStrategyConfig(
 export interface StrategyOptions {
   execution?: string;
   entryDeadlineSeconds?: string;
+  entryCrossingSeconds?: string;
   exitPassiveSeconds?: string;
   top?: string;
   allocationMode?: string;
@@ -231,7 +232,7 @@ export const SCENARIO_EXIT_DEFAULTS = {
 /** `cassie strategy <botId>`: view and tune the bot's strategy and signal guardrails. */
 export async function runStrategy(botId: string, opts: StrategyOptions = {}): Promise<void> {
   const cfg = loadBotConfig(botId);
-  const executionOptions = ["execution", "entryDeadlineSeconds", "exitPassiveSeconds"] as const;
+  const executionOptions = ["execution", "entryDeadlineSeconds", "entryCrossingSeconds", "exitPassiveSeconds"] as const;
   const hasExecutionOptions = executionOptions.some((name) => opts[name] !== undefined);
   if (hasExecutionOptions && (cfg.venue !== "polymarket" || !["signals", "flip-flat"].includes(cfg.strategy.id))) {
     throw new Error("execution settings are supported only for Polymarket signals bots");
@@ -265,6 +266,9 @@ export async function runStrategy(botId: string, opts: StrategyOptions = {}): Pr
         ...(opts.entryDeadlineSeconds === undefined
           ? {}
           : { entryDeadlineSec: positiveNumber("entry deadline", opts.entryDeadlineSeconds) }),
+        ...(opts.entryCrossingSeconds === undefined
+          ? {}
+          : { entryCrossingSec: nonnegativeNumber("entry crossing window", opts.entryCrossingSeconds) }),
         ...(opts.exitPassiveSeconds === undefined
           ? {}
           : { exitPassiveSec: nonnegativeNumber("exit passive duration", opts.exitPassiveSeconds) }),
@@ -590,13 +594,14 @@ function printStrategy(
   console.log(`  slippage:             ${risk.slippagePct}% from best executable price`);
   const executionConfig = PredictionExecutionConfigSchema.parse(execution ?? {});
   const executionMode = venue === "polymarket" ? executionConfig.mode : "legacy";
-  console.log(`  execution:            ${executionMode} (${executionMode === "adaptive" ? "managed post-only limits" : "crossing limits"})`);
+  console.log(`  execution:            ${executionMode} (${executionMode === "adaptive" ? "maker-first managed limits" : "crossing limits"})`);
   if (venue === "polymarket") {
     const inactive = executionMode === "legacy" ? " (inactive in legacy mode)" : "";
-    console.log(`  entry deadline:       ${compactNumber(executionConfig.entryDeadlineSec)} sec${inactive}`);
+    console.log(`  entry deadline:       ${compactNumber(executionConfig.entryDeadlineSec)} sec maker phase${inactive}`);
+    console.log(`  entry crossing:       ${executionConfig.entryCrossingSec === 0 ? "off (maker-only entries)" : `${compactNumber(executionConfig.entryCrossingSec)} sec marketable limit inside the price bound after the deadline`}${inactive}`);
     console.log(`  exit passive phase:   ${compactNumber(executionConfig.exitPassiveSec)} sec${inactive}`);
     const feeMode = polymarketFeeMode(executionMode);
-    console.log(`  fee mode:             ${feeMode} (${executionMode} execution${feeMode === "maker" ? "; urgent exits fill as taker" : ""})`);
+    console.log(`  fee mode:             ${feeMode} (${executionMode} execution${feeMode === "maker" ? "; entries that cross after the deadline and urgent exits fill as taker" : ""})`);
     console.log(`  Quotient fee:         ${describePolymarketBuilderFee(feeMode)}`);
   }
   console.log(`  hard per-order cap:   $${risk.maxOrderNotional.toFixed(2)} (risk module)`);
