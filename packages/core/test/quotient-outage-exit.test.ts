@@ -53,7 +53,7 @@ function harness() {
   const ctx = () => ({
     botId: "outage",
     venueId: "polymarket" as const,
-    config: { allocationMode: "portfolio-kelly", scenarioExitEnabled: true, convergenceExitPp: 3 },
+    config: { allocationMode: "portfolio-kelly", scenarioExitEnabled: true },
     signals,
     positions: [position],
     openOrders: [],
@@ -74,16 +74,21 @@ describe("exits during a Quotient outage", () => {
   it("still exits on the last committed forecast when every Quotient read fails", async () => {
     const { state, ctx, logs } = harness();
     const strategy = new FlipFlatStrategy();
-    // Tick 1: Quotient answers, the held position commits Q = 0.70 at mid 0.55: hold.
+    // Tick 1: Quotient answers. Entry Q is 0.70 from the signal; the committed
+    // forecast has retreated to 0.38, but at mid 0.30 the held side still has
+    // +8pp of edge, so the collapse branch waits.
+    state.forecasts = [forecast(0.38)];
+    state.mid = 0.3;
     expect((await strategy.tick(ctx() as never)).filter((a) => a.kind === "exit")).toHaveLength(0);
 
-    // Outage. The market converges on the committed forecast: exit, without waiting for fresh data.
+    // Outage. The market rises through the committed forecast: the collapse
+    // fires on that forecast, without waiting for fresh data.
     state.outage = true;
     state.now += 60_000;
-    state.mid = 0.69;
+    state.mid = 0.4;
     const actions = await strategy.tick(ctx() as never);
     expect(actions.filter((a) => a.kind === "enter")).toHaveLength(0);
-    expect(actions.filter((a) => a.kind === "exit")).toMatchObject([{ marketRef: MARKET, reason: expect.stringContaining("convergence") }]);
+    expect(actions.filter((a) => a.kind === "exit")).toMatchObject([{ marketRef: MARKET, reason: expect.stringContaining("q_collapse") }]);
     expect(logs.some((line) => line.includes("signal refresh failed"))).toBe(true);
   });
 

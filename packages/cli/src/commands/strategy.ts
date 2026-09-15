@@ -24,7 +24,6 @@ export const RECOMMENDED_STRATEGY = {
   maxEntrySpreadPp: 30,
   minEntryNotional: 1,
   takeProfitPrice: 0.9,
-  convergenceExitPp: null,
   maxHoldDays: 7,
   universe: "from-signals",
   tickIntervalMin: 1,
@@ -47,7 +46,6 @@ const LEGACY_DAILY_BUDGET_STRATEGY = {
   maxEntrySpreadPp: 30,
   minEntryNotional: 1,
   takeProfitPrice: 0.9,
-  convergenceExitPp: null,
   maxHoldDays: 7,
   universe: "from-signals",
   tickIntervalMin: 1,
@@ -147,12 +145,6 @@ export async function elicitStrategyConfig(
       default: current.takeProfitPrice === null ? "off" : d("takeProfitPrice", "0.9"),
     }),
   );
-  const convergenceExitPp = optionalSignedNumber(
-    "convergence edge",
-    await ask("Optional convergence exit: remaining edge in pp (or off)", {
-      default: current.convergenceExitPp === null || current.convergenceExitPp === undefined ? "off" : d("convergenceExitPp", "off"),
-    }),
-  );
   const maxHoldDays = optionalPositiveNumber(
     "maximum hold",
     await ask("Maximum hold (days or unlimited)", {
@@ -178,7 +170,6 @@ export async function elicitStrategyConfig(
     maxEntrySpreadPp,
     minEntryNotional,
     takeProfitPrice,
-    convergenceExitPp,
     maxHoldDays,
     universe: universeRaw === "from-signals" ? "from-signals" : universeRaw.split(",").map((s) => s.trim()),
     tickIntervalMin: positionCheckSeconds / 60,
@@ -204,7 +195,6 @@ export interface StrategyOptions {
   maxEntryEdge?: string;
   minEntryNotional?: string;
   takeProfitPrice?: string;
-  convergenceExitPp?: string;
   maxHoldDays?: string;
   positionCheckSeconds?: string;
   signalCheckMinutes?: string;
@@ -346,9 +336,6 @@ export async function runStrategy(botId: string, opts: StrategyOptions = {}): Pr
     if (opts.takeProfitPrice !== undefined) {
       strategyConfig.takeProfitPrice = optionalPrice("take-profit price", opts.takeProfitPrice);
     }
-    if (opts.convergenceExitPp !== undefined) {
-      strategyConfig.convergenceExitPp = optionalSignedNumber("convergence edge", opts.convergenceExitPp);
-    }
     if (opts.maxHoldDays !== undefined) {
       strategyConfig.maxHoldDays = optionalPositiveNumber("maximum hold", opts.maxHoldDays);
     }
@@ -455,12 +442,6 @@ function positionLimit(raw: string): number | null {
   const normalized = raw.trim().toLowerCase();
   if (normalized === "unlimited" || normalized === "none" || normalized === "off") return null;
   return positiveInteger("position limit", raw);
-}
-
-function optionalSignedNumber(label: string, raw: string): number | null {
-  const normalized = raw.trim().toLowerCase();
-  if (normalized === "off" || normalized === "none" || normalized === "unlimited") return null;
-  return signedNumber(label, raw);
 }
 
 function optionalPrice(label: string, raw: string): number | null {
@@ -592,11 +573,6 @@ function printStrategy(
       ? "off"
       : `sell once the held-side bid reaches $${Number(current.takeProfitPrice).toFixed(2)}`;
   console.log(`  take profit:          ${takeProfit}`);
-  const convergence =
-    current.convergenceExitPp === null || current.convergenceExitPp === undefined
-      ? "off"
-      : `sell once remaining edge falls to ${current.convergenceExitPp}pp (no profit floor)`;
-  console.log(`  convergence exit:     ${convergence}`);
   if (scenario.scenarioExitEnabled === true) {
     console.log("  exit model:           seven-day signal state machine (scenarioExitEnabled)");
     console.log(

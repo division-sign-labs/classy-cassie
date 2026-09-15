@@ -34,13 +34,12 @@ Exits are position-driven, not signal-driven, and the venue book is checked ever
 By default a position is sold once the held outcome's executable best bid reaches 90¢
 (`takeProfitPrice`; `null` disables it). The forecast plays no part in that exit: above
 90¢ a position risks the whole stake for a few more cents, and replayed against published
-signals, holding past the floor lost about 7% on average versus selling there. An optional
-convergence exit (`convergenceExitPp`, off by default) sells once at most that many pp of
-held-side forecast edge remains, with no profit floor; replayed, it sold winners before
-the take-profit could and lowered the average return. Otherwise the default maximum hold
-is seven days. A stale or unpublished entry signal cannot suppress any exit. Neither the
-entry volume floor nor the minimum-notional floor ever blocks a sell; executable slippage
-and depth still apply.
+signals, holding past the floor lost about 7% on average versus selling there. Otherwise
+the default maximum hold is seven days. There is no forecast-convergence exit: replayed,
+selling once the market got within a few points of Q sold winners before the take-profit
+could and lowered the average return. A stale or unpublished entry signal cannot suppress
+either exit. Neither the entry volume floor nor the minimum-notional floor ever blocks a
+sell; executable slippage and depth still apply.
 
 ## Seven-day signal-exit state machine (opt-in)
 
@@ -67,11 +66,7 @@ Exits are evaluated in this order and exactly one reason is emitted:
    back above 50% resets it.
 5. `take_profit` — the held outcome's executable best bid is at or above
    `takeProfitPrice` (90¢), whatever edge the forecast still shows.
-6. `convergence` — only when `convergenceExitPp` is set (off by default): remaining
-   held-side edge is at or below it, with no profit floor and no Q-retreat condition. At
-   3pp it needs no confirmations and its threshold is wider than the adverse-cross
-   branch's, so it subsumes that branch in practice.
-7. `time_stop` — position age at or above `maxHoldDays` (7) measured from the actual entry
+6. `time_stop` — position age at or above `maxHoldDays` (7) measured from the actual entry
    fill, regardless of P&L.
 
 Executable P&L walks the held-side bids for the full position and deducts `exitFeeBps`.
@@ -90,7 +85,6 @@ adverse-cross, flip, take-profit, and time stop still apply.
 cassie strategy <botId> --scenario-exit on
 cassie strategy <botId> --take-profit-price 0.9 --adverse-cross-confirmations 2 \
   --q-collapse-pp 30 --flip-confirmations 2 --flip-exit-max-remaining-edge-pp 5 --max-hold-days 7
-cassie strategy <botId> --convergence-exit-pp 3   # optional; off by default
 ```
 
 ## Pending-entry reservation and order provenance

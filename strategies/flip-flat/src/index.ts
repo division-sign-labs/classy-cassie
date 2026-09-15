@@ -67,15 +67,6 @@ const FlipFlatConfigObjectSchema = z.object({
    * maximum holding period remains independent. Null disables it.
    */
   takeProfitPrice: z.number().positive().max(1).nullable().default(0.9),
-  /**
-   * Optional convergence exit for prediction markets: sell once the market
-   * has priced the forecast in, i.e. remaining held-side edge falls to this
-   * many pp or below. Signed, so an overshoot past the forecast is past
-   * converged. No profit floor and no Q-retreat condition gate it. Off by
-   * default: replayed against published signals it sold winners before the
-   * take-profit could and lowered the average return.
-   */
-  convergenceExitPp: z.number().nullable().default(null),
   /** Unconditional prediction-position deadline; null disables the deadline. */
   maxHoldDays: z.number().positive().nullable().default(7),
 
@@ -253,7 +244,6 @@ export type ScenarioExitReason =
   | "adverse_cross"
   | "q_flip"
   | "take_profit"
-  | "convergence"
   | "time_stop";
 
 export interface ScenarioEntrySnapshot {
@@ -350,7 +340,6 @@ export interface ScenarioExitDecision {
 type ScenarioExitConfig = Pick<
   FlipFlatConfig,
   | "takeProfitPrice"
-  | "convergenceExitPp"
   | "adverseCrossEdgePp"
   | "adverseCrossMaxPnlPct"
   | "adverseCrossConfirmations"
@@ -365,10 +354,8 @@ type ScenarioExitConfig = Pick<
  * Exit precedence, evaluated top to bottom; exactly one reason is returned.
  * The take-profit is a price floor on the held outcome's executable bid: it
  * needs no forecast and applies to every position the same way, whatever
- * the market's resolution date. The optional convergence exit below it asks
- * only whether the market has priced the forecast in and carries no profit
- * floor. The adverse branches above both still take precedence, and the
- * deadline below them still bounds the hold.
+ * the market's resolution date. The adverse branches above it still take
+ * precedence, and the deadline below it still bounds the hold.
  */
 export function evaluateScenarioExit(input: ScenarioExitInput, cfg: ScenarioExitConfig): ScenarioExitDecision {
   const remainingEdgePp =
@@ -413,13 +400,6 @@ export function evaluateScenarioExit(input: ScenarioExitInput, cfg: ScenarioExit
     input.executableBidHeld + EPSILON >= cfg.takeProfitPrice
   ) {
     return { reason: "take_profit", ...metrics };
-  }
-  if (
-    cfg.convergenceExitPp !== null &&
-    remainingEdgePp !== undefined &&
-    remainingEdgePp <= cfg.convergenceExitPp + EPSILON
-  ) {
-    return { reason: "convergence", ...metrics };
   }
   if (cfg.maxHoldDays !== null && input.ageMs + EPSILON >= cfg.maxHoldDays * DAY_MS) {
     return { reason: "time_stop", ...metrics };
@@ -701,7 +681,7 @@ export class FlipFlatStrategy implements Strategy {
       for (const marketRef of scenario.blockedMarkets) entryBlockedMarkets.add(marketRef);
     } else {
       actions.push(
-        ...(await this.legacyExits(ctx, cfg, heldPositions, signals, holdStarts, openOrderMarkets, entryBlockedMarkets, now)),
+        ...(await this.legacyExits(ctx, cfg, heldPositions, holdStarts, openOrderMarkets, entryBlockedMarkets, now)),
       );
     }
 
@@ -837,14 +817,13 @@ export class FlipFlatStrategy implements Strategy {
   }
 
   // -------------------------------------------------------------------------
-  // Legacy exits (take-profit price, optional convergence, maximum hold)
+  // Legacy exits (take-profit price + maximum hold)
   // -------------------------------------------------------------------------
 
   private async legacyExits(
     ctx: StrategyContext,
     cfg: FlipFlatConfig,
     heldPositions: Position[],
-    signals: Signal[],
     holdStarts: HoldStartsState,
     openOrderMarkets: Set<string>,
     entryBlockedMarkets: Set<string>,
@@ -852,10 +831,7 @@ export class FlipFlatStrategy implements Strategy {
   ): Promise<Action[]> {
     const actions: Action[] = [];
     // The maximum hold is checked first and needs no book. Before that
-    // deadline, the take-profit sells once the held side's bid is high
-    // enough, and the optional convergence exit sells once the market has
-    // priced the forecast in.
-    const convergenceCandidates: Position[] = [];
+    // deadline, the take-profit sells once the held side's bid is high enough.
     for (const held of heldPositions) {
       if (openOrderMarkets.has(held.marketRef) || entryBlockedMarkets.has(held.marketRef)) continue;
       const heldSince = holdStarts.byMarket[held.marketRef] ?? now;
@@ -878,32 +854,6 @@ export class FlipFlatStrategy implements Strategy {
           marketRef: held.marketRef,
           reason: takeProfit.reason,
           provenance: { exitModel: "legacy", takeProfitPrice: cfg.takeProfitPrice, executableBid: takeProfit.bid },
-        });
-        // The position still consumes exposure until the exit actually
-        // fills. Never spend that headroom speculatively in the same tick.
-        entryBlockedMarkets.add(held.marketRef);
-        continue;
-      }
-      if (cfg.convergenceExitPp !== null) convergenceCandidates.push(held);
-    }
-    if (convergenceCandidates.length === 0) return actions;
-
-    const heldRefs = new Set(convergenceCandidates.map((position) => position.marketRef));
-    const forecastByMarket = await this.heldForecasts(ctx, signals, heldRefs);
-    for (const held of convergenceCandidates) {
-      if (entryBlockedMarkets.has(held.marketRef)) continue;
-      const forecast = forecastByMarket.get(held.marketRef);
-      if (!forecast) {
-        ctx.log.info(`no Q forecast for held market ${held.marketRef}; convergence not evaluated`);
-        continue;
-      }
-      const converged = await this.convergenceCheck(ctx, cfg, forecast, held);
-      if (converged) {
-        actions.push({
-          kind: "exit",
-          marketRef: held.marketRef,
-          reason: converged,
-          provenance: { exitModel: "legacy", forecastId: forecast.id, forecastTs: forecast.ts, probYes: forecast.probYes },
         });
         // The position still consumes exposure until the exit actually
         // fills. Never spend that headroom speculatively in the same tick.
@@ -1031,7 +981,7 @@ export class FlipFlatStrategy implements Strategy {
       actions.push({
         kind: "exit",
         marketRef,
-        urgent: telemetry.exitReason !== "take_profit" && telemetry.exitReason !== "convergence",
+        urgent: telemetry.exitReason !== "take_profit",
         reason: detail,
         provenance: { exitModel: "scenario", ...telemetry },
       });
@@ -1648,43 +1598,6 @@ export class FlipFlatStrategy implements Strategy {
       reason: `take profit: held ${held.side} bid ${bid.toFixed(3)} >= ${cfg.takeProfitPrice.toFixed(3)}`,
       bid,
     };
-  }
-
-  /**
-   * Convergence: has the market priced the held side's forecast in? Remaining
-   * edge is measured on the venue midpoint against the held outcome's own
-   * forecast, so for a NO position both Q and the mid are mirrored. Mixing the
-   * two conventions would invert every NO decision.
-   *
-   * There is no profit floor here by design: a converged position is sold at
-   * whatever the market pays, gain or loss. The forecast no longer favours it.
-   */
-  private async convergenceCheck(
-    ctx: StrategyContext,
-    cfg: FlipFlatConfig,
-    forecast: MarketForecast,
-    held: Position,
-  ): Promise<string | undefined> {
-    if (cfg.convergenceExitPp === null) return undefined;
-    // Prediction markets only — perps carry no binary forecast to converge on.
-    if (held.side !== "YES" && held.side !== "NO") return undefined;
-
-    let mid: number;
-    try {
-      mid = await outcomeMid(ctx, forecast.marketRef, held.side);
-    } catch (err) {
-      if (ctx.execution) throw err;
-      ctx.log.warn(`convergence check skipped for ${forecast.marketRef}: ${(err as Error).message}`);
-      return undefined;
-    }
-    if (!(mid > 0 && mid < 1)) return undefined;
-
-    const curPrice = mid;
-    const prob = held.side === "NO" ? 1 - forecast.probYes : forecast.probYes;
-    // Signed on purpose: an overshoot past the forecast is past converged.
-    const remainingEdgePp = (prob - curPrice) * 100;
-    if (remainingEdgePp > cfg.convergenceExitPp + EPSILON) return undefined;
-    return `converged: ${remainingEdgePp.toFixed(1)}pp edge left at mid ${curPrice.toFixed(3)} (limit ${cfg.convergenceExitPp.toFixed(1)}pp)`;
   }
 
   /**

@@ -39,8 +39,8 @@ describe("flip-flat against fixtures (offline e2e)", () => {
     expect(positions[0]!.size).toBe(8);
 
     // Tick 3: the signal moves to NO at 0.70, valuing the held YES at 0.30.
-    // The executable YES bid is nowhere near the 90¢ take-profit, convergence
-    // is off by default, and the hold deadline is days away, so nothing sells.
+    // The executable YES bid is nowhere near the 90¢ take-profit and the hold
+    // deadline is days away, so nothing sells.
     const t3 = await engine.tick();
     expect(t3.ordersPlaced).toBe(0);
     expect(alerter.ofKind("exit")).toHaveLength(0);

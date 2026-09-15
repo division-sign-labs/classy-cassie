@@ -223,7 +223,6 @@ program
   .option("--max-entry-edge <pp|unlimited>", "maximum forecast entry edge; unlimited removes the guardrail")
   .option("--min-entry-notional <usd>", "entry-only floor after sizing and capacity caps")
   .option("--take-profit-price <price|off>", "sell a prediction position once the held-side bid reaches this price (0–1); off disables")
-  .option("--convergence-exit-pp <pp|off>", "optional: also sell once remaining forecast edge falls to this many pp; off (the default) disables")
   .option("--max-hold-days <days|unlimited>", "unconditional maximum holding period")
   .option("--position-check-seconds <seconds>", "reconcile and evaluate held positions on this cadence")
   .option("--signal-check-minutes <minutes>", "refresh the Quotient signal snapshot on this cadence")

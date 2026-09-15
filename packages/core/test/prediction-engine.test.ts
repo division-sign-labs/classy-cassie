@@ -144,7 +144,7 @@ function harness(options: { side?: "YES" | "NO"; legacy?: boolean; maxHoldDays?:
     ...(options.legacy || options.entryCrossingSec !== undefined
       ? { execution: { ...(options.legacy ? { mode: "legacy" } : {}), ...(options.entryCrossingSec !== undefined ? { entryCrossingSec: options.entryCrossingSec } : {}) } } : {}),
     strategy: { id: "flip-flat", config: { allocationMode: "portfolio-kelly", minExitDepth2cUsd: 0, maxHoldDays: options.maxHoldDays ?? null,
-      convergenceExitPp: null, signalPollIntervalMin: 1 } },
+      takeProfitPrice: null, signalPollIntervalMin: 1 } },
     risk: { slippagePct: 10, depthCapPct: 100, minDailyVolume: 0, minViableNotional: 1, maxOrderNotional: 1000 },
   });
   const createEngine = () => new Engine({ botId: config.id, config, adapter: venue, account: ACCOUNT, strategy: new FlipFlatStrategy(), signals,

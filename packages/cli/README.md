@@ -348,9 +348,7 @@ disables that entry-only gate.
 
 A position is sold once the held-side executable bid reaches 90¢; the forecast plays no
 part in that exit. Otherwise the default maximum hold is seven days. Tune those with
-`--take-profit-price` (`off` disables it) and `--max-hold-days`. An optional convergence
-exit, `--convergence-exit-pp` (off by default), sells once at most that many pp of forecast
-edge remains, with no profit floor.
+`--take-profit-price` (`off` disables it) and `--max-hold-days`.
 The 24-hour volume floor remains an entry filter but never blocks an exit; exit slippage
 and executable depth still apply.
 

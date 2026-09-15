@@ -1,8 +1,7 @@
 // packages/core/test/take-profit-exit.test.ts
 // Take-profit exit: sell once the held outcome's executable bid reaches the
 // price floor (90¢ by default). The forecast plays no part; a position below
-// the floor stays open until the independent maximum holding period, unless
-// the optional convergence exit is switched on.
+// the floor stays open until the independent maximum holding period.
 
 import { describe, expect, it } from "vitest";
 import {
@@ -133,13 +132,6 @@ describe("take-profit exit", () => {
 
   it("can be turned off", async () => {
     expect(await exits(ctxWith([sig()], [position()], 0.97, { takeProfitPrice: null }))).toHaveLength(0);
-  });
-
-  it("runs alongside an enabled convergence exit", async () => {
-    // Priced in at 0.69 with convergence on: the forecast exit takes it.
-    const got = await exits(ctxWith([sig()], [position()], 0.69, { convergenceExitPp: 3 }));
-    expect(got).toHaveLength(1);
-    expect(got[0]!.reason).toMatch(/^converged/);
   });
 
   it("holds through a signal-side flip while below the floor", async () => {
