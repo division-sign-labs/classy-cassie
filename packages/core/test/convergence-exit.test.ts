@@ -1,7 +1,8 @@
 // packages/core/test/convergence-exit.test.ts
-// Plain convergence exit: sell once the market has priced the held side's
-// forecast in, whatever that realizes. There is no profit floor and no
-// Q-retreat condition, so a converged loser goes out with a converged winner.
+// Optional convergence exit (off by default, enabled here at 3pp): sell once
+// the market has priced the held side's forecast in, whatever that realizes.
+// There is no profit floor and no Q-retreat condition, so a converged loser
+// goes out with a converged winner.
 
 import { describe, expect, it } from "vitest";
 import {
@@ -55,7 +56,7 @@ function ctxWith(
 ) {
   return {
     venueId: "polymarket" as const,
-    config,
+    config: { convergenceExitPp: 3, ...config },
     signals: {
       latest: async () => signals,
       ...(forecasts ? { forecasts: async () => forecasts } : {}),
@@ -93,7 +94,8 @@ describe("convergence exit", () => {
       marketRef: MARKET,
       probYes: 0.9184779613,
     };
-    const got = await exits(ctxWith([], [position({ avgPrice: 0.62 })], 0.992, {}, [forecast]));
+    // The 0.98 bid would take profit first; switch that off to exercise the forecast path.
+    const got = await exits(ctxWith([], [position({ avgPrice: 0.62 })], 0.992, { takeProfitPrice: null }, [forecast]));
     expect(got).toHaveLength(1);
     expect(got[0]!.reason).toMatch(/^converged: -7\.4pp edge left/);
   });
@@ -139,9 +141,17 @@ describe("convergence exit", () => {
     expect(await exits(ctxWith([sig({ side: "NO", prob: 0.7 })], [position({ side: "NO" })], 0.55))).toHaveLength(0);
   });
 
-  it("honors a configured edge threshold and can be turned off", async () => {
+  it("honors a configured edge threshold and is off by default", async () => {
     expect(await exits(ctxWith([sig()], [position()], 0.69, { convergenceExitPp: 0 }))).toHaveLength(0);
     expect(await exits(ctxWith([sig()], [position()], 0.69, { convergenceExitPp: null }))).toHaveLength(0);
+    expect(await exits(ctxWith([sig()], [position()], 0.69, { convergenceExitPp: undefined }))).toHaveLength(0);
+  });
+
+  it("yields to the take-profit once the held-side bid reaches the floor", async () => {
+    // Converged and at a 0.90 bid: the price floor is the reason on record.
+    const got = await exits(ctxWith([sig({ prob: 0.92 })], [position()], 0.91));
+    expect(got).toHaveLength(1);
+    expect(got[0]!.reason).toBe("take profit: held YES bid 0.900 >= 0.900");
   });
 
   it("holds through a signal-side flip while the held side keeps edge", async () => {

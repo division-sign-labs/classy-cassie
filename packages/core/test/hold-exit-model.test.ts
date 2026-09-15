@@ -1,5 +1,6 @@
 // packages/core/test/hold-exit-model.test.ts
-// Plain convergence exits plus a persistent maximum holding period.
+// Take-profit price floor, optional convergence exit, and a persistent
+// maximum holding period.
 
 import { describe, expect, it } from "vitest";
 import {
@@ -70,6 +71,7 @@ function context(input: {
       allocationMode: "daily-budget",
       dailyBudgetUsd: 100,
       positionBudgetPct: 25,
+      convergenceExitPp: 3,
       ...input.config,
     },
     signals: { latest: async () => signals } as SignalSource,
@@ -105,14 +107,57 @@ async function exits(strategy: FlipFlatStrategy, ctx: StrategyContext) {
 }
 
 describe("flip-flat hold and exit model", () => {
-  it("defaults to a 3pp convergence exit and a seven-day maximum hold", () => {
+  it("defaults to a 90¢ take-profit, no convergence exit, and a seven-day maximum hold", () => {
     const config = FlipFlatConfigSchema.parse({});
-    expect(config.convergenceExitPp).toBe(3);
+    expect(config.takeProfitPrice).toBe(0.9);
+    expect(config.convergenceExitPp).toBeNull();
+    expect(() => FlipFlatConfigSchema.parse({ takeProfitPrice: 1.5 })).toThrow();
+    expect(() => FlipFlatConfigSchema.parse({ takeProfitPrice: 0 })).toThrow();
+    expect(FlipFlatConfigSchema.parse({ takeProfitPrice: null }).takeProfitPrice).toBeNull();
+    expect(FlipFlatConfigSchema.parse({ convergenceExitPp: 3 }).convergenceExitPp).toBe(3);
     expect(config.maxHoldDays).toBe(7);
     expect(FlipFlatConfigSchema.parse({ convergenceExitPp: null }).convergenceExitPp).toBeNull();
   });
 
-  it("sells once the market has priced the forecast in", async () => {
+  it("takes profit once the held side's executable bid reaches 90¢", async () => {
+    const clock = { now: START };
+    const got = await exits(new FlipFlatStrategy(), context({ clock, mid: 0.91 }));
+    expect(got).toHaveLength(1);
+    expect(got[0]!.reason).toBe("take profit: held YES bid 0.910 >= 0.900");
+    expect(got[0]!.provenance).toMatchObject({ exitModel: "legacy", takeProfitPrice: 0.9, executableBid: 0.91 });
+  });
+
+  it("holds below the take-profit price", async () => {
+    const clock = { now: START };
+    expect(await exits(new FlipFlatStrategy(), context({ clock, mid: 0.89 }))).toHaveLength(0);
+  });
+
+  it("does not take profit when the held side has no executable bid", async () => {
+    const clock = { now: START };
+    expect(await exits(new FlipFlatStrategy(), context({ clock, mid: 0.95, yesBid: null }))).toHaveLength(0);
+  });
+
+  it("uses the mirrored YES ask as the executable bid for a held NO position", async () => {
+    const clock = { now: START };
+    const got = await exits(
+      new FlipFlatStrategy(),
+      context({ clock, mid: 0.09, yesBid: 0.08, yesAsk: 0.1, positions: [{ ...position(0.5), side: "NO" }] }),
+    );
+    expect(got).toHaveLength(1);
+    expect(got[0]!.reason).toBe("take profit: held NO bid 0.900 >= 0.900");
+  });
+
+  it("honors a configured price floor", async () => {
+    const clock = { now: START };
+    expect(
+      await exits(new FlipFlatStrategy(), context({ clock, mid: 0.91, config: { takeProfitPrice: 0.95 } })),
+    ).toHaveLength(0);
+    expect(
+      await exits(new FlipFlatStrategy(), context({ clock, mid: 0.96, config: { takeProfitPrice: 0.95 } })),
+    ).toHaveLength(1);
+  });
+
+  it("sells once the market has priced the forecast in, when convergence is enabled", async () => {
     const clock = { now: START };
     // Forecast 52, market 51: 1pp of edge left.
     const got = await exits(new FlipFlatStrategy(), context({ clock, mid: 0.51, signals: [signal(0.52)] }));

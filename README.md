@@ -131,7 +131,7 @@ shows current state only and says so; redeploy to start recording.
 | `packages/core`        | venue adapters, wallet/keystore, strategy engine, risk module, signal client, alerts, thesis sizing |
 | `packages/cli`         | the `cassie` binary: wizard, wallet, fund, run, deploy, status, logs, dashboard, portfolio, trade, orders, ticket |
 | `packages/runtime-node` | the bot process: engine loop, SQLite state, unix-socket control API. Same code for `cassie run` and a droplet |
-| `strategies/flip-flat` | the `signals` strategy: follow Quotient signals; prediction positions exit on convergence or the seven-day maximum hold |
+| `strategies/flip-flat` | the `signals` strategy: follow Quotient signals; prediction positions exit at a 90¢ bid, a confirmed Q flip, or the seven-day maximum hold |
 | `skills/cassie`        | agent-facing operator manual ([SKILL.md](skills/cassie/SKILL.md)) + thesis policy (`thesis/mappings.json`) |
 | `fixtures/`            | signal + order-book fixtures for the offline e2e                     |
 
@@ -185,7 +185,7 @@ their latest Q forecasts.
 
 The runtime separates the two cadences: every five minutes it refreshes the entry-signal
 snapshot and batches Q forecast lookups for held markets; every 60 seconds it re-reads
-venue odds and checks convergence and hold deadlines. Entry-signal freshness never gates
+venue odds and checks the take-profit and hold deadlines. Entry-signal freshness never gates
 an exit. Held-market lookups cost $0.005 per batch of up to 10 markets per refresh.
 Configure the cadences with
 `cassie strategy <botId> --signal-check-minutes 5 --position-check-seconds 60`.

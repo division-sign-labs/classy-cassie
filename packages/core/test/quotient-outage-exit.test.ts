@@ -53,7 +53,7 @@ function harness() {
   const ctx = () => ({
     botId: "outage",
     venueId: "polymarket" as const,
-    config: { allocationMode: "portfolio-kelly", scenarioExitEnabled: true },
+    config: { allocationMode: "portfolio-kelly", scenarioExitEnabled: true, convergenceExitPp: 3 },
     signals,
     positions: [position],
     openOrders: [],

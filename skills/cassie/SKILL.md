@@ -152,12 +152,15 @@ Every step happens in the terminal; you only leave it to copy-paste dashboard va
    bid depth within 2¢ by default, an entry-only check that can be disabled with
    `--min-exit-depth-2c-usd 0`. A position is sold once the executable held-side bid
    reaches 90¢ (`--take-profit-price`; `off` disables it); the forecast plays no part in
-   that exit. Otherwise a prediction position exits at the seven-day maximum hold (or
-   resolution). `--scenario-exit on` wraps that in the confirmed seven-day signal-exit
+   that exit. An optional convergence exit (`--convergence-exit-pp`, off by default) sells
+   once at most that many pp of forecast edge remains, with no profit floor; replayed
+   against published signals it sold winners before the take-profit could. Otherwise a
+   prediction position exits at the seven-day maximum hold (or resolution).
+   `--scenario-exit on` wraps that in the confirmed seven-day signal-exit
    state machine (Q collapse, confirmed adverse cross, confirmed Q flip, the 90¢
-   take-profit, time stop from the entry fill), evaluated in that precedence with one
-   canonical reason per exit; it is off
-   unless an operator turns it on. The positive take-profit applies to every position the
+   take-profit, optional convergence, time stop from the entry fill), evaluated in that
+   precedence with one canonical reason per exit; it is off
+   unless an operator turns it on. The take-profit applies to every position the
    same way whatever the market's resolution date. The 24h-volume floor and the minimum-notional floor
    apply to entries, never exits; exit slippage and executable depth still apply. An
    accepted entry stays reserved against market and event caps until the venue position or

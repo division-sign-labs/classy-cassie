@@ -1,7 +1,7 @@
 // packages/core/test/scenario-exit.test.ts
 // Seven-day signal-exit state machine for the signals (flip-flat) strategy:
-// Q-collapse, confirmed adverse cross, confirmed Q flip, plain
-// convergence, and the time stop, with per-forecast confirmation
+// Q-collapse, confirmed adverse cross, confirmed Q flip, the 90¢
+// take-profit, optional convergence, and the time stop, with per-forecast confirmation
 // counting, immutable entry Q, and idempotent exit submission.
 
 import { describe, expect, it } from "vitest";
@@ -66,7 +66,7 @@ function env(over: Partial<Env> = {}): Env {
     fills: [],
     openOrders: [],
     memory: memory(),
-    config: {},
+    config: { convergenceExitPp: 3 },
     logs: [],
     ...over,
   };
@@ -208,7 +208,8 @@ describe("scenario exit configuration", () => {
   it("is off by default so existing bots keep the legacy exit overlay", () => {
     const cfg = FlipFlatConfigSchema.parse({});
     expect(cfg.scenarioExitEnabled).toBe(false);
-    expect(cfg.convergenceExitPp).toBe(3);
+    expect(cfg.takeProfitPrice).toBe(0.9);
+    expect(cfg.convergenceExitPp).toBeNull();
     expect(cfg.adverseCrossConfirmations).toBe(2);
     expect(cfg.qCollapsePp).toBe(30);
     expect(cfg.flipConfirmations).toBe(2);
@@ -217,7 +218,7 @@ describe("scenario exit configuration", () => {
   });
 
   it("does not run the state machine when disabled", async () => {
-    const e = env({ config: { scenarioExitEnabled: false, convergenceExitPp: null } });
+    const e = env({ config: { scenarioExitEnabled: false, takeProfitPrice: null, convergenceExitPp: null } });
     const strategy = new FlipFlatStrategy();
     await enter(strategy, e, { side: "YES", entryQ: 0.8, avgPrice: 0.6 });
     e.forecasts = [forecast("f", HOUR_MS, 0.2)];
@@ -227,7 +228,7 @@ describe("scenario exit configuration", () => {
 });
 
 describe("pure exit precedence", () => {
-  const cfg = FlipFlatConfigSchema.parse({ scenarioExitEnabled: true });
+  const cfg = FlipFlatConfigSchema.parse({ scenarioExitEnabled: true, convergenceExitPp: 3 });
   const base = {
     resolved: false,
     entryQHeld: 0.8,
@@ -244,12 +245,26 @@ describe("pure exit precedence", () => {
     expect(evaluateScenarioExit(base, cfg).reason).toBe("q_collapse");
     expect(evaluateScenarioExit({ ...base, entryQHeld: 0.4 }, cfg).reason).toBe("adverse_cross");
     expect(evaluateScenarioExit({ ...base, entryQHeld: 0.4, adverseCrossConfirmations: 1 }, cfg).reason).toBe("q_flip");
+    // A 0.90 bid takes profit ahead of convergence, whatever edge Q still shows.
     expect(
       evaluateScenarioExit(
-        { ...base, entryQHeld: 0.7, currentQHeld: 0.7, midHeld: 0.69, executablePnlPct: 13, adverseCrossConfirmations: 0, flipConfirmed: false },
+        { ...base, entryQHeld: 0.7, currentQHeld: 0.99, midHeld: 0.91, executableBidHeld: 0.9, executablePnlPct: 50, adverseCrossConfirmations: 0, flipConfirmed: false },
+        cfg,
+      ).reason,
+    ).toBe("take_profit");
+    expect(
+      evaluateScenarioExit(
+        { ...base, entryQHeld: 0.7, currentQHeld: 0.7, midHeld: 0.69, executableBidHeld: 0.68, executablePnlPct: 13, adverseCrossConfirmations: 0, flipConfirmed: false },
         cfg,
       ).reason,
     ).toBe("convergence");
+    // With convergence off (the default), the same state holds until the deadline.
+    expect(
+      evaluateScenarioExit(
+        { ...base, entryQHeld: 0.7, currentQHeld: 0.7, midHeld: 0.69, executableBidHeld: 0.68, executablePnlPct: 13, ageMs: DAY_MS, adverseCrossConfirmations: 0, flipConfirmed: false },
+        { ...cfg, convergenceExitPp: null },
+      ).reason,
+    ).toBeUndefined();
     // 5pp of edge still open, so it is not converged.
     expect(
       evaluateScenarioExit(
@@ -385,9 +400,51 @@ describe("seven-day signal exit state machine", () => {
     expect(got[0]!.reason).toMatch(/pnl -15\.7%/);
   });
 
-  describe("6. convergence sells once the market has priced the forecast in", () => {
+  describe("6. take profit sells once the held-side executable bid reaches the price floor", () => {
     async function setup(input: { entryQ: number; currentQ: number; mid: number; avgPrice: number; config?: Record<string, unknown> }) {
-      const e = env({ config: input.config ?? {} });
+      const e = env({ config: { convergenceExitPp: null, ...input.config } });
+      const strategy = new FlipFlatStrategy();
+      await enter(strategy, e, { side: "YES", entryQ: input.entryQ, avgPrice: input.avgPrice });
+      setYesMid(e, input.mid);
+      e.forecasts = [forecast("f", HOUR_MS, input.currentQ)];
+      return { e, strategy };
+    }
+
+    it("sells at a 0.90 bid whatever edge the forecast still shows", async () => {
+      // Q 0.99 against a 0.91 mid leaves +8pp of edge; the price floor wins anyway.
+      const { e, strategy } = await setup({ entryQ: 0.7, currentQ: 0.99, mid: 0.91, avgPrice: 0.6 });
+      const got = await exits(strategy, e);
+      expect(got).toHaveLength(1);
+      expect(got[0]!.reason).toMatch(/^take_profit: entryQ 70\.0% → Q 99\.0%, mid 0\.910, bid 0\.900, edge \+8\.0pp, retreat -29\.0pp, pnl \+50\.0%/);
+      expect(got[0]!.urgent).toBeFalsy();
+    });
+
+    it("holds at a 0.89 bid", async () => {
+      const { e, strategy } = await setup({ entryQ: 0.7, currentQ: 0.7, mid: 0.9, avgPrice: 0.6 });
+      expect(await exits(strategy, e)).toHaveLength(0);
+    });
+
+    it("needs no forecast", async () => {
+      const e = env({ config: { convergenceExitPp: null } });
+      const strategy = new FlipFlatStrategy();
+      await enter(strategy, e, { side: "YES", entryQ: 0.7, avgPrice: 0.6 });
+      setYesMid(e, 0.91);
+      const got = await exits(strategy, e);
+      expect(got).toHaveLength(1);
+      expect(got[0]!.reason).toMatch(/^take_profit/);
+    });
+
+    it("honors a configured price floor and can be turned off", async () => {
+      const higher = await setup({ entryQ: 0.7, currentQ: 0.7, mid: 0.91, avgPrice: 0.6, config: { takeProfitPrice: 0.95 } });
+      expect(await exits(higher.strategy, higher.e)).toHaveLength(0);
+      const off = await setup({ entryQ: 0.7, currentQ: 0.7, mid: 0.97, avgPrice: 0.6, config: { takeProfitPrice: null } });
+      expect(await exits(off.strategy, off.e)).toHaveLength(0);
+    });
+  });
+
+  describe("6a. the optional convergence exit sells once the market has priced the forecast in", () => {
+    async function setup(input: { entryQ: number; currentQ: number; mid: number; avgPrice: number; config?: Record<string, unknown> }) {
+      const e = env({ config: { convergenceExitPp: 3, ...input.config } });
       const strategy = new FlipFlatStrategy();
       await enter(strategy, e, { side: "YES", entryQ: input.entryQ, avgPrice: input.avgPrice });
       setYesMid(e, input.mid);

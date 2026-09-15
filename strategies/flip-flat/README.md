@@ -31,16 +31,20 @@ or risk consumes only what it actually placed. The UTC reset replenishes entry c
 without closing anything.
 
 Exits are position-driven, not signal-driven, and the venue book is checked every minute.
-By default a position is sold once at most 3pp of held-side forecast edge remains
-(`convergenceExitPp`; `null` disables it). There is no profit floor and no Q-retreat
-condition, so a converged position is sold at whatever the market pays.
-Otherwise the default maximum hold is seven days. A stale or unpublished entry signal
-cannot suppress either exit. Neither the entry volume floor nor the minimum-notional floor
-ever blocks a sell; executable slippage and depth still apply.
+By default a position is sold once the held outcome's executable best bid reaches 90¢
+(`takeProfitPrice`; `null` disables it). The forecast plays no part in that exit: above
+90¢ a position risks the whole stake for a few more cents, and replayed against published
+signals, holding past the floor lost about 7% on average versus selling there. An optional
+convergence exit (`convergenceExitPp`, off by default) sells once at most that many pp of
+held-side forecast edge remains, with no profit floor; replayed, it sold winners before
+the take-profit could and lowered the average return. Otherwise the default maximum hold
+is seven days. A stale or unpublished entry signal cannot suppress any exit. Neither the
+entry volume floor nor the minimum-notional floor ever blocks a sell; executable slippage
+and depth still apply.
 
 ## Seven-day signal-exit state machine (opt-in)
 
-`scenarioExitEnabled: true` wraps the convergence exit above in a confirmed state machine
+`scenarioExitEnabled: true` wraps the take-profit above in a confirmed state machine
 that also reads the latest Q forecast for every held market on the five-minute forecast
 cadence. Everything is measured on the contract actually held: for a NO position,
 Q, the midpoint, and the executable bid are all mirrored. The immutable entry Q is the
@@ -61,11 +65,13 @@ Exits are evaluated in this order and exactly one reason is emitted:
    confirm the flip; exit once remaining edge is at or below 5pp. The confirmation is
    retained while Q stays flipped, so a later market move can still trigger it. A forecast
    back above 50% resets it.
-5. `convergence` — remaining held-side edge is at or below `convergenceExitPp` (3pp),
-   with no profit floor and no Q-retreat condition. Because it needs no confirmations and
-   its threshold is wider than the adverse-cross branch's, it subsumes that branch in
-   practice; `q_flip` still decides the 3–5pp band.
-6. `time_stop` — position age at or above `maxHoldDays` (7) measured from the actual entry
+5. `take_profit` — the held outcome's executable best bid is at or above
+   `takeProfitPrice` (90¢), whatever edge the forecast still shows.
+6. `convergence` — only when `convergenceExitPp` is set (off by default): remaining
+   held-side edge is at or below it, with no profit floor and no Q-retreat condition. At
+   3pp it needs no confirmations and its threshold is wider than the adverse-cross
+   branch's, so it subsumes that branch in practice.
+7. `time_stop` — position age at or above `maxHoldDays` (7) measured from the actual entry
    fill, regardless of P&L.
 
 Executable P&L walks the held-side bids for the full position and deducts `exitFeeBps`.
@@ -78,12 +84,13 @@ with no visible order.
 
 Positions that predate the record are seeded from the active same-side signal when one
 exists; without an entry Q, the collapse branch stays off for that position while the
-adverse-cross, flip, convergence, and time stop still apply.
+adverse-cross, flip, take-profit, and time stop still apply.
 
 ```sh
 cassie strategy <botId> --scenario-exit on
-cassie strategy <botId> --convergence-exit-pp 3 --adverse-cross-confirmations 2 \
+cassie strategy <botId> --take-profit-price 0.9 --adverse-cross-confirmations 2 \
   --q-collapse-pp 30 --flip-confirmations 2 --flip-exit-max-remaining-edge-pp 5 --max-hold-days 7
+cassie strategy <botId> --convergence-exit-pp 3   # optional; off by default
 ```
 
 ## Pending-entry reservation and order provenance
