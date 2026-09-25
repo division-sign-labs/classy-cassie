@@ -741,3 +741,91 @@ describe("seven-day signal exit state machine", () => {
     expect(line).toMatch(/entryQ 80\.0% → Q 20\.0%, mid 0\.250, bid 0\.240, edge -5\.0pp, retreat \+60\.0pp, pnl -60\.0%, adverse \d\/2, flip \d\/2, age \d+\.\d\dd, forecasts \[/);
   });
 });
+
+describe("hold preset gates", () => {
+  const DAY = 86_400_000;
+  const base = {
+    resolved: false,
+    entryQHeld: 0.7,
+    currentQHeld: 0.4,
+    midHeld: 0.2,
+    executablePnlPct: -50,
+    executableBidHeld: 0.19,
+    ageMs: DAY,
+    adverseCrossConfirmations: 0,
+    flipConfirmed: true,
+  };
+
+  it("parses the hold preset values", () => {
+    const cfg = FlipFlatConfigSchema.parse({
+      allocationMode: "fixed-notional",
+      lotNotionalUsd: 10,
+      maxWindowDays: 60,
+      scenarioExitEnabled: true,
+      adverseCrossConfirmations: null,
+      qCollapsePp: null,
+      flipExitMaxRemainingEdgePp: null,
+      takeProfitPrice: null,
+      maxHoldDays: null,
+    });
+    expect(cfg.allocationMode).toBe("fixed-notional");
+    expect(cfg.lotNotionalUsd).toBe(10);
+    expect(cfg.maxWindowDays).toBe(60);
+    expect(cfg.adverseCrossConfirmations).toBeNull();
+    expect(cfg.qCollapsePp).toBeNull();
+    expect(cfg.flipExitMaxRemainingEdgePp).toBeNull();
+    expect(FlipFlatConfigSchema.parse({}).maxWindowDays).toBeNull();
+    expect(FlipFlatConfigSchema.parse({}).lotNotionalUsd).toBe(10);
+  });
+
+  it("exits a confirmed flip at any remaining edge when the edge gate is off", () => {
+    const cfg = FlipFlatConfigSchema.parse({
+      scenarioExitEnabled: true,
+      flipExitMaxRemainingEdgePp: null,
+      qCollapsePp: null,
+      adverseCrossConfirmations: null,
+      takeProfitPrice: null,
+      maxHoldDays: null,
+    });
+    // Remaining edge is +20pp here; the default 5pp gate would hold.
+    expect(evaluateScenarioExit(base, cfg).reason).toBe("q_flip");
+    expect(evaluateScenarioExit({ ...base, midHeld: undefined }, cfg).reason).toBe("q_flip");
+    expect(evaluateScenarioExit({ ...base, flipConfirmed: false }, cfg).reason).toBeUndefined();
+  });
+
+  it("keeps the default 5pp gate on a confirmed flip", () => {
+    const cfg = FlipFlatConfigSchema.parse({ scenarioExitEnabled: true, takeProfitPrice: null });
+    expect(evaluateScenarioExit(base, cfg).reason).toBeUndefined();
+    expect(evaluateScenarioExit({ ...base, midHeld: 0.36 }, cfg).reason).toBe("q_flip");
+  });
+
+  it("turns the collapse and adverse-cross exits off with null", () => {
+    const input = {
+      resolved: false,
+      entryQHeld: 0.9,
+      currentQHeld: 0.5,
+      midHeld: 0.6,
+      executablePnlPct: -20,
+      executableBidHeld: 0.59,
+      ageMs: DAY,
+      adverseCrossConfirmations: 3,
+      flipConfirmed: false,
+    };
+    expect(evaluateScenarioExit(input, FlipFlatConfigSchema.parse({ scenarioExitEnabled: true })).reason).toBe("q_collapse");
+    expect(
+      evaluateScenarioExit(input, FlipFlatConfigSchema.parse({ scenarioExitEnabled: true, qCollapsePp: null })).reason,
+    ).toBe("adverse_cross");
+    expect(
+      evaluateScenarioExit(
+        input,
+        FlipFlatConfigSchema.parse({
+          scenarioExitEnabled: true,
+          qCollapsePp: null,
+          adverseCrossConfirmations: null,
+          takeProfitPrice: null,
+          maxHoldDays: null,
+        }),
+      ).reason,
+    ).toBeUndefined();
+  });
+});

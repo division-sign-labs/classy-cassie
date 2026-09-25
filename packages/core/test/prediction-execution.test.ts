@@ -124,6 +124,82 @@ function harness(strategy: Record<string, unknown> = {}, execution?: Record<stri
 
 describe("adaptive prediction execution", () => {
   afterEach(() => { vi.useRealTimers(); });
+
+  it("checks idle accounts every thirty seconds while preserving signal refreshes and explicit reads", async () => {
+    const h = harness(); await h.ready();
+    for (let i = 0; i < 5; i++) {
+      h.advance(5000);
+      await h.executor.supervise({ routine: true, refreshedAt: h.now() });
+    }
+    expect(h.adapter.tradeSettlements).toHaveBeenCalledTimes(1);
+    expect(h.adapter.openOrders).toHaveBeenCalledTimes(1);
+    expect(h.adapter.balances).toHaveBeenCalledTimes(1);
+    expect(h.adapter.positions).toHaveBeenCalledTimes(1);
+    expect((await h.executor.snapshot()).refreshedAt).toBe(h.now());
+    h.advance(5000); await h.executor.supervise({ routine: true });
+    expect(h.adapter.tradeSettlements).toHaveBeenCalledTimes(2);
+    await h.executor.supervise();
+    expect(h.adapter.tradeSettlements).toHaveBeenCalledTimes(3);
+  });
+
+  it("refreshes before a new admission and keeps working orders, fills and heartbeats on the fast cadence", async () => {
+    const h = harness(); await h.ready();
+    h.advance(5000); await h.executor.supervise({ routine: true });
+    expect(h.adapter.tradeSettlements).toHaveBeenCalledTimes(1);
+    await h.executor.admit(enter(), []);
+    expect(h.adapter.tradeSettlements).toHaveBeenCalledTimes(2);
+    h.advance(5000); await h.executor.supervise({ routine: true });
+    expect(h.adapter.tradeSettlements).toHaveBeenCalledTimes(3);
+    const heartbeats = h.adapter.heartbeat.mock.calls.length;
+    expect(await h.executor.heartbeat()).toBe(true);
+    expect(h.adapter.heartbeat).toHaveBeenCalledTimes(heartbeats + 1);
+    h.fill("order-1", 100, "MATCHED", "pending");
+    h.advance(5000); await h.executor.supervise({ routine: true });
+    expect(h.adapter.tradeSettlements).toHaveBeenCalledTimes(4);
+    expect((await h.executor.snapshot()).unsettledFillCount).toBe(1);
+    h.fill("order-1", 100, "CONFIRMED", "pending");
+    h.advance(5000); await h.executor.supervise({ routine: true });
+    expect((await h.executor.snapshot()).unsettledFillCount).toBe(0);
+    expect((await h.executor.snapshot()).parents[0]!.filledSize).toBe(100);
+  });
+
+  it("keeps fast checks through the late-fill overlap before returning to idle cadence", async () => {
+    const h = harness(); await h.ready(); await h.executor.admit(enter(), []);
+    h.fill("order-1", 100);
+    await h.executor.supervise(); h.advance(5000); await h.executor.supervise();
+    expect((await h.executor.snapshot()).parents[0]!.status).toBe("completed");
+    const before = h.adapter.tradeSettlements.mock.calls.length;
+    h.advance(5000); await h.executor.supervise({ routine: true });
+    expect(h.adapter.tradeSettlements).toHaveBeenCalledTimes(before + 1);
+    h.advance(300_000); await h.executor.supervise({ routine: true });
+    expect(h.adapter.tradeSettlements).toHaveBeenCalledTimes(before + 2);
+    h.advance(5000); await h.executor.supervise({ routine: true });
+    expect(h.adapter.tradeSettlements).toHaveBeenCalledTimes(before + 2);
+  });
+
+  it("keeps observing unowned orders at the fast cadence", async () => {
+    const h = harness();
+    h.orders.set("external", { id: "external", marketRef: "yes", tokenId: "yes", conditionId: "condition", outcome: "YES",
+      side: "BUY", size: 10, filledSize: 0, price: .5, status: "open" });
+    await h.ready();
+    expect((await h.executor.snapshot()).unownedMarkets).toEqual(["yes"]);
+    h.advance(5000); await h.executor.supervise({ routine: true });
+    expect(h.adapter.openOrders).toHaveBeenCalledTimes(2);
+  });
+
+  it("does not defer restart recovery or hide a failed idle reconciliation", async () => {
+    const h = harness(); await h.ready();
+    h.advance(5000); await h.restart().recover();
+    expect(h.adapter.tradeSettlements).toHaveBeenCalledTimes(2);
+    const limited = Object.assign(new Error("rate limited"), { name: "RateLimitError", retryAfter: 2 });
+    h.adapter.tradeSettlements.mockRejectedValueOnce(limited);
+    h.advance(30_000); await expect(h.executor.supervise({ routine: true })).rejects.toBe(limited);
+    expect((await h.executor.snapshot()).supervision).toBeDefined();
+    h.advance(5000); await h.executor.supervise({ routine: true });
+    expect(h.adapter.tradeSettlements).toHaveBeenCalledTimes(4);
+    expect((await h.executor.snapshot()).supervision).toBeUndefined();
+  });
+
   it("finishes fully settled orders after their detail disappears without canceling them", async () => {
     const h = harness(); await h.ready(); await h.executor.admit(enter(), []);
     h.fill("order-1", 100); h.hideStatus();

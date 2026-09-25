@@ -30,12 +30,14 @@ import type {
   VenueReadApi,
 } from "../types.js";
 import type { BotConfig } from "../config.js";
+import { closingPnl } from "../alerts/format.js";
 import { checkCapacity } from "../risk/capacity.js";
 import { mirrorBookForNo, mirrorQuoteForNo } from "./mirror.js";
 import { StateKeys, getJson, setJson } from "../state.js";
 import { PerpExecutor, isProtectiveOrder } from "./perp-execution.js";
 import { PredictionExecutor, assertPredictionExecutionSettled } from "./prediction-execution.js";
 import { positionMarketValue } from "../portfolio.js";
+import { isRateLimitError } from "../venues/transient.js";
 
 export interface ArmedTrigger {
   marketRef: string;
@@ -152,6 +154,10 @@ export interface OrderDecisionRecord {
   capacityNotes: string[];
   /** Strategy-supplied provenance (signal id/timestamp, edge, target, exposure, headroom). */
   provenance?: Record<string, unknown>;
+  /** Exits: the held average price at placement, the basis for realized P&L at fill. */
+  entryAvgPrice?: number;
+  /** The held side the order opens or closes. */
+  positionSide?: PositionSide;
 }
 
 export const orderDecisionKey = (orderId: string): string => `orders:decision:${orderId}`;
@@ -198,6 +204,8 @@ function isAdvanceable(s: SignalSource): s is SignalSource & AdvanceableSource {
 export class Engine {
   private readonly d: EngineDeps;
   private readonly now: () => number;
+  /** Human market titles seen on venue positions, keyed by marketRef. */
+  private readonly marketTitles = new Map<string, string>();
   private readonly perps?: PerpExecutor;
   private readonly predictions?: PredictionExecutor;
   private predictionSignals?: { signals: Signal[]; refreshedAt?: number };
@@ -401,6 +409,7 @@ export class Engine {
     const { adapter, account, botId, config, signals, log } = this.d;
     if (this.perps) {
       const snapshot = await this.perps.snapshot();
+      this.rememberTitles(snapshot.positions);
       return { botId, venueId: adapter.id, config: config.strategy.config, signals, venue: this.readApi(), positions: snapshot.positions,
         openOrders: snapshot.openOrders, equity: snapshot.equity, perpAccount: snapshot, perpExecution: await this.perps.status(), log,
         now: this.now, memory: this.strategyMemory() };
@@ -410,6 +419,7 @@ export class Engine {
       adapter.openOrders(account),
       adapter.balances(account),
     ]);
+    this.rememberTitles(positions);
     const collateral = balances.reduce((s, b) => s + b.total, 0);
     const posValue = positions.reduce((s, p) => s + positionMarketValue(p), 0);
     return {
@@ -457,6 +467,7 @@ export class Engine {
           alertKind: "entry",
           alertMessage: `enter ${action.side} ${shortRef(action.marketRef)}`,
           provenance: action.provenance,
+          positionSide: action.side,
         });
       }
       case "exit": {
@@ -481,6 +492,8 @@ export class Engine {
           alertKind: "exit",
           alertMessage: `exit ${pos.side} ${shortRef(action.marketRef)}${action.reason ? ` (${action.reason})` : ""}`,
           provenance: action.provenance,
+          entryAvgPrice: pos.avgPrice,
+          positionSide: pos.side,
         });
         if (result.placed) await this.disarmTriggers(action.marketRef);
         return result;
@@ -527,6 +540,9 @@ export class Engine {
           botId: this.d.botId,
           message: `redeemed resolved position ${pos.side} ${shortRef(action.marketRef)}`,
           data: { size: pos.size, conditionId: pos.conditionId, ...receipt },
+          ...this.baseAlert(),
+          market: this.alertMarket(action.marketRef, pos.outcome ?? (pos.side === "YES" || pos.side === "NO" ? pos.side : undefined), pos.label),
+          reason: "market resolved; position redeemed",
         });
         return { placed: false };
       }
@@ -573,6 +589,9 @@ export class Engine {
     alertKind: AlertEvent["kind"];
     alertMessage: string;
     provenance?: Record<string, unknown>;
+    /** Exits: held average price, for P&L. */
+    entryAvgPrice?: number;
+    positionSide?: PositionSide;
   }): Promise<StrategyActionResult> {
     const { adapter, account, config, botId } = this.d;
     const { book, quote, minOrderSize } = await this.quoteFor(p.marketRef, p.outcome);
@@ -596,6 +615,9 @@ export class Engine {
         kind: "skipped-order",
         botId,
         message: `skipped ${p.side} ${shortRef(p.marketRef)}: ${cap.skipReasons.join("; ")}`,
+        ...this.baseAlert(),
+        market: this.alertMarket(p.marketRef, p.outcome),
+        reason: cap.skipReasons.join("; "),
       });
       return { placed: false };
     }
@@ -619,6 +641,9 @@ export class Engine {
         kind: "skipped-order",
         botId,
         message: `skipped BUY ${shortRef(p.marketRef)}: size ${size} is below venue minimum ${minOrderSize}`,
+        ...this.baseAlert(),
+        market: this.alertMarket(p.marketRef, p.outcome),
+        reason: `size ${size} is below venue minimum ${minOrderSize}`,
       });
       return { placed: false };
     }
@@ -634,6 +659,9 @@ export class Engine {
         kind: "skipped-order",
         botId,
         message: `skipped ${p.side} ${shortRef(p.marketRef)}: ${reason}`,
+        ...this.baseAlert(),
+        market: this.alertMarket(p.marketRef, p.outcome),
+        reason,
       });
       return { placed: false };
     }
@@ -694,6 +722,8 @@ export class Engine {
       ...(ack.filledSize !== undefined ? { ackFilledSize: ack.filledSize } : {}),
       capacityNotes: cap.notes,
       ...(p.provenance ? { provenance: p.provenance } : {}),
+      ...(p.entryAvgPrice !== undefined ? { entryAvgPrice: p.entryAvgPrice } : {}),
+      ...(p.positionSide !== undefined ? { positionSide: p.positionSide } : {}),
     };
     await setJson(this.d.state, `orders:placed:${ack.orderId}`, { ts: placedAt, intent, ...(p.provenance ? { provenance: p.provenance } : {}) });
     // The placed record is deleted at TTL cancel; the decision record is
@@ -713,6 +743,19 @@ export class Engine {
         ...(cap.notes.length ? { capacity: cap.notes.join("; ") } : {}),
         ...(p.provenance ? { provenance: alertProvenance(p.provenance) } : {}),
       },
+      ...this.baseAlert(placedAt),
+      market: this.alertMarket(p.marketRef, p.outcome),
+      trade: {
+        side: p.side,
+        size: intent.size,
+        price: intent.limitPrice,
+        notionalUsd: placedNotional,
+        orderId: ack.orderId,
+        ...(p.positionSide ? { positionSide: p.positionSide } : {}),
+        ...(ack.status === "filled" ? { filled: true } : {}),
+      },
+      ...(p.alertKind === "exit" ? optionalPnl(exitPnl(p.entryAvgPrice, p.positionSide, intent.size, intent.limitPrice, p.provenance)) : {}),
+      reason: p.reason,
     });
     return {
       placed: ack.status !== "rejected",
@@ -767,8 +810,25 @@ export class Engine {
       reduceOnly: p.reduceOnly,
       triggers: native ? { stopPx: p.stopPx, tpPx: p.tpPx } : undefined,
     };
+    // Read the holding before the order changes it: its average price is the P&L basis.
+    const heldSide: PositionSide = p.outcome ?? (p.side === "BUY" ? "LONG" : "SHORT");
+    let held: Position | undefined;
+    try {
+      const positions = await adapter.positions(account);
+      this.rememberTitles(positions);
+      if (p.reduceOnly) {
+        held = positions.find((pos) => pos.marketRef === p.marketRef && (!p.outcome || (pos.outcome ?? pos.side) === p.outcome));
+      }
+    } catch {
+      // Titles and P&L on the alert are best-effort; the order proceeds.
+    }
     const ack = await adapter.placeOrder(account, intent);
-    await setJson(this.d.state, `orders:placed:${ack.orderId}`, { ts: this.now(), intent });
+    const positionSide: PositionSide = held?.side ?? heldSide;
+    await setJson(this.d.state, `orders:placed:${ack.orderId}`, {
+      ts: this.now(),
+      intent,
+      ...(held ? { entryAvgPrice: held.avgPrice, positionSide } : {}),
+    });
 
     // Manual and thesis-driven orders retain the operator's rationale in alerts.
     await this.alert({
@@ -783,6 +843,19 @@ export class Engine {
         ...(p.note ? { note: p.note } : {}),
         source: "manual",
       },
+      ...this.baseAlert(),
+      market: this.alertMarket(p.marketRef, p.outcome),
+      trade: {
+        side: p.side,
+        size: intent.size,
+        price: intent.limitPrice,
+        notionalUsd: intent.size * intent.limitPrice,
+        orderId: ack.orderId,
+        positionSide,
+        ...(ack.status === "filled" ? { filled: true } : {}),
+      },
+      ...(held ? optionalPnl(closingPnl(held.avgPrice, positionSide, intent.size, intent.limitPrice, 0, "executable")) : {}),
+      reason: p.note ?? "manual order",
     });
 
     let synthetic = false;
@@ -849,6 +922,7 @@ export class Engine {
     const triggers = await this.loadTriggers();
     if (triggers.length === 0) return;
     const positions = await this.d.adapter.positions(this.d.account);
+    this.rememberTitles(positions);
     const execution = await this.predictions?.snapshot();
     const remaining: ArmedTrigger[] = [];
     for (const t of triggers) {
@@ -920,6 +994,8 @@ export class Engine {
         reason: `synthetic-${t.kind}`,
         alertKind: "exit",
         alertMessage: `synthetic ${t.kind} fired for ${t.posSide} ${shortRef(t.marketRef)}`,
+        entryAvgPrice: pos.avgPrice,
+        positionSide: t.posSide,
       });
     }
     await setJson(this.d.state, StateKeys.triggers, remaining);
@@ -935,13 +1011,36 @@ export class Engine {
     const fills = await adapter.fills(account, since);
     if (fills.length === 0) return;
     let maxTs = since;
+    // Titles for the markets just filled; best-effort, never blocks the alert.
+    await adapter.positions(account).then((positions) => this.rememberTitles(positions), () => undefined);
     for (const f of fills) {
       maxTs = Math.max(maxTs, f.ts);
+      const decision = f.orderId ? await getJson<OrderDecisionRecord>(state, orderDecisionKey(f.orderId)) : undefined;
+      const placed = f.orderId && !decision
+        ? await getJson<{ entryAvgPrice?: number; positionSide?: PositionSide; intent?: OrderIntent }>(state, `orders:placed:${f.orderId}`)
+        : undefined;
+      const closing = decision ? decision.alertKind === "exit" : placed?.intent?.reduceOnly === true || placed?.entryAvgPrice !== undefined;
+      const entryAvgPrice = decision?.entryAvgPrice ?? placed?.entryAvgPrice;
+      const positionSide = decision?.positionSide ?? placed?.positionSide ?? f.outcome;
       await this.alert({
         kind: "fill",
         botId,
         message: `fill: ${f.side} ${f.size} ${shortRef(f.marketRef)} @ ${f.price}`,
         data: { orderId: f.orderId, fee: f.fee },
+        ...this.baseAlert(f.ts),
+        market: this.alertMarket(f.marketRef, f.outcome ?? decision?.outcome),
+        trade: {
+          side: f.side,
+          size: f.size,
+          price: f.price,
+          notionalUsd: f.size * f.price,
+          ...(f.fee !== undefined ? { feeUsd: f.fee } : {}),
+          ...(f.orderId ? { orderId: f.orderId } : {}),
+          ...(positionSide ? { positionSide } : {}),
+          filled: true,
+        },
+        ...(closing ? optionalPnl(closingPnl(entryAvgPrice, positionSide, f.size, f.price, f.fee, "realized")) : {}),
+        ...(decision?.reason ? { reason: decision.reason } : {}),
       });
     }
     await state.set(StateKeys.lastFillTs, String(maxTs + 1));
@@ -969,6 +1068,12 @@ export class Engine {
             ? `order ${o.id} partially filled ${o.filledSize}/${o.size}, remainder canceled at TTL`
             : `order ${o.id} unfilled after ${config.risk.orderTtlSec}s, canceled`,
         data: { marketRef: o.marketRef, side: o.side, price: o.price },
+        ...this.baseAlert(),
+        market: this.alertMarket(o.marketRef, o.outcome),
+        trade: { side: o.side, size: o.size, price: o.price, orderId: o.id },
+        reason: o.filledSize > 0
+          ? `partially filled ${o.filledSize}/${o.size}; remainder canceled`
+          : `unfilled after ${config.risk.orderTtlSec}s; canceled`,
       });
     }
   }
@@ -1018,6 +1123,7 @@ export class Engine {
   async predictionStatus() { return this.predictions?.snapshot(); }
   async supervisePredictions(): Promise<void> {
     await this.predictions?.supervise({
+      routine: this.d.adapter.id === "polymarket",
       paused: (await this.d.state.get(StateKeys.paused)) === "true",
       ...this.predictionSignals,
       exitDecisions: this.predictionExitDecisions,
@@ -1064,7 +1170,11 @@ export class Engine {
 
     // Dedup within the configured window so a flapping venue doesn't flood chat.
     const windowMs = this.d.config.alerts.errorDedupMin * 60_000;
-    const fingerprint = `${code}:${message.slice(0, 80)}`;
+    // One venue cooldown can fail several stages, with a different countdown or
+    // request cursor each time. Keep every error above, but send one rate-limit alert.
+    const fingerprint = isRateLimitError(err)
+      ? `venue-rate-limit:${this.d.adapter.id}`
+      : `${code}:${message.slice(0, 80)}`;
     const seen = (await getJson<Record<string, number>>(this.d.state, StateKeys.alertFingerprints)) ?? {};
     const last = seen[fingerprint] ?? 0;
     if (this.now() - last < windowMs) return;
@@ -1078,8 +1188,42 @@ export class Engine {
       botId: this.d.botId,
       message: `error [${code}]: ${message.slice(0, 200)}`,
       data: { tick: seq, fingerprint },
+      ...this.baseAlert(),
+      ...(typeof context?.marketRef === "string" ? { market: this.alertMarket(context.marketRef) } : {}),
     });
   }
+
+  private rememberTitles(positions: readonly Position[]): void {
+    for (const p of positions) if (p.label) this.marketTitles.set(p.marketRef, p.label);
+  }
+
+  private alertMarket(ref: string, outcome?: "YES" | "NO", title?: string): NonNullable<AlertEvent["market"]> {
+    const known = title ?? this.marketTitles.get(ref);
+    return { ref, ...(known ? { title: known } : {}), ...(outcome ? { outcome } : {}) };
+  }
+
+  /** Where and when, shared by every alert this engine sends. */
+  private baseAlert(atMs?: number): Pick<AlertEvent, "at" | "venue" | "strategy"> {
+    return { at: new Date(atMs ?? this.now()).toISOString(), venue: this.d.adapter.id, strategy: this.d.config.strategy.id };
+  }
+}
+
+function optionalPnl(pnl: AlertEvent["pnl"] | undefined): Pick<AlertEvent, "pnl"> {
+  return pnl ? { pnl } : {};
+}
+
+/** Exit P&L at the limit price; else the strategy's own executable P&L estimate. */
+function exitPnl(
+  entryAvgPrice: number | undefined,
+  positionSide: PositionSide | undefined,
+  size: number,
+  price: number,
+  provenance: Record<string, unknown> | undefined,
+): AlertEvent["pnl"] | undefined {
+  const computed = closingPnl(entryAvgPrice, positionSide, size, price, 0, "executable");
+  if (computed) return computed;
+  const pct = provenance?.executablePnlPct;
+  return typeof pct === "number" && Number.isFinite(pct) ? { pct, basis: "executable" } : undefined;
 }
 
 function shortRef(marketRef: string): string {

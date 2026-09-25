@@ -35,6 +35,12 @@ describe("flip-flat against fixtures (offline e2e)", () => {
     const fillsAfterT2 = alerter.ofKind("fill");
     expect(fillsAfterT2).toHaveLength(1);
     expect(fillsAfterT2[0]!.message).toMatch(/fill: BUY 8 fx-yes-1 @ 0.56/);
+    // Readable fields: the fixture's market title, the fill, and no P&L on an entry fill.
+    expect(entries[0]).toMatchObject({ venue: "fixture", market: { ref: "fx-yes-1" }, trade: { side: "BUY", size: 8 } });
+    expect(entries[0]!.pnl).toBeUndefined();
+    expect(fillsAfterT2[0]).toMatchObject({ market: { ref: "fx-yes-1" }, trade: { side: "BUY", size: 8, price: 0.56, filled: true } });
+    expect(fillsAfterT2[0]!.market?.title).toBeTruthy();
+    expect(fillsAfterT2[0]!.pnl).toBeUndefined();
     positions = await venue.positions();
     expect(positions[0]!.size).toBe(8);
 

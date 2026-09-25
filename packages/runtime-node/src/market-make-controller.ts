@@ -1,9 +1,10 @@
 // packages/runtime-node/src/market-make-controller.ts
 
 import { createHash } from "node:crypto";
-import { executableLiquidationValue, isTransientVenueError } from "@quotient-forecasting/cassie-core";
+import { closingPnl, executableLiquidationValue, isTransientVenueError } from "@quotient-forecasting/cassie-core";
 import type {
   Alerter,
+  AlertEvent,
   AlertKind,
   Balance,
   Fill,
@@ -1953,7 +1954,7 @@ export class MarketMakeController {
       marketKey,
       asset: tokenId,
       outcome,
-    });
+    }, { market: this.alertMarket(marketKey, outcome), reason: "market resolved; redemption confirmed" });
     this.log.info("market-make redemption confirmed by zero venue position", { marketKey, tokenId, outcome });
   }
 
@@ -2258,7 +2259,7 @@ export class MarketMakeController {
       outcome: action.outcome,
       side: action.side,
       purpose: action.purpose,
-    });
+    }, { market: this.alertMarket(action.marketKey, action.outcome), reason });
     this.log.warn("market-make action rejected before venue submission", { clientId: action.clientId, reason });
   }
 
@@ -3394,6 +3395,10 @@ export class MarketMakeController {
     const signal = this.reducerState.markets[marketKey]?.signal;
     const placement = this.reducerPlacement(marketKey, stored.clientOrderId, stored.venueOrderId);
     const hadInventory = Boolean(this.reducerState.markets[marketKey]?.inventory);
+    const inventoryBefore = this.reducerState.markets[marketKey]?.inventory;
+    const before = inventoryBefore
+      ? { avgCost: inventoryBefore.avgCost, cashPaidUsd: inventoryBefore.cashPaidUsd, cashReceivedUsd: inventoryBefore.cashReceivedUsd }
+      : undefined;
     const result = this.stateStore.recordFill({
       fillId,
       venueTradeId: fill.id,
@@ -3443,12 +3448,39 @@ export class MarketMakeController {
         price: fill.price,
         feeUsd: fill.fee,
       };
-      await this.alert("fill", `${fill.side} ${outcome} fill on ${marketKey}`, data);
+      const fee = fill.fee ?? 0;
+      const base = {
+        at: new Date(fill.ts).toISOString(),
+        market: this.alertMarket(marketKey, outcome),
+        trade: {
+          side: fill.side,
+          size: fillQuantity,
+          price: fill.price,
+          notionalUsd: fillQuantity * fill.price,
+          ...(fill.fee !== undefined ? { feeUsd: fill.fee } : {}),
+          orderId,
+          maker: true,
+          positionSide: outcome,
+          filled: true,
+        },
+      } as const;
+      const fillPnl = fill.side === "SELL" && before
+        ? closingPnl(before.avgCost, outcome, fillQuantity, fill.price, fee, "realized")
+        : undefined;
+      await this.alert("fill", `${fill.side} ${outcome} fill on ${marketKey}`, data, { ...base, ...(fillPnl ? { pnl: fillPnl } : {}) });
       const hasInventory = Boolean(this.reducerState.markets[marketKey]?.inventory);
       if (fill.side === "BUY" && !hadInventory && hasInventory) {
-        await this.alert("entry", `Opened ${outcome} inventory on ${marketKey}`, data);
+        await this.alert("entry", `Opened ${outcome} inventory on ${marketKey}`, data, { ...base, reason: "first fill opened inventory" });
       } else if (fill.side === "SELL" && hadInventory && !hasInventory) {
-        await this.alert("exit", `Closed ${outcome} inventory on ${marketKey}`, data);
+        // The whole cycle: cash received, including this closing fill, less cash paid.
+        const cyclePnl = before && before.cashPaidUsd > 0
+          ? (() => {
+              const usd = before.cashReceivedUsd + fillQuantity * fill.price - fee - before.cashPaidUsd;
+              return { usd: Math.round(usd * 10_000) / 10_000, pct: Math.round((usd / before.cashPaidUsd) * 10_000) / 100, basis: "realized" as const };
+            })()
+          : undefined;
+        await this.alert("exit", `Closed ${outcome} inventory on ${marketKey}`, data, {
+          ...base, ...(cyclePnl ? { pnl: cyclePnl } : {}), reason: "inventory closed" });
       }
     }
     return result.inserted;
@@ -4711,10 +4743,39 @@ export class MarketMakeController {
     }
   }
 
-  private async alert(kind: AlertKind, message: string, data?: Record<string, unknown>): Promise<void> {
+  /**
+   * The market question from the catalog, else the market key. Snapshots are
+   * spread from the Gamma catalog (mapCatalog), so `question` is present at
+   * runtime although the snapshot type does not declare it.
+   */
+  private alertMarket(marketKey: string, outcome?: string): NonNullable<AlertEvent["market"]> {
+    const catalog = this.catalogCache.get(marketKey)?.value ?? this.reducerState.markets[marketKey]?.catalog;
+    const question = (catalog as { question?: unknown } | undefined)?.question;
+    return {
+      ref: catalog?.marketRef ?? marketKey,
+      ...(typeof question === "string" && question.trim() ? { title: question.trim() } : {}),
+      ...(outcome === "YES" || outcome === "NO" ? { outcome } : {}),
+    };
+  }
+
+  private async alert(
+    kind: AlertKind,
+    message: string,
+    data?: Record<string, unknown>,
+    extra: Pick<AlertEvent, "at" | "market" | "trade" | "pnl" | "reason"> = {},
+  ): Promise<void> {
     if (!this.alerter) return;
     try {
-      await this.alerter.send({ kind, botId: this.botId, message, ...(data ? { data } : {}) });
+      await this.alerter.send({
+        kind,
+        botId: this.botId,
+        message,
+        ...(data ? { data } : {}),
+        venue: "polymarket",
+        strategy: "market-make",
+        ...extra,
+        at: extra.at ?? new Date(this.now()).toISOString(),
+      });
     } catch (error) {
       this.log.warn("market-make alert delivery failed", {
         kind,
@@ -4750,6 +4811,7 @@ export class MarketMakeController {
     // interruption is deduplicated, so repeated failures stay auditable.
     if (prior !== undefined && now - prior < 5 * 60_000) return;
     this.alertFingerprints.set(fingerprint, now);
-    await this.alert("error", message, { code, ...(context ?? {}) });
+    await this.alert("error", message, { code, ...(context ?? {}) },
+      typeof context?.marketKey === "string" ? { market: this.alertMarket(context.marketKey) } : {});
   }
 }

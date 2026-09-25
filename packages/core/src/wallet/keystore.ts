@@ -189,6 +189,15 @@ export class Keystore {
     return decryptSecret(entry.enc, passphrase);
   }
 
+  /** Removes one entry; true when it existed. Other entries are untouched. */
+  removeEntry(botId: string, name: string): boolean {
+    const file = this.load(botId);
+    if (!file?.entries[name]) return false;
+    delete file.entries[name];
+    this.save(file);
+    return true;
+  }
+
   entryMeta(botId: string, name: string): KeystoreEntry | null {
     return this.load(botId)?.entries[name] ?? null;
   }
@@ -262,4 +271,6 @@ export const KeyRoles = {
   quotientToken: "quotient-token", // signal API token (runtime-eligible)
   kalshiApi: "kalshi-api", // Kalshi RSA private key, single-line base64 PKCS#8 DER (runtime-eligible)
   surplusApiKey: "surplus-api-key", // Surplus Intelligence LLM key, inf_… (runtime-eligible)
+  webhookUrl: "webhook-url", // alert webhook URL; Slack/Discord URLs are bearer secrets (runtime-eligible)
+  webhookSecret: "webhook-secret", // HMAC signing secret for the alert webhook (runtime-eligible)
 } as const;

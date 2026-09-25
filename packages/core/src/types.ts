@@ -739,29 +739,74 @@ export interface ErrorRecord {
   tickSeq?: number;
 }
 
-export type AlertKind =
-  | "entry"
-  | "exit"
-  | "flip"
-  | "fill"
-  | "partial-fill-timeout"
-  | "skipped-order"
-  | "deposit"
-  | "deploy"
-  | "error"
-  | "deadman"
-  | "resolution"
-  | "test";
+export const ALERT_KINDS = [
+  "entry",
+  "exit",
+  "flip",
+  "fill",
+  "partial-fill-timeout",
+  "skipped-order",
+  "deposit",
+  "deploy",
+  "error",
+  "deadman",
+  "resolution",
+  "test",
+] as const;
+export type AlertKind = (typeof ALERT_KINDS)[number];
+
+/** realized: from a fill, fee deducted. executable: at the order's limit price, before the fill. */
+export type AlertPnlBasis = "realized" | "executable";
+
+export interface AlertMarket {
+  ref: string;
+  /** Human title: the market question, ticker, or `COIN-PERP`. */
+  title?: string;
+  outcome?: "YES" | "NO";
+  url?: string;
+}
+
+export interface AlertTrade {
+  side: OrderSide;
+  size: number;
+  price: number;
+  notionalUsd?: number;
+  feeUsd?: number;
+  orderId?: string;
+  maker?: boolean;
+  /** The held side the trade opens or closes: YES/NO, or LONG/SHORT for perps. */
+  positionSide?: PositionSide;
+  /** True when this is an executed fill rather than an order placement. */
+  filled?: boolean;
+}
+
+export interface AlertPnl {
+  usd?: number;
+  pct?: number;
+  basis: AlertPnlBasis;
+}
 
 export interface AlertEvent {
   kind: AlertKind;
   botId: string;
   message: string;
+  /** Debug metadata. Rendered last. */
   data?: Record<string, unknown>;
+  /** ISO time of the underlying event. */
+  at?: string;
+  venue?: VenueId;
+  strategy?: string;
+  market?: AlertMarket;
+  trade?: AlertTrade;
+  pnl?: AlertPnl;
+  /** Plain-words cause, rendered before the debug metadata. */
+  reason?: string;
 }
 
 export interface Alerter {
   send(event: AlertEvent): Promise<void>;
+  /** Drain buffered deliveries (shutdown, `cassie alerts test`). */
+  flush?(): Promise<unknown>;
 }
 
 // ---------------------------------------------------------------------------

@@ -3,6 +3,7 @@
 // File I/O lives in the CLI and the runtime; this module holds no side effects.
 
 import { z } from "zod";
+import { ALERT_KINDS } from "./types.js";
 import { CommodityConfigSchema } from "./strategies/kalshi-commodities.js";
 
 /** Live signals older than three hours are stale unless a bot overrides this. */
@@ -70,8 +71,17 @@ export const TelegramConfigSchema = z.object({
   chatId: z.string(),
 });
 
+/** Tunes the webhook sink. The URL and signing secret are credentials and live in the keystore or `.local.env`. */
+export const WebhookAlertsConfigSchema = z.object({
+  format: z.enum(["json", "slack", "discord"]).default("json"),
+  /** Kinds to deliver; omitted means every kind. */
+  kinds: z.array(z.enum(ALERT_KINDS)).min(1).optional(),
+});
+export type WebhookAlertsConfig = z.output<typeof WebhookAlertsConfigSchema>;
+
 export const AlertsConfigSchema = z.object({
   telegram: TelegramConfigSchema.optional(),
+  webhook: WebhookAlertsConfigSchema.optional(),
   /** Dedup window for error alerts, minutes (§14). */
   errorDedupMin: z.number().positive().default(15),
 });

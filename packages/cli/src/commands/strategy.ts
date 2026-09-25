@@ -56,7 +56,55 @@ const LEGACY_DAILY_BUDGET_SUMMARY =
   "no position-count cap, widest eligible edges first, $100 daily budget, 25% requested per entry, " +
   "10–30pp entry edge, positions every 60s, signals every 5m";
 
-type AllocationMode = "portfolio-kelly" | "daily-budget";
+type AllocationMode = "portfolio-kelly" | "daily-budget" | "fixed-notional";
+
+/**
+ * Hold-to-resolution preset: `cassie strategy <bot> --preset hold`, or `signals-hold`
+ * in `cassie init`. One fixed-dollar lot per market, entered on the first signal seen
+ * with at least 15pp of edge and at most 60 days to resolution; sold only after two
+ * consecutive committed forecasts put Q on the other side of 50%; otherwise held to
+ * the payout. Replayed on every published Polymarket signal from 2026-06-29 to 09-16
+ * (q-trade-analysis/signal-daily-hold-report.md): +19.6% per lot, about 1.3 lots a day.
+ */
+export const HOLD_STRATEGY = {
+  topN: null,
+  allocationMode: "fixed-notional",
+  lotNotionalUsd: 10,
+  nearResolutionDays: null,
+  nearResolutionSizeCutPct: 25,
+  entrySpreadPp: 15,
+  maxEntrySpreadPp: null,
+  maxWindowDays: 60,
+  minEntryNotional: 1,
+  takeProfitPrice: null,
+  maxHoldDays: null,
+  scenarioExitEnabled: true,
+  adverseCrossConfirmations: null,
+  qCollapsePp: null,
+  flipConfirmations: 2,
+  flipExitMaxRemainingEdgePp: null,
+  universe: "from-signals",
+  tickIntervalMin: 1,
+  signalPollIntervalMin: 5,
+} as const;
+
+export const HOLD_SUMMARY =
+  "one fixed $10 lot per market with no top-ups, 15pp+ entry edge with no ceiling, 60 days or less to resolution, " +
+  "sell only after two consecutive forecasts put Q on the other side of 50%, otherwise hold to the payout; " +
+  "no take-profit, no time stop, no collapse or adverse-cross exit";
+
+export type StrategyPreset = "recommended" | "hold";
+
+export function presetStrategyConfig(preset: StrategyPreset, venue?: string): Record<string, unknown> {
+  if (preset === "hold") return { ...HOLD_STRATEGY };
+  return { ...(venue === "hyperliquid" ? LEGACY_DAILY_BUDGET_STRATEGY : RECOMMENDED_STRATEGY) };
+}
+
+function parsePreset(raw: string): StrategyPreset {
+  const normalized = raw.trim().toLowerCase();
+  if (normalized === "recommended" || normalized === "hold") return normalized;
+  throw new Error("preset must be recommended or hold");
+}
 
 export function recommendedStrategySummary(venue?: string): string {
   return venue === "hyperliquid" ? LEGACY_DAILY_BUDGET_SUMMARY : RECOMMENDED_SUMMARY;
@@ -178,6 +226,7 @@ export async function elicitStrategyConfig(
 }
 
 export interface StrategyOptions {
+  preset?: string;
   execution?: string;
   entryDeadlineSeconds?: string;
   entryCrossingSeconds?: string;
@@ -192,7 +241,9 @@ export interface StrategyOptions {
   minExitDepth2cUsd?: string;
   dailyBudget?: string;
   positionBudgetPct?: string;
+  lotNotional?: string;
   maxEntryEdge?: string;
+  maxWindowDays?: string;
   minEntryNotional?: string;
   takeProfitPrice?: string;
   maxHoldDays?: string;
@@ -283,27 +334,35 @@ export async function runStrategy(botId: string, opts: StrategyOptions = {}): Pr
         return;
       }
     }
-    const strategyConfig = normalizeStrategyConfig(cfg.strategy.config as Record<string, unknown>);
+    let strategyConfig = normalizeStrategyConfig(cfg.strategy.config as Record<string, unknown>);
+    if (opts.preset !== undefined) strategyConfig = presetStrategyConfig(parsePreset(opts.preset), cfg.venue);
     let tickIntervalMin = cfg.tickIntervalMin;
     if (opts.top !== undefined) strategyConfig.topN = positionLimit(opts.top);
     const requestedMode = requestedAllocationMode(opts);
     strategyConfig.allocationMode ??= configuredAllocationMode(strategyConfig, cfg.venue);
     if (requestedMode !== undefined) {
       strategyConfig.allocationMode = requestedMode;
-      if (requestedMode === "portfolio-kelly") {
+      if (requestedMode !== "daily-budget") {
         delete strategyConfig.dailyBudgetUsd;
         delete strategyConfig.positionBudgetPct;
-        strategyConfig.kellyFraction ??= RECOMMENDED_STRATEGY.kellyFraction;
-        strategyConfig.marketCapPct ??= RECOMMENDED_STRATEGY.marketCapPct;
-        strategyConfig.eventCapPct ??= RECOMMENDED_STRATEGY.eventCapPct;
-        strategyConfig.minExitDepth2cUsd ??= RECOMMENDED_STRATEGY.minExitDepth2cUsd;
-      } else {
+      }
+      if (requestedMode !== "portfolio-kelly") {
         delete strategyConfig.kellyFraction;
         delete strategyConfig.marketCapPct;
         delete strategyConfig.eventCapPct;
         delete strategyConfig.minExitDepth2cUsd;
+      }
+      if (requestedMode !== "fixed-notional") delete strategyConfig.lotNotionalUsd;
+      if (requestedMode === "portfolio-kelly") {
+        strategyConfig.kellyFraction ??= RECOMMENDED_STRATEGY.kellyFraction;
+        strategyConfig.marketCapPct ??= RECOMMENDED_STRATEGY.marketCapPct;
+        strategyConfig.eventCapPct ??= RECOMMENDED_STRATEGY.eventCapPct;
+        strategyConfig.minExitDepth2cUsd ??= RECOMMENDED_STRATEGY.minExitDepth2cUsd;
+      } else if (requestedMode === "daily-budget") {
         strategyConfig.dailyBudgetUsd ??= LEGACY_DAILY_BUDGET_STRATEGY.dailyBudgetUsd;
         strategyConfig.positionBudgetPct ??= LEGACY_DAILY_BUDGET_STRATEGY.positionBudgetPct;
+      } else {
+        strategyConfig.lotNotionalUsd ??= HOLD_STRATEGY.lotNotionalUsd;
       }
     }
     if (opts.kellyFraction !== undefined) {
@@ -327,8 +386,12 @@ export async function runStrategy(botId: string, opts: StrategyOptions = {}): Pr
     if (opts.positionBudgetPct !== undefined) {
       strategyConfig.positionBudgetPct = percentage("budget per position", opts.positionBudgetPct);
     }
+    if (opts.lotNotional !== undefined) strategyConfig.lotNotionalUsd = positiveNumber("lot notional", opts.lotNotional);
     if (opts.maxEntryEdge !== undefined) {
       strategyConfig.maxEntrySpreadPp = optionalPositiveNumber("maximum entry edge", opts.maxEntryEdge);
+    }
+    if (opts.maxWindowDays !== undefined) {
+      strategyConfig.maxWindowDays = optionalPositiveNumber("maximum days to resolution", opts.maxWindowDays);
     }
     if (opts.minEntryNotional !== undefined) {
       strategyConfig.minEntryNotional = nonnegativeNumber("minimum entry notional", opts.minEntryNotional);
@@ -403,15 +466,15 @@ function applyScenarioExitOptions(config: Record<string, unknown>, opts: Strateg
     config.adverseCrossMaxPnlPct = signedNumber("adverse cross maximum P&L", opts.adverseCrossMaxPnlPct);
   }
   if (opts.adverseCrossConfirmations !== undefined) {
-    config.adverseCrossConfirmations = positiveInteger("adverse cross confirmations", opts.adverseCrossConfirmations);
+    config.adverseCrossConfirmations = optionalPositiveInteger("adverse cross confirmations", opts.adverseCrossConfirmations);
   }
-  if (opts.qCollapsePp !== undefined) config.qCollapsePp = positiveNumber("Q collapse", opts.qCollapsePp);
+  if (opts.qCollapsePp !== undefined) config.qCollapsePp = optionalPositiveNumber("Q collapse", opts.qCollapsePp);
   if (opts.qCollapseMaxRemainingEdgePp !== undefined) {
     config.qCollapseMaxRemainingEdgePp = signedNumber("Q collapse maximum remaining edge", opts.qCollapseMaxRemainingEdgePp);
   }
   if (opts.flipConfirmations !== undefined) config.flipConfirmations = positiveInteger("flip confirmations", opts.flipConfirmations);
   if (opts.flipExitMaxRemainingEdgePp !== undefined) {
-    config.flipExitMaxRemainingEdgePp = signedNumber("flip exit maximum remaining edge", opts.flipExitMaxRemainingEdgePp);
+    config.flipExitMaxRemainingEdgePp = optionalSignedNumber("flip exit maximum remaining edge", opts.flipExitMaxRemainingEdgePp);
   }
   if (opts.exitFeeBps !== undefined) config.exitFeeBps = nonnegativeNumber("exit fee", opts.exitFeeBps);
   if (opts.exitRetrySeconds !== undefined) config.exitRetrySec = positiveNumber("exit retry window", opts.exitRetrySeconds);
@@ -438,6 +501,18 @@ function positiveInteger(label: string, raw: string): number {
   return value;
 }
 
+function optionalPositiveInteger(label: string, raw: string): number | null {
+  const normalized = raw.trim().toLowerCase();
+  if (normalized === "off" || normalized === "none") return null;
+  return positiveInteger(label, raw);
+}
+
+function optionalSignedNumber(label: string, raw: string): number | null {
+  const normalized = raw.trim().toLowerCase();
+  if (normalized === "off" || normalized === "none") return null;
+  return signedNumber(label, raw);
+}
+
 function positionLimit(raw: string): number | null {
   const normalized = raw.trim().toLowerCase();
   if (normalized === "unlimited" || normalized === "none" || normalized === "off") return null;
@@ -460,12 +535,16 @@ function optionalPositiveNumber(label: string, raw: string): number | null {
 
 function parseAllocationMode(raw: string): AllocationMode {
   const normalized = raw.trim().toLowerCase();
-  if (normalized === "portfolio-kelly" || normalized === "daily-budget") return normalized;
-  throw new Error("allocation mode must be portfolio-kelly or daily-budget");
+  if (normalized === "portfolio-kelly" || normalized === "daily-budget" || normalized === "fixed-notional") return normalized;
+  throw new Error("allocation mode must be portfolio-kelly, daily-budget or fixed-notional");
 }
 
 function configuredAllocationMode(config: Record<string, unknown>, venue?: string): AllocationMode {
-  if (config.allocationMode === "portfolio-kelly" || config.allocationMode === "daily-budget") {
+  if (
+    config.allocationMode === "portfolio-kelly" ||
+    config.allocationMode === "daily-budget" ||
+    config.allocationMode === "fixed-notional"
+  ) {
     return config.allocationMode;
   }
   if (Object.hasOwn(config, "dailyBudgetUsd") || Object.hasOwn(config, "positionBudgetPct")) return "daily-budget";
@@ -481,8 +560,13 @@ function requestedAllocationMode(opts: StrategyOptions): AllocationMode | undefi
     opts.eventCapPct !== undefined ||
     opts.minExitDepth2cUsd !== undefined;
 
+  const requestsFixedNotional = opts.lotNotional !== undefined;
+
   if (requestsDailyBudget && requestsPortfolioKelly) {
     throw new Error("daily-budget and portfolio-kelly sizing options cannot be combined");
+  }
+  if (requestsFixedNotional && (requestsDailyBudget || requestsPortfolioKelly)) {
+    throw new Error("--lot-notional cannot be combined with daily-budget or portfolio-kelly sizing options");
   }
   if (explicit === "portfolio-kelly" && requestsDailyBudget) {
     throw new Error("--allocation-mode portfolio-kelly conflicts with daily-budget sizing options");
@@ -490,9 +574,16 @@ function requestedAllocationMode(opts: StrategyOptions): AllocationMode | undefi
   if (explicit === "daily-budget" && requestsPortfolioKelly) {
     throw new Error("--allocation-mode daily-budget conflicts with Kelly/cap sizing options");
   }
+  if (explicit !== undefined && explicit !== "fixed-notional" && requestsFixedNotional) {
+    throw new Error(`--allocation-mode ${explicit} conflicts with --lot-notional`);
+  }
+  if (explicit === "fixed-notional" && (requestsDailyBudget || requestsPortfolioKelly)) {
+    throw new Error("--allocation-mode fixed-notional conflicts with daily-budget and Kelly/cap sizing options");
+  }
   if (explicit !== undefined) return explicit;
   if (requestsDailyBudget) return "daily-budget";
   if (requestsPortfolioKelly) return "portfolio-kelly";
+  if (requestsFixedNotional) return "fixed-notional";
   return undefined;
 }
 
@@ -538,7 +629,12 @@ function printStrategy(
 ): void {
   const normalized = normalizeStrategyConfig(config);
   const allocationMode = configuredAllocationMode(normalized, venue);
-  const defaults = allocationMode === "portfolio-kelly" ? RECOMMENDED_STRATEGY : LEGACY_DAILY_BUDGET_STRATEGY;
+  const defaults =
+    allocationMode === "portfolio-kelly"
+      ? RECOMMENDED_STRATEGY
+      : allocationMode === "fixed-notional"
+        ? HOLD_STRATEGY
+        : LEGACY_DAILY_BUDGET_STRATEGY;
   const current = { ...defaults, ...normalized, allocationMode } as Record<string, unknown>;
   const positionLimit = current.topN === null ? "unlimited" : String(current.topN);
   console.log(`  position limit:       ${positionLimit} (widest eligible edges first)`);
@@ -549,6 +645,9 @@ function printStrategy(
     console.log(`  per-event cap:        ${current.eventCapPct}% of portfolio equity`);
     console.log(`  entry liquidity:      $${Number(current.minExitDepth2cUsd).toFixed(2)} held-side bid depth within 2¢`);
     console.log("  repeat signals:       top up toward target; over-cap holdings are not auto-trimmed");
+  } else if (allocationMode === "fixed-notional") {
+    console.log(`  lot per entry:        $${Number(current.lotNotionalUsd).toFixed(2)} fixed, before liquidity/risk caps`);
+    console.log("  repeat signals:       one lot per market; no top-ups");
   } else {
     const dailyBudgetUsd = Number(current.dailyBudgetUsd);
     const positionBudgetPct = Number(current.positionBudgetPct);
@@ -565,6 +664,9 @@ function printStrategy(
   console.log(
     `  maximum entry edge:   ${current.maxEntrySpreadPp === null ? "unlimited" : `${current.maxEntrySpreadPp}pp`}`,
   );
+  console.log(
+    `  resolution window:    ${current.maxWindowDays === null || current.maxWindowDays === undefined ? "any" : `${current.maxWindowDays} days or less at entry`}`,
+  );
   console.log(`  minimum viable entry: $${Number(current.minEntryNotional).toFixed(2)} (entries only; exits are never floored)`);
   const scenario = { ...SCENARIO_EXIT_DEFAULTS, ...normalized } as Record<string, unknown>;
   const maxHold = current.maxHoldDays === null ? "unlimited" : `${current.maxHoldDays} days`;
@@ -576,16 +678,27 @@ function printStrategy(
   if (scenario.scenarioExitEnabled === true) {
     console.log("  exit model:           seven-day signal state machine (scenarioExitEnabled)");
     console.log(
-      `  adverse cross:        edge <= ${scenario.adverseCrossEdgePp}pp and P&L <= ${scenario.adverseCrossMaxPnlPct}% on ` +
-        `${scenario.adverseCrossConfirmations} distinct forecasts`,
+      scenario.adverseCrossConfirmations === null
+        ? "  adverse cross:        off"
+        : `  adverse cross:        edge <= ${scenario.adverseCrossEdgePp}pp and P&L <= ${scenario.adverseCrossMaxPnlPct}% on ` +
+            `${scenario.adverseCrossConfirmations} distinct forecasts`,
     );
     console.log(
-      `  Q collapse:           retreat >= ${scenario.qCollapsePp}pp with edge <= ${scenario.qCollapseMaxRemainingEdgePp}pp, immediate`,
+      scenario.qCollapsePp === null
+        ? "  Q collapse:           off"
+        : `  Q collapse:           retreat >= ${scenario.qCollapsePp}pp with edge <= ${scenario.qCollapseMaxRemainingEdgePp}pp, immediate`,
     );
     console.log(
-      `  Q flip:               ${scenario.flipConfirmations} distinct forecasts below 50%, exit at edge <= ${scenario.flipExitMaxRemainingEdgePp}pp`,
+      `  Q flip:               ${scenario.flipConfirmations} distinct forecasts below 50%, ` +
+        (scenario.flipExitMaxRemainingEdgePp === null
+          ? "exit on confirmation at any remaining edge"
+          : `exit at edge <= ${scenario.flipExitMaxRemainingEdgePp}pp`),
     );
-    console.log(`  time stop:            ${maxHold} from the entry fill, regardless of P&L`);
+    console.log(
+      current.maxHoldDays === null
+        ? "  time stop:            off (hold to resolution)"
+        : `  time stop:            ${maxHold} from the entry fill, regardless of P&L`,
+    );
     console.log(`  exit fee assumed:     ${scenario.exitFeeBps}bps on executable proceeds`);
     console.log(`  exit retry window:    ${scenario.exitRetrySec}s before an invisible exit is re-evaluated`);
   } else {

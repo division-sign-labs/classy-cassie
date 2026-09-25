@@ -4,6 +4,10 @@
 
 import type { AlertEvent, Alerter, Logger } from "../types.js";
 import { boundFetch } from "../http.js";
+import { formatAlertText } from "./format.js";
+
+export * from "./format.js";
+export * from "./webhook.js";
 
 export class NoopAlerter implements Alerter {
   async send(_event: AlertEvent): Promise<void> {}
@@ -12,24 +16,9 @@ export class NoopAlerter implements Alerter {
 export class ConsoleAlerter implements Alerter {
   constructor(private readonly log: Logger) {}
   async send(event: AlertEvent): Promise<void> {
-    this.log.info(`ALERT [${event.kind}] ${event.message}`, event.data);
+    this.log.info(`ALERT ${formatAlertText(event, { includeData: false })}`, event.data);
   }
 }
-
-const KIND_EMOJI: Record<string, string> = {
-  entry: "🟢",
-  exit: "🔵",
-  flip: "🔄",
-  fill: "✅",
-  "partial-fill-timeout": "⏱️",
-  "skipped-order": "⏭️",
-  deposit: "💰",
-  deploy: "🚀",
-  error: "🔴",
-  deadman: "🛑",
-  resolution: "🏁",
-  test: "🔔",
-};
 
 export class TelegramAlerter implements Alerter {
   constructor(
@@ -43,14 +32,7 @@ export class TelegramAlerter implements Alerter {
   private readonly fetchImpl: typeof fetch;
 
   async send(event: AlertEvent): Promise<void> {
-    const emoji = KIND_EMOJI[event.kind] ?? "ℹ️";
-    let text = `${emoji} [${event.botId}] ${event.message}`;
-    if (event.data && Object.keys(event.data).length > 0) {
-      const detail = Object.entries(event.data)
-        .map(([k, v]) => `${k}: ${typeof v === "number" ? v : JSON.stringify(v)}`)
-        .join("\n");
-      text += `\n${detail}`;
-    }
+    const text = formatAlertText(event);
     const res = await this.fetchImpl(`https://api.telegram.org/bot${this.botToken}/sendMessage`, {
       method: "POST",
       headers: { "content-type": "application/json" },
@@ -75,6 +57,9 @@ export class FanoutAlerter implements Alerter {
   async send(event: AlertEvent): Promise<void> {
     await Promise.all(this.sinks.map((s) => s.send(event)));
   }
+  async flush(): Promise<void> {
+    await Promise.all(this.sinks.map((s) => s.flush?.()));
+  }
 }
 
 /** Never lets an alert failure break a tick; logs instead. */
@@ -88,6 +73,14 @@ export class SafeAlerter implements Alerter {
       await this.inner.send(event);
     } catch (err) {
       this.log.warn(`alert delivery failed (${event.kind}): ${(err as Error).message}`);
+    }
+  }
+  async flush(): Promise<unknown> {
+    try {
+      return await this.inner.flush?.();
+    } catch (err) {
+      this.log.warn(`alert flush failed: ${(err as Error).message}`);
+      return undefined;
     }
   }
 }

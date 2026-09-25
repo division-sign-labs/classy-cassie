@@ -22,7 +22,13 @@ import { botConfigPath, loadBotConfig, saveBotConfig } from "../paths.js";
 import { createSplitsTreasury } from "../splits-init.js";
 import { discoverQuotientToken } from "../quotient-token.js";
 import { describeTelegramFailure, localTelegramSettings } from "../telegram-settings.js";
-import { recommendedStrategySummary, elicitRecommendedStrategyConfig, elicitStrategyConfig } from "./strategy.js";
+import {
+  HOLD_STRATEGY,
+  HOLD_SUMMARY,
+  elicitRecommendedStrategyConfig,
+  elicitStrategyConfig,
+  recommendedStrategySummary,
+} from "./strategy.js";
 import { AGENT_STRATEGY_SUMMARY, elicitAgentConfig, fetchAndStorePersona } from "./agent.js";
 import { discoverSurplusApiKey, verifySurplusApiKey } from "../surplus-config.js";
 import { runDeploy } from "./deploy.js";
@@ -522,6 +528,13 @@ export async function runInit(): Promise<void> {
       title: existing?.strategy.id === "signals" || existing?.strategy.id === "flip-flat" ? "signals (current)" : "signals",
       description: "follow Quotient signals, hold until the forecast converges with the price",
     },
+    ...(isPredictionVenue(venue)
+      ? [{
+          value: "signals-hold",
+          title: "signals-hold",
+          description: "buy each new Quotient signal with a fixed stake, sell only if Q flips, otherwise hold to resolution",
+        }]
+      : []),
     {
       value: "agent",
       title: existing?.strategy.id === "agent" ? "agent (current)" : "agent",
@@ -557,7 +570,10 @@ export async function runInit(): Promise<void> {
     const [current] = strategyChoices.splice(currentStrategy, 1);
     strategyChoices.unshift(current!);
   }
-  const strategyId = isPredictionVenue(venue) || venue === "hyperliquid" ? await select("Strategy", strategyChoices) : "signals";
+  const strategyChoice = isPredictionVenue(venue) || venue === "hyperliquid" ? await select("Strategy", strategyChoices) : "signals";
+  // The hold preset is the signals strategy with its knobs set; the bot keeps the `signals` id.
+  const holdPreset = strategyChoice === "signals-hold";
+  const strategyId = holdPreset ? "signals" : strategyChoice;
   requireSafeStrategyTransition(existing?.strategy.id, strategyId);
 
   let strategyConfig: Record<string, unknown>;
@@ -617,6 +633,17 @@ export async function runInit(): Promise<void> {
         : MARKET_MAKE_PRESET,
     ) as unknown as Record<string, unknown>;
     tickIntervalMin = MarketMakeConfigSchema.parse(strategyConfig).reconciliation.rest_reconcile_seconds / 60;
+  } else if (holdPreset) {
+    console.log("Signals strategy, hold preset: each new Quotient signal held to resolution unless Q flips.");
+    for (const rule of HOLD_SUMMARY.split(", ")) console.log(rule);
+    if (venue === "polymarket") console.log(QUOTIENT_POLYMARKET_FEE_DISCLOSURE);
+    const lotRaw = await ask("Stake per signal ($)", {
+      default: String(existingStrategy.lotNotionalUsd ?? HOLD_STRATEGY.lotNotionalUsd),
+    });
+    const lotNotionalUsd = Number(lotRaw);
+    if (!Number.isFinite(lotNotionalUsd) || lotNotionalUsd <= 0) throw new Error("stake per signal must be greater than zero");
+    strategyConfig = { ...HOLD_STRATEGY, lotNotionalUsd };
+    tickIntervalMin = HOLD_STRATEGY.tickIntervalMin;
   } else {
     console.log("Signals strategy: published Quotient signals.");
     for (const rule of recommendedStrategySummary(venue).split(", ")) console.log(rule);

@@ -84,6 +84,8 @@ async function main(): Promise<void> {
     quotientToken: required("QUOTIENT_API_TOKEN"),
     telegramToken: process.env.TELEGRAM_BOT_TOKEN,
     telegramChatId: process.env.TELEGRAM_CHAT_ID,
+    webhookUrl: process.env.CASSIE_WEBHOOK_URL,
+    webhookSecret: process.env.CASSIE_WEBHOOK_SECRET,
     // Required only when the bot runs the agent strategy; buildStrategy throws
     // a targeted error there, so a plain signals bot keeps booting without it.
     surplusApiKey: config.strategy.id === "agent" ? required("SURPLUS_API_KEY") : process.env.SURPLUS_API_KEY,

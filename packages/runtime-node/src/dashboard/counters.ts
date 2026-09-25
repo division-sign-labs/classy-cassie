@@ -41,4 +41,8 @@ export class CountingAlerter implements Alerter {
       throw error;
     }
   }
+
+  flush(): Promise<unknown> {
+    return this.inner.flush?.() ?? Promise.resolve(undefined);
+  }
 }

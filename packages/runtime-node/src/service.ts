@@ -17,6 +17,7 @@ import {
   PolymarketCatalogClient,
   SafeAlerter,
   TelegramAlerter,
+  WebhookAlerter,
   checkLiveSignalAccess,
   computePortfolio,
   consoleLogger,
@@ -44,6 +45,7 @@ import {
   SurplusClient,
   createMarketLister,
   isTransientVenueError,
+  isRateLimitError,
 } from "@quotient-forecasting/cassie-core";
 import { FlipFlatStrategy } from "@quotient-forecasting/strategy-flip-flat";
 import {
@@ -115,6 +117,10 @@ export interface BotRuntimeOptions {
   telegramToken?: string;
   /** Overrides the saved chat id; deploy forwards TELEGRAM_CHAT_ID from the operator's .local.env. */
   telegramChatId?: string;
+  /** Alert webhook URL; the sink is on when set. Tuned by config.alerts.webhook. */
+  webhookUrl?: string;
+  /** Signs each webhook request (x-cassie-signature). */
+  webhookSecret?: string;
   /** Surplus Intelligence key (inf_…). Required by the agent strategy only. */
   surplusApiKey?: string;
   /** Shared call counters; defaults to the process-wide registry. */
@@ -258,6 +264,8 @@ function compactNumber(value: number): string {
   return String(Number(value.toFixed(4)));
 }
 
+const ALERT_FLUSH_TIMEOUT_MS = 3_000;
+
 export function buildAlerter(opts: BotRuntimeOptions, log: Logger, counters?: EngineCounters): Alerter {
   // Counting sits inside SafeAlerter so a swallowed delivery failure is still counted.
   const count = (sink: Alerter): Alerter => (counters ? new CountingAlerter(sink, counters) : sink);
@@ -265,6 +273,17 @@ export function buildAlerter(opts: BotRuntimeOptions, log: Logger, counters?: En
   const chatId = opts.telegramChatId ?? opts.config.alerts.telegram?.chatId;
   if (opts.telegramToken && chatId) {
     sinks.push(new SafeAlerter(count(new TelegramAlerter(opts.telegramToken, chatId)), log));
+  }
+  if (opts.webhookUrl) {
+    const webhook = opts.config.alerts.webhook;
+    sinks.push(new SafeAlerter(count(new WebhookAlerter({
+      url: opts.webhookUrl,
+      ...(opts.webhookSecret ? { secret: opts.webhookSecret } : {}),
+      format: webhook?.format ?? "json",
+      ...(webhook?.kinds ? { kinds: webhook.kinds } : {}),
+      ...(opts.version ? { version: opts.version } : {}),
+      log,
+    })), log));
   }
   if (sinks.length === 0) return count(new ConsoleAlerter(log));
   return sinks.length === 1 ? sinks[0]! : new FanoutAlerter(sinks);
@@ -277,6 +296,8 @@ export class BotService {
   readonly log: Logger;
 
   private readonly adapter: VenueAdapter;
+  /** Absent only on test doubles built without the constructor. */
+  private readonly alerter?: Alerter;
   private readonly strategy?: Strategy;
   private readonly engine?: Engine;
   private readonly marketMaker?: MarketMaker;
@@ -291,7 +312,7 @@ export class BotService {
   private triggerTimer?: NodeJS.Timeout;
   private perpSupervisionPending = false;
   private perpSupervisionError?: { message: string; at: number };
-  private predictionSupervisionError?: { message: string; at: number };
+  private predictionSupervisionError?: { fingerprint: string; at: number };
   private predictionTimer?: NodeJS.Timeout;
   private predictionSupervision?: Promise<void>;
   private predictionHeartbeat?: Promise<void>;
@@ -323,6 +344,7 @@ export class BotService {
       perpDex: opts.config.strategy.id === "quotient-swing" ? "xyz" : undefined,
     }), this.metrics);
     const alerter = buildAlerter(opts, this.log, this.counters);
+    this.alerter = alerter;
     if (opts.config.strategy.id === "kalshi-commodities") this.commodityRecordings = new CommodityRecordingStore(`${opts.statePath}.commodities.sqlite`);
     if (opts.config.strategy.id === "quotient-swing") {
       if (!opts.quotientToken) throw new Error("quotient-swing needs a Quotient API key");
@@ -537,12 +559,13 @@ export class BotService {
             .then(async () => { this.predictionExecution = await engine.predictionStatus(); this.predictionSupervisionError = undefined; })
             .catch(error => {
               // A throttled or slow venue defers supervision; the executor keeps its orders and retries.
-              // Log that once a minute per message rather than every five seconds.
+              // Count changing cooldowns and request cursors as one rate-limit incident.
               const message = (error as Error).message;
               if (!isTransientVenueError(error)) { this.log.error(`prediction execution failed: ${message}`); return; }
-              if (this.predictionSupervisionError?.message !== message || Date.now() - this.predictionSupervisionError.at >= 60_000) {
+              const fingerprint = isRateLimitError(error) ? "venue-rate-limit" : message;
+              if (this.predictionSupervisionError?.fingerprint !== fingerprint || Date.now() - this.predictionSupervisionError.at >= 60_000) {
                 this.log.warn(`prediction supervision deferred; retrying: ${message}`);
-                this.predictionSupervisionError = { message, at: Date.now() };
+                this.predictionSupervisionError = { fingerprint, at: Date.now() };
               }
             })
             .finally(() => { this.predictionSupervision = undefined; });
@@ -599,6 +622,21 @@ export class BotService {
     }
   }
 
+  /** Deliver buffered alerts before exit, bounded so a dead endpoint cannot stall shutdown. */
+  private async flushAlerts(): Promise<void> {
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    try {
+      await Promise.race([
+        Promise.resolve(this.alerter?.flush?.()),
+        new Promise<void>((resolve) => { timer = setTimeout(resolve, ALERT_FLUSH_TIMEOUT_MS); }),
+      ]);
+    } catch (error) {
+      this.log?.warn(`alert flush failed at shutdown: ${(error as Error).message}`);
+    } finally {
+      if (timer) clearTimeout(timer);
+    }
+  }
+
   shutdown(cancelResting = true): Promise<ShutdownResult> {
     if (this.shutdownPromise) return this.shutdownPromise;
     if (this.swing && (cancelResting || this.active)) {
@@ -608,6 +646,7 @@ export class BotService {
         await this.swing!.prepareShutdown();
         this.terminating = true; this.active = false; this.stopTimers();
         await this.swing!.shutdown(false);
+        await this.flushAlerts();
         this.state.close();
         return { stopped: true, restingOrdersCanceled: true, cancellation: { method: "engine", requested: true,
           completed: true, verifiedOpenOrders: false, remainingOpenOrders: null, protectiveOrdersRetained: true } };
@@ -695,6 +734,7 @@ export class BotService {
         primaryFailure = error;
         throw error;
       } finally {
+        await this.flushAlerts();
         const closeStores = () => {
         const closeFailures: unknown[] = [];
         try {

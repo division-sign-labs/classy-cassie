@@ -4,7 +4,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { BotConfigSchema, type VenueAccount } from "@quotient-forecasting/cassie-core";
+import { BotConfigSchema, VenueRateLimitedError, type VenueAccount } from "@quotient-forecasting/cassie-core";
 import { BotService } from "../src/service.js";
 
 const doubles = vi.hoisted(() => ({ engine: vi.fn(), adapter: vi.fn() }));
@@ -23,6 +23,7 @@ describe("adaptive execution runtime lanes", () => {
   let service: BotService | undefined;
   let finishTick: (() => void) | undefined;
   let engine: ReturnType<typeof engineDouble>;
+  let log: { info: ReturnType<typeof vi.fn>; warn: ReturnType<typeof vi.fn>; error: ReturnType<typeof vi.fn>; debug: ReturnType<typeof vi.fn> };
   function engineDouble() {
     return {
       adaptivePredictionExecution: true,
@@ -46,11 +47,12 @@ describe("adaptive execution runtime lanes", () => {
     engine = engineDouble();
     doubles.engine.mockReturnValue(engine);
     doubles.adapter.mockReturnValue({ cancelAll: vi.fn(), openOrders: vi.fn().mockResolvedValue([]) });
+    log = { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() };
     service = new BotService({ config: BotConfigSchema.parse({ id: "adaptive-test", venue: "polymarket",
       strategy: { id: "signals", config: {} }, tickIntervalMin: 1,
       reporting: { provider: "ares", builderCode: "0x" + "a".repeat(64) } }),
       account, statePath: join(dir, "bot.sqlite"), runtime: "local", quotientToken: "test-token",
-      log: { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() } });
+      log });
   });
   afterEach(async () => {
     finishTick?.();
@@ -92,6 +94,28 @@ describe("adaptive execution runtime lanes", () => {
     expect(engine.supervisePredictions).toHaveBeenCalledOnce();
     expect(engine.heartbeatIfResting).toHaveBeenCalledTimes(3);
     finishSupervision();
+  });
+
+  it("logs changing rate-limit countdowns once a minute while retries and heartbeat continue", async () => {
+    let attempt = 0;
+    engine.supervisePredictions.mockImplementation(async () => {
+      attempt += 1;
+      if (attempt % 6 === 1) throw Object.assign(new Error(`Request to /data/trades?after=${attempt} was rate limited`), { name: "RateLimitError" });
+      throw new VenueRateLimitedError("orders", 30_000 - (attempt % 6) * 5_000);
+    });
+    await service!.start();
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(log.warn).toHaveBeenCalledTimes(1);
+    expect(engine.supervisePredictions).toHaveBeenCalledTimes(12);
+    expect(engine.heartbeatIfResting).toHaveBeenCalledTimes(12);
+    await vi.advanceTimersByTimeAsync(5_000);
+    expect(log.warn).toHaveBeenCalledTimes(2);
+
+    engine.supervisePredictions.mockResolvedValue(undefined);
+    await vi.advanceTimersByTimeAsync(5_000);
+    engine.supervisePredictions.mockRejectedValue(new VenueRateLimitedError("orders", 30_000));
+    await vi.advanceTimersByTimeAsync(5_000);
+    expect(log.warn).toHaveBeenCalledTimes(3);
   });
 
   it("keeps SQLite open for late redemption receipts after bounded shutdown", async () => {

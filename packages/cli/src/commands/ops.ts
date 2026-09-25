@@ -3,16 +3,27 @@
 
 import pc from "picocolors";
 import {
+  KeyRoles,
   TelegramAlerter,
+  WebhookAlerter,
   computePortfolio,
   createAdapter,
   parseBotConfig,
+  type AlertEvent,
   type BotPortfolio,
   type Order,
 } from "@quotient-forecasting/cassie-core";
-import { adapterFor, controlFetch, isDeployed, requireAccount } from "../context.js";
-import { listBotIds, loadBotConfig } from "../paths.js";
+import { adapterFor, ask, controlFetch, getPassphrase, isDeployed, keystore, requireAccount } from "../context.js";
+import { listBotIds, loadBotConfig, saveBotConfig } from "../paths.js";
 import { describeTelegramSettings, resolveTelegramSettings } from "../telegram-settings.js";
+import {
+  checkWebhookUrl,
+  describeWebhookSettings,
+  localWebhookSettings,
+  parseAlertKinds,
+  parseWebhookFormat,
+  resolveWebhookSettings,
+} from "../webhook-settings.js";
 import { money, num, renderTable, shortRef } from "../render.js";
 
 export interface PortfolioOutputBreakdown {
@@ -196,13 +207,115 @@ function printOrders(orders: Order[]): void {
 export async function alertsTest(botId: string): Promise<void> {
   const cfg = loadBotConfig(botId);
   const telegram = await resolveTelegramSettings(botId, cfg.alerts.telegram);
-  if (!telegram.token || !telegram.chatId) {
-    console.error(pc.red(`${describeTelegramSettings(telegram)}.\nPut both in the nearest .local.env, or run: cassie init`));
+  const webhook = await resolveWebhookSettings(botId);
+  const hasTelegram = Boolean(telegram.token && telegram.chatId);
+  if (!hasTelegram && !webhook.url) {
+    console.error(pc.red(
+      `No alert sink is configured.\n${describeTelegramSettings(telegram)}.\n${describeWebhookSettings(webhook)}.\n` +
+      `Put the values in the nearest .local.env, run cassie init, or run cassie alerts webhook ${botId}`,
+    ));
     process.exit(1);
   }
-  console.log(pc.dim(describeTelegramSettings(telegram)));
-  await new TelegramAlerter(telegram.token, telegram.chatId).send({ kind: "test", botId, message: "test ping from `cassie alerts test`" });
-  console.log(pc.green("sent"));
+  const event: AlertEvent = {
+    kind: "test",
+    botId,
+    message: "test alert from `cassie alerts test`",
+    at: new Date().toISOString(),
+    venue: cfg.venue,
+    strategy: cfg.strategy.id,
+  };
+  let failed = false;
+  if (hasTelegram) {
+    console.log(pc.dim(describeTelegramSettings(telegram)));
+    try {
+      await new TelegramAlerter(telegram.token!, telegram.chatId!).send(event);
+      console.log(pc.green("telegram: sent"));
+    } catch (error) {
+      failed = true;
+      console.error(pc.red(`telegram: ${(error as Error).message}`));
+    }
+  }
+  if (webhook.url) {
+    console.log(pc.dim(describeWebhookSettings(webhook)));
+    const sink = new WebhookAlerter({
+      url: webhook.url,
+      ...(webhook.secret ? { secret: webhook.secret } : {}),
+      format: cfg.alerts.webhook?.format ?? "json",
+      retryDelaysMs: [500],
+    });
+    await sink.send(event);
+    const result = await sink.flush();
+    if (result.sent > 0) console.log(pc.green("webhook: sent"));
+    else {
+      failed = true;
+      console.error(pc.red(`webhook: ${result.lastError ?? "not delivered"}`));
+    }
+  }
+  if (failed) process.exit(1);
+}
+
+export interface AlertsWebhookOpts {
+  format?: string;
+  kinds?: string;
+  off?: boolean;
+  show?: boolean;
+}
+
+function applyHint(botId: string, deployed: boolean): string {
+  return deployed ? `Apply with: cassie deploy ${botId}` : `Applies the next time you run: cassie run ${botId}`;
+}
+
+/**
+ * Configure the alert webhook. The URL and signing secret are prompted for
+ * (never taken from argv) and stored in the bot's keystore, unless the nearest
+ * .local.env or the environment already sets them.
+ */
+export async function alertsWebhook(botId: string, opts: AlertsWebhookOpts): Promise<void> {
+  const cfg = loadBotConfig(botId);
+  if (opts.off && (opts.format || opts.kinds || opts.show)) throw new Error("--off takes no other options");
+
+  if (opts.show) {
+    const settings = await resolveWebhookSettings(botId);
+    console.log(describeWebhookSettings(settings));
+    const tuning = cfg.alerts.webhook;
+    console.log(`format: ${tuning?.format ?? "json"}; kinds: ${tuning?.kinds?.join(", ") ?? "all"}`);
+    return;
+  }
+
+  if (opts.off) {
+    const ks = keystore();
+    const removed = [KeyRoles.webhookUrl, KeyRoles.webhookSecret].filter((role) => ks.removeEntry(botId, role));
+    const { webhook: _removed, ...alerts } = cfg.alerts;
+    saveBotConfig(parseBotConfig({ ...cfg, alerts }));
+    console.log(`${botId}: webhook alerts off${removed.length ? `; removed ${removed.join(", ")} from the keystore` : ""}`);
+    const local = localWebhookSettings();
+    if (local.url) console.log(pc.yellow(`CASSIE_WEBHOOK_URL is still set in ${local.urlOrigin}; remove it there too.`));
+    console.log(applyHint(botId, isDeployed(cfg)));
+    return;
+  }
+
+  const format = parseWebhookFormat(opts.format) ?? cfg.alerts.webhook?.format ?? "json";
+  const kinds = opts.kinds !== undefined ? parseAlertKinds(opts.kinds) : cfg.alerts.webhook?.kinds;
+
+  const local = localWebhookSettings();
+  if (local.url) {
+    checkWebhookUrl(local.url);
+    console.log(pc.dim(`URL from ${local.urlOrigin}; not stored in the keystore`));
+  } else {
+    const url = checkWebhookUrl(await ask("Webhook URL", { secret: true }));
+    const secret = (await ask("Signing secret (blank for none; Slack and Discord ignore it)", { secret: true })).trim();
+    const pass = await getPassphrase(botId);
+    const ks = keystore();
+    ks.putEntry(botId, KeyRoles.webhookUrl, url, pass, { runtimeEligible: true });
+    if (secret) ks.putEntry(botId, KeyRoles.webhookSecret, secret, pass, { runtimeEligible: true });
+    else ks.removeEntry(botId, KeyRoles.webhookSecret);
+  }
+
+  saveBotConfig(parseBotConfig({ ...cfg, alerts: { ...cfg.alerts, webhook: { format, ...(kinds ? { kinds } : {}) } } }));
+  console.log(describeWebhookSettings(await resolveWebhookSettings(botId)));
+  console.log(`format: ${format}; kinds: ${kinds?.join(", ") ?? "all"}`);
+  console.log(`Check it with: cassie alerts test ${botId}`);
+  console.log(applyHint(botId, isDeployed(cfg)));
 }
 
 export function venueStatus(): void {

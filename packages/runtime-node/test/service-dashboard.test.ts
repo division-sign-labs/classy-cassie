@@ -112,3 +112,42 @@ describe("buildAlerter counting", () => {
     expect(counters.snapshot()).toMatchObject({ alertsSent: 1, alertsByKind: { test: 1 } });
   });
 });
+
+describe("buildAlerter webhook sink", () => {
+  it("posts to the webhook when a URL is set and counts the delivery", async () => {
+    const counters = new EngineCounters();
+    const config = BotConfigSchema.parse({ id: "b", venue: "polymarket", alerts: { webhook: { format: "json", kinds: ["exit"] } } });
+    const calls: Array<{ url: string; headers: Record<string, string> }> = [];
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = (async (url: string, init?: RequestInit) => {
+      calls.push({ url: String(url), headers: init?.headers as Record<string, string> });
+      return new Response(null, { status: 200 });
+    }) as typeof fetch;
+    try {
+      const alerter = buildAlerter({ config, account, statePath: "/dev/null", runtime: "local", webhookUrl: "https://hooks.example.com/b", webhookSecret: "s" }, log, counters);
+      await alerter.send({ kind: "entry", botId: "b", message: "filtered out by kinds" });
+      await alerter.send({ kind: "exit", botId: "b", message: "sold" });
+      await alerter.flush?.();
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+    expect(calls).toHaveLength(1);
+    expect(calls[0]!.url).toBe("https://hooks.example.com/b");
+    expect(calls[0]!.headers["x-cassie-signature"]).toMatch(/^v1=[0-9a-f]{64}$/);
+    expect(counters.snapshot()).toMatchObject({ alertsByKind: { entry: 1, exit: 1 } });
+  });
+
+  it("stays on the console sink without a URL", async () => {
+    const counters = new EngineCounters();
+    const originalFetch = globalThis.fetch;
+    const fetchSpy = vi.fn();
+    globalThis.fetch = fetchSpy as unknown as typeof fetch;
+    try {
+      const alerter = buildAlerter({ config: BotConfigSchema.parse({ id: "b", venue: "polymarket" }), account, statePath: "/dev/null", runtime: "local" }, log, counters);
+      await alerter.send({ kind: "test", botId: "b", message: "ping" });
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+    expect(fetchSpy).not.toHaveBeenCalled();
+  });
+});

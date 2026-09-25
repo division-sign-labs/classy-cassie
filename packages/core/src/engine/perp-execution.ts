@@ -1,9 +1,10 @@
 // packages/core/src/engine/perp-execution.ts
 // Durable, engine-owned perp execution. Strategy/model output never signs or places orders.
 import { createHash } from "node:crypto";
-import type { Action, Alerter, Fill, Logger, Order, OrderAck, OrderIntent, Position, StateStore, StrategyActionResult, VenueAccount, VenueAdapter } from "../types.js";
+import type { Action, AlertEvent, Alerter, Fill, Logger, Order, OrderAck, OrderIntent, Position, StateStore, StrategyActionResult, VenueAccount, VenueAdapter } from "../types.js";
 import type { PerpAccountSnapshot, PerpCashFlowResult, PerpCycle, PerpExecutionState, PerpMarketSnapshot } from "../perps.js";
 import { getJson, setJson } from "../state.js";
+import { closingPnl } from "../alerts/format.js";
 import { checkCapacity } from "../risk/capacity.js";
 import { formatBoundedHlPrice } from "../venues/hyperliquid-perps.js";
 import { HyperliquidOrderNotSubmittedError, HyperliquidOrderRejectedError, toCloid } from "../venues/hyperliquid.js";
@@ -230,10 +231,23 @@ export class PerpExecutor {
   private rememberTarget(c: Cycle, id: string): void {
     c.targetOrderIds = [...new Set([...(c.targetOrderIds ?? []), ...(c.targetOrderId ? [c.targetOrderId] : []), id])];
   }
-  private async alert(kind: "entry" | "exit" | "error" | "fill" | "skipped-order", message: string, data?: Record<string, unknown>): Promise<void> {
+  private async alert(
+    kind: "entry" | "exit" | "error" | "fill" | "skipped-order",
+    message: string,
+    data?: Record<string, unknown>,
+    extra: Pick<AlertEvent, "at" | "market" | "trade" | "pnl" | "reason"> = {},
+  ): Promise<void> {
     // The journal carries the reason even when alert delivery is misconfigured.
     if (kind === "error" || kind === "skipped-order") this.d.log.warn(`${message}${data?.detail !== undefined ? `: ${String(data.detail)}` : ""}`);
-    await this.d.alerter.send({ kind, botId: this.d.botId, message, data }).catch(e => this.d.log.warn(`alert failed: ${String(e)}`));
+    await this.d.alerter.send({
+      kind, botId: this.d.botId, message, data,
+      venue: this.d.adapter.id, strategy: "quotient-swing",
+      ...extra,
+      at: extra.at ?? new Date(this.now()).toISOString(),
+    }).catch(e => this.d.log.warn(`alert failed: ${String(e)}`));
+  }
+  private perpMarket(marketRef: string): NonNullable<AlertEvent["market"]> {
+    return { ref: marketRef, title: `${marketRef}-PERP` };
   }
   /**
    * Books a venue read outcome. One outage spans a contiguous run of failures. Either
@@ -424,7 +438,12 @@ export class PerpExecutor {
         target.targetFilledSize = (target.targetFilledSize ?? 0) + f.size;
         target.exitReason ??= "target";
         s.seenFills.push(f.id); s.fillSince = Math.max(s.fillSince, f.ts);
-        await this.alert("fill", `${f.side} ${f.size} ${f.marketRef} @ ${f.price} (take-profit)`, { fee: f.fee, orderId: f.orderId, reason: "target" });
+        const tpPnl = closingPnl(target.entryPrice, target.side, f.size, f.price, f.fee, "realized");
+        await this.alert("fill", `${f.side} ${f.size} ${f.marketRef} @ ${f.price} (take-profit)`, { fee: f.fee, orderId: f.orderId, reason: "target", fillId: f.id }, {
+          at: new Date(f.ts).toISOString(), market: this.perpMarket(f.marketRef),
+          trade: { side: f.side, size: f.size, price: f.price, notionalUsd: f.size * f.price, ...(f.fee !== undefined ? { feeUsd: f.fee } : {}),
+            ...(f.orderId ? { orderId: f.orderId } : {}), positionSide: target.side, filled: true },
+          ...(tpPnl ? { pnl: tpPnl } : {}), reason: "target" });
         continue;
       }
       const sub = Object.values(s.submissions).find(o => o.orderId === f.orderId);
@@ -432,7 +451,13 @@ export class PerpExecutor {
       const c = s.cycles.find(cycle => cycle.id === sub.cycleId);
       if (c && !sub.intent.reduceOnly) c.openedAt = Math.min(c.openedAt ?? f.ts, f.ts);
       s.seenFills.push(f.id); s.fillSince = Math.max(s.fillSince, f.ts);
-      await this.alert("fill", `${f.side} ${f.size} ${f.marketRef} @ ${f.price}`, { fee: f.fee, orderId: f.orderId });
+      const fillPnl = c && sub.intent.reduceOnly ? closingPnl(c.entryPrice, c.side, f.size, f.price, f.fee, "realized") : undefined;
+      await this.alert("fill", `${f.side} ${f.size} ${f.marketRef} @ ${f.price}`, { fee: f.fee, orderId: f.orderId, fillId: f.id }, {
+        at: new Date(f.ts).toISOString(), market: this.perpMarket(f.marketRef),
+        trade: { side: f.side, size: f.size, price: f.price, notionalUsd: f.size * f.price, ...(f.fee !== undefined ? { feeUsd: f.fee } : {}),
+          ...(f.orderId ? { orderId: f.orderId } : {}), ...(c ? { positionSide: c.side } : {}), filled: true },
+        ...(fillPnl ? { pnl: fillPnl } : {}),
+        ...(sub.intent.reduceOnly && c?.exitReason ? { reason: c.exitReason } : {}) });
     }
     s.seenFills = s.seenFills.slice(-20_000); s.seenFlows = s.seenFlows.slice(-20_000);
     const knownOrders = new Set(Object.values(s.submissions).map(x => x.orderId));
@@ -924,8 +949,15 @@ export class PerpExecutor {
         if ((ack.filledSize ?? 0) > 0) { c.openedAt ??= this.now(); c.filledSize = ack.filledSize!; c.entryPrice = ack.avgFillPrice ?? c.entryPrice; }
       }
       await this.save(s);
+      const placedPnl = intent.reduceOnly ? closingPnl(c.entryPrice, c.side, intent.size, intent.limitPrice, 0, "executable") : undefined;
+      const placedReason = c.exitReason ?? (typeof c.provenance?.reason === "string" ? c.provenance.reason : undefined);
       await this.alert(intent.reduceOnly ? "exit" : "entry", `${intent.side} ${intent.size} ${intent.marketRef} @ ${intent.limitPrice}`, {
-        orderId: ack.orderId, status: ack.status, stop: c.stopPx, stopRiskUsd: c.initialRiskUsd, leverage: c.leverage, reason: c.exitReason ?? c.provenance?.reason });
+        orderId: ack.orderId, status: ack.status, stop: c.stopPx, stopRiskUsd: c.initialRiskUsd, leverage: c.leverage, reason: c.exitReason ?? c.provenance?.reason }, {
+        at: new Date(sub.createdAt).toISOString(), market: this.perpMarket(intent.marketRef),
+        trade: { side: intent.side, size: intent.size, price: intent.limitPrice, notionalUsd: intent.size * intent.limitPrice,
+          orderId: ack.orderId, positionSide: c.side, ...(ack.status === "filled" ? { filled: true } : {}) },
+        ...(placedPnl ? { pnl: placedPnl } : {}),
+        ...(placedReason ? { reason: placedReason } : {}) });
       return { placed: true, placedNotional: intent.size * intent.limitPrice, placedSize: intent.size,
         limitPrice: intent.limitPrice, orderId: ack.orderId, clientId: intent.clientId, status: ack.status, filledSize: ack.filledSize, avgFillPrice: ack.avgFillPrice, placedAt: sub.createdAt };
     } catch (error) {
@@ -945,7 +977,8 @@ export class PerpExecutor {
       c.status = "closed"; c.closedAt = this.now();
     }
     await this.save(s);
-    await this.alert("skipped-order", `Order not placed for ${c.marketRef}: ${reason}`, { clientId: sub.intent.clientId, purpose: sub.intent.purpose });
+    await this.alert("skipped-order", `Order not placed for ${c.marketRef}: ${reason}`, { clientId: sub.intent.clientId, purpose: sub.intent.purpose }, {
+      market: this.perpMarket(c.marketRef), reason });
     return { placed: false, status: "rejected", clientId: sub.intent.clientId, placedNotional: 0, placedSize: 0, filledSize: 0 };
   }
 }

@@ -24,6 +24,8 @@ export interface LocalRunOpts {
   quotientToken?: string;
   telegramToken?: string;
   telegramChatId?: string;
+  webhookUrl?: string;
+  webhookSecret?: string;
   /** Surplus Intelligence key. Required by the agent strategy only. */
   surplusApiKey?: string;
   fixtureBooksPath?: string;

@@ -133,8 +133,15 @@ Every step happens in the terminal; you only leave it to copy-paste dashboard va
      rails.
    - **Hyperliquid** — derives the master address from the bot key. Agent approval happens
      in the funding flow, after the account exists on the L1.
-7. **Strategy** — prediction venues offer `signals` and `agent`; Polymarket additionally
-   offers `market-make`; Hyperliquid bots always run `signals`. `market-make` is the
+7. **Strategy** — prediction venues offer `signals`, `signals-hold` and `agent`; Polymarket
+   additionally offers `market-make`; Hyperliquid bots always run `signals`. `signals-hold`
+   is the `signals` strategy on its hold preset (`cassie strategy <botId> --preset hold`):
+   one fixed-dollar lot per market (`--lot-notional`, default $10, no top-ups), a 15pp entry
+   floor with no ceiling, markets resolving within 60 days (`--max-window-days`), sold only
+   after two consecutive forecasts put Q on the other side of 50% at any remaining edge,
+   otherwise held to the payout with no take-profit, time stop, collapse or adverse-cross
+   exit (each accepts `off`). Replayed on every published Polymarket signal 2026-06-29 to
+   09-16 it made about 20% per lot at 1.3 lots a day; the bot keeps the `signals` id. `market-make` is the
    deterministic Q-directed passive-inventory strategy, not a symmetric dealer; see §14.
    The `agent` strategy is the monitoring agent — plain-language mandate, Quotient
    research, model-selected entries, quarter-Kelly sizing; see §13. `signals` follows
@@ -203,7 +210,8 @@ Every step happens in the terminal; you only leave it to copy-paste dashboard va
    get your chat id from **@userinfobot**. The wizard offers a test ping. Or skip the
    prompts and put `TELEGRAM_BOT_TOKEN` and `TELEGRAM_CHAT_ID` in `.local.env`: run,
    deploy and `cassie alerts test` read them from there, and deploy forwards both to the
-   droplet.
+   droplet. Webhook alerts are configured separately with `cassie alerts webhook <botId>`
+   (§6).
 10. **Funding** — optionally continues straight into `cassie fund <botId>`.
 11. **Runtime** — offers to deploy the completed bot to a DigitalOcean droplet. Declining
     prints both the local-run and deploy-later commands. Reconfiguring a deployed bot
@@ -298,7 +306,8 @@ cassie trade <botId> --thesis [--save <file>] [--mappings <file>]   # develop a 
 cassie trade <botId> --from-thesis <file> [--mappings <file>]       # place a saved thesis
 cassie logs <botId> [--tail <n>] [-f] [--since '1 hour ago']   # the droplet's journal
 cassie logs <botId> --errors [--level error|warn|info]         # the engine's recorded errors
-cassie alerts test <botId>                   # Telegram ping
+cassie alerts test <botId>                   # a test alert to every configured sink
+cassie alerts webhook <botId> [--format json|slack|discord] [--kinds a,b] [--show] [--off]
 cassie venue status                          # adapters + verifiedAgainst dates
 cassie agent prompt <botId> [--set <text>]   # view/update the agent strategy's mandate
 cassie agent persona <botId> [--handle <h>] [--refresh]   # persona judgment layer ($1/fetch)
@@ -497,23 +506,97 @@ Two log sources, and they answer different questions:
   `<ISO> LEVEL [code] tick=<n> <message> {context}`. This table holds errors only, so
   `--level warn` and `--level info` match nothing here — use the journal for those.
 
-Telegram carries the events worth interrupting someone for. `cassie alerts test <botId>`
-sends a ping. The kinds, each prefixed with its own marker in the message:
+Alerts carry the events worth interrupting someone for. There are two sinks, Telegram and
+a webhook, and both use one layout: the trade and its P&L first, then the time, the market,
+the side and size, where the bot runs, and why. The debug metadata comes last, after a
+blank line.
 
-| kind | when |
-|---|---|
-| `entry` | a position opened |
-| `exit` | a position closed |
-| `flip` | a position reversed |
-| `fill` | an order filled |
-| `partial-fill-timeout` | a resting remainder hit its TTL |
-| `skipped-order` | the risk module refused an order, with the reason |
-| `deposit` | collateral credited |
-| `deploy` | a deploy finished |
-| `error` | an engine error, deduped by fingerprint for `alerts.errorDedupMin` minutes |
-| `deadman` | the venue cancelled resting orders because the runtime stopped heartbeating |
-| `resolution` | a prediction market resolved |
-| `test` | `cassie alerts test` |
+```
+🔵 Exit  +$12.40 (+8.3%)
+14:03 UTC · Sep 24
+Will Bitcoin close above $100k on Sep 30?
+YES · sold 120 @ 0.71 · $85.20 · fee $0.43 · maker
+polymarket · signals · wti-1
+take-profit: 71¢ bid reached
+
+orderId: "0x…"
+signalId: "sig_8f21"
+```
+
+P&L appears on exits only. On an order placement it is computed at the limit price against
+the held average price, before fees. On a fill it is realized, and the dollar figure is net
+of the fee. The percentage is the price return on the closed size before fees; for perps it
+is not the return on margin. P&L is omitted when the venue reports no average price. The
+market title comes from the venue's position, so a first entry into a new Polymarket market
+shows a shortened token id until the position exists. Kalshi shows the ticker and
+Hyperliquid shows `COIN-PERP`.
+
+`cassie alerts test <botId>` sends a test alert to every configured sink.
+
+| kind | when | emitted |
+|---|---|---|
+| `entry` | a position opened | yes |
+| `exit` | a position closed | yes |
+| `fill` | an order filled | yes |
+| `partial-fill-timeout` | a resting remainder hit its TTL | yes |
+| `skipped-order` | the risk module refused an order, with the reason | yes |
+| `error` | an engine error, deduped by fingerprint for `alerts.errorDedupMin` minutes | yes |
+| `resolution` | a prediction market resolved | yes |
+| `test` | `cassie alerts test` | yes |
+| `flip`, `deposit`, `deploy`, `deadman` | reserved | declared, not emitted by any code path today |
+
+### Webhook alerts
+
+`cassie alerts webhook <botId>` prompts for the URL and an optional signing secret and
+stores both in the bot's keystore. Alternatively, put `CASSIE_WEBHOOK_URL` and
+`CASSIE_WEBHOOK_SECRET` in the nearest `.local.env`; those win over the keystore. The URL is
+treated as a secret because Slack and Discord webhook URLs grant posting rights. Deploy
+forwards both to the droplet's environment file over SSH; a running bot picks up a change
+on the next `cassie deploy` or `cassie run`.
+
+- `--format json` (default) posts the structured event below. `slack` posts `{"text": …}`
+  and `discord` posts `{"content": …}`, both carrying the readable text above.
+- `--kinds entry,exit` limits delivery to those kinds. The default is every kind.
+- `--show` prints where each value comes from, never the values. `--off` removes the stored
+  URL and secret.
+
+The JSON body:
+
+```json
+{
+  "version": 1,
+  "id": "wti-1:exit:settlement:st_4:2026-09-24T14:03:00.000Z",
+  "kind": "exit",
+  "at": "2026-09-24T14:03:00.000Z",
+  "bot_id": "wti-1",
+  "venue": "polymarket",
+  "strategy": "signals",
+  "headline": "Exit +$12.40 (+8.3%)",
+  "text": "the readable layout, without the debug block",
+  "market": { "ref": "…", "title": "Will Bitcoin close above $100k on Sep 30?", "outcome": "YES" },
+  "trade": { "side": "SELL", "size": 120, "price": 0.71, "notional_usd": 85.2, "fee_usd": 0.43,
+             "order_id": "0x…", "maker": true, "position_side": "YES", "filled": true },
+  "pnl": { "usd": 12.4, "pct": 8.3, "basis": "realized" },
+  "reason": "take-profit: 71¢ bid reached",
+  "message": "the engine's one-line message",
+  "data": { "orderId": "0x…", "signalId": "sig_8f21" }
+}
+```
+
+`id` is stable for one emission; use it to drop repeats. Headers: `x-cassie-bot`,
+`x-cassie-event` (the kind), `x-cassie-event-id`, `x-cassie-delivery`, `x-cassie-attempt`,
+`x-cassie-timestamp` (Unix seconds), and with a secret
+`x-cassie-signature: v1=<hex HMAC-SHA256 of "<timestamp>.<raw body>">`. Verify it:
+
+```js
+const expected = crypto.createHmac("sha256", secret).update(`${timestamp}.${rawBody}`).digest("hex");
+const ok = signature === `v1=${expected}` && Math.abs(Date.now() / 1000 - timestamp) < 300;
+```
+
+Delivery is in order and never delays trading. Each alert gets three attempts; network
+errors, timeouts (10 seconds), 408, 429 and 5xx are retried, and any other response drops
+that alert with one log warning. At most 200 alerts wait in memory; past that the oldest are
+dropped. Shutdown waits up to 3 seconds for the queue to drain.
 
 ## 7. Wiring Quotient signals
 

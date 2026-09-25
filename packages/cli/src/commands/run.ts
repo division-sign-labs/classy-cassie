@@ -7,6 +7,7 @@ import { consoleLogger } from "@quotient-forecasting/cassie-core";
 import { runLocal } from "@quotient-forecasting/cassie-runtime-node";
 import { buildRuntimeCreds, requireAccount } from "../context.js";
 import { describeTelegramSettings, resolveTelegramSettings } from "../telegram-settings.js";
+import { describeWebhookSettings, resolveWebhookSettings } from "../webhook-settings.js";
 import { dirs, loadBotConfig, statePath } from "../paths.js";
 import { resolveQuotientToken } from "../quotient-token.js";
 import { resolveSurplusApiKey } from "../surplus-config.js";
@@ -31,6 +32,8 @@ export async function runBot(botId: string, opts: RunOpts): Promise<void> {
   const quotientToken = twoSidedMaker ? undefined : (await resolveQuotientToken(botId))?.token;
   const telegram = await resolveTelegramSettings(botId, cfg.alerts.telegram);
   console.log(pc.dim(describeTelegramSettings(telegram)));
+  const webhook = await resolveWebhookSettings(botId);
+  console.log(pc.dim(describeWebhookSettings(webhook)));
   let surplusApiKey: string | undefined;
   if (cfg.strategy.id === "agent") {
     const resolved = await resolveSurplusApiKey(botId);
@@ -80,6 +83,8 @@ export async function runBot(botId: string, opts: RunOpts): Promise<void> {
     quotientToken,
     telegramToken: telegram.token,
     telegramChatId: telegram.chatId,
+    webhookUrl: webhook.url,
+    webhookSecret: webhook.secret,
     surplusApiKey,
     log: consoleLogger(botId, opts.debug ? "debug" : "info"),
   });

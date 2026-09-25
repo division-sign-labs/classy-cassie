@@ -52,4 +52,24 @@ describe("manualOrder alerting", () => {
     const result = await engine.manualOrder({ marketRef: "fx-yes-1", outcome: "YES", side: "BUY", size: 1e9 });
     if (!result.placed) expect(alerter.ofKind("entry")).toHaveLength(0);
   });
+
+  it("carries the structured trade fields and executable P&L on a reducing order", async () => {
+    const { engine, alerter } = buildFixtureEngine();
+    const entry = await engine.manualOrder({ marketRef: "fx-yes-1", outcome: "YES", side: "BUY", size: 5 });
+    const [entryAlert] = alerter.ofKind("entry");
+    expect(entryAlert).toMatchObject({
+      venue: "fixture",
+      market: { ref: "fx-yes-1", outcome: "YES" },
+      trade: { side: "BUY", size: 5, orderId: entry.orderId },
+      reason: "manual order",
+    });
+    expect(Number.isFinite(Date.parse(entryAlert!.at!))).toBe(true);
+    expect(entryAlert!.pnl).toBeUndefined();
+
+    await engine.manualOrder({ marketRef: "fx-yes-1", outcome: "YES", side: "SELL", size: 5, reduceOnly: true });
+    const [exitAlert] = alerter.ofKind("exit");
+    expect(exitAlert!.trade).toMatchObject({ side: "SELL", size: 5, positionSide: "YES" });
+    expect(exitAlert!.pnl?.basis).toBe("executable");
+    expect(Number.isFinite(exitAlert!.pnl?.usd)).toBe(true);
+  });
 });

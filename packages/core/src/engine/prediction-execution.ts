@@ -3,6 +3,7 @@
 import type { BotConfig } from "../config.js";
 import type { Action, Alerter, Balance, Fill, Logger, Order, OrderBook, OrderIntent, Position, PredictionCancellationResult, PredictionExecutionMarket, Signal, StateStore, StrategyActionResult, VenueAccount, VenueAdapter } from "../types.js";
 import { getJson, setJson } from "../state.js";
+import { closingPnl } from "../alerts/format.js";
 import { isTransientVenueError, retryAfterMs } from "../venues/transient.js";
 import { checkCapacity } from "../risk/capacity.js";
 import { derivePredictionExecutionMetrics, type PredictionExecutionMetrics } from "./prediction-execution-metrics.js";
@@ -33,6 +34,8 @@ const SNAPSHOT_TIMEOUT_MS = 8_000;
 /** Cold starts resolve market metadata for every token in the settlement history before the caches warm. */
 const COLD_START_TIMEOUT_MS = 30_000;
 const SNAPSHOT_REUSE_MS = 3_000;
+/** Idle accounts do not need the five-second cadence used to supervise live execution. */
+const IDLE_RECONCILE_MS = 30_000;
 const DEFAULT_DEFER_MS = 5_000;
 const DEFER_LOG_INTERVAL_MS = 30_000;
 /** An ambiguous POST is resolved from venue evidence; after this long with no trace it is treated as never landed. */
@@ -202,6 +205,8 @@ export interface PredictionExecutorDeps {
 }
 
 export interface PredictionSupervisionOptions {
+  /** Scheduled passes can defer idle account reads; explicit supervision still forces a read. */
+  routine?: boolean;
   paused?: boolean;
   signals?: Signal[];
   refreshedAt?: number;
@@ -558,6 +563,8 @@ export class PredictionExecutor {
         }
       }
       await this.save();
+      if (options.routine && !this.deferral && this.lastReconciledAt !== undefined
+        && this.now() - this.lastReconciledAt < IDLE_RECONCILE_MS && !this.needsFastSupervision(c)) return;
       let snapshot: PortfolioSnapshot | undefined;
       try { await this.reconcile(); }
       catch (error) {
@@ -605,6 +612,15 @@ export class PredictionExecutor {
       if (snapshot && !skipped) this.clearDeferral();
       await this.save();
     });
+  }
+
+  private needsFastSupervision(c: Checkpoint): boolean {
+    return Object.values(c.parents).some(p => active(p)
+      || (p.terminalAt !== undefined && this.now() - p.terminalAt < FILL_OVERLAP_MS))
+      || Object.values(c.children).some(working)
+      || Object.keys(c.queuedExits).length > 0
+      || Object.values(c.settlements).some(fill => !["CONFIRMED", "FAILED"].includes(fill.status))
+      || this.unownedOrderIds.size > 0;
   }
 
   private children(p: Parent): Child[] { return p.children.map(id => this.checkpoint!.children[id]!).filter(Boolean); }
@@ -1082,11 +1098,25 @@ export class PredictionExecutor {
     for (const [settlementId, fill] of pending) {
       const child = c.children[fill.childId]!;
       const parent = c.parents[child.parentId]!;
+      const held = this.portfolio?.positions.find(p => parent.tokenId !== undefined && p.tokenId === parent.tokenId)
+        ?? this.portfolio?.positions.find(p => p.marketRef === parent.marketRef && (p.outcome ?? p.side) === parent.outcome);
+      const pnl = parent.side === "SELL"
+        ? closingPnl(held?.avgPrice, parent.outcome, fill.quantity, fill.price, fill.fee, "realized")
+          ?? (typeof parent.provenance?.executablePnlPct === "number" ? { pct: parent.provenance.executablePnlPct, basis: "executable" as const } : undefined)
+        : undefined;
       void this.rpc("fill notification", () => this.d.alerter!.send({
         kind: parent.side === "BUY" ? "entry" : "exit", botId: this.d.botId,
         message: `${parent.side === "BUY" ? "Entry" : "Exit"} filled: ${fill.quantity} ${parent.outcome} @ ${fill.price}`,
         data: { executionId: parent.id, orderId: child.venueId, settlementId, marketRef: parent.marketRef,
           feeUsd: fill.fee, maker: child.intent.postOnly === true, reason: parent.reason },
+        at: new Date(Number.isFinite(fill.ts) ? fill.ts : this.now()).toISOString(),
+        venue: this.d.adapter.id, strategy: this.d.config.strategy.id,
+        market: { ref: parent.marketRef, ...(held?.label ? { title: held.label } : {}), outcome: parent.outcome },
+        trade: { side: parent.side, size: fill.quantity, price: fill.price, notionalUsd: fill.quantity * fill.price,
+          ...(fill.fee !== undefined ? { feeUsd: fill.fee } : {}), ...(child.venueId ? { orderId: child.venueId } : {}),
+          maker: child.intent.postOnly === true, positionSide: parent.outcome, filled: true },
+        ...(pnl ? { pnl } : {}),
+        ...(parent.reason ? { reason: parent.reason } : {}),
       })).catch(error => this.d.log.warn("prediction fill notification failed", { error: String(error) }));
     }
   }

@@ -78,7 +78,8 @@ Ctrl-C cancels resting orders before the process exits.
 | `cassie passphrase remember <bot>` | Save a verified passphrase in the system credential store. |
 | `cassie passphrase forget <bot>` | Remove a saved passphrase. |
 | `cassie passphrase status <bot>` | Show whether a passphrase is saved. |
-| `cassie alerts test <bot>` | Send a Telegram ping. |
+| `cassie alerts test <bot>` | Send a test alert to every configured sink. |
+| `cassie alerts webhook <bot>` | Post alerts to a webhook URL: JSON, Slack, or Discord. |
 | `cassie venue status` | Adapters and when each was last verified. |
 
 ## Execution
@@ -372,6 +373,19 @@ remove the ceiling at any time:
 ```sh
 cassie strategy <bot> --max-entry-edge 25
 cassie strategy <bot> --max-entry-edge unlimited
+```
+
+`--preset hold` switches a signals bot to the hold-to-resolution rule: one fixed-dollar lot
+per market (`--lot-notional`, default $10, no top-ups), a 15pp entry floor with no ceiling,
+markets resolving within 60 days (`--max-window-days`; `off` disables), sold only after two
+consecutive forecasts put Q on the other side of 50% at any remaining edge, otherwise held
+to the payout with no take-profit and no time stop. `--preset recommended` restores the
+default rule. Each gated exit accepts `off`: `--q-collapse-pp off`,
+`--adverse-cross-confirmations off`, `--flip-exit-max-remaining-edge-pp off`.
+
+```sh
+cassie strategy <bot> --preset hold
+cassie strategy <bot> --lot-notional 25 --max-window-days 30
 ```
 
 The signals strategy does not cap quoted bid/ask spread; slippage and in-band depth

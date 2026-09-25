@@ -87,6 +87,36 @@ cassie strategy <botId> --take-profit-price 0.9 --adverse-cross-confirmations 2 
   --q-collapse-pp 30 --flip-confirmations 2 --flip-exit-max-remaining-edge-pp 5 --max-hold-days 7
 ```
 
+## Hold-to-resolution preset
+
+`cassie strategy <botId> --preset hold` (or `signals-hold` in `cassie init`) sets the
+same strategy to: one fixed-dollar lot per market (`allocationMode: fixed-notional`,
+`lotNotionalUsd`, no top-ups, no daily reset), entered on the first signal seen with at
+least 15pp of edge and no ceiling (`entrySpreadPp: 15`, `maxEntrySpreadPp: null`) and at
+most 60 days to resolution (`maxWindowDays: 60`); sold only after two consecutive
+committed forecasts put Q on the other side of 50%, at any remaining edge
+(`flipConfirmations: 2`, `flipExitMaxRemainingEdgePp: null`); otherwise held to the
+payout (`takeProfitPrice: null`, `maxHoldDays: null`, `qCollapsePp: null`,
+`adverseCrossConfirmations: null`). A market that resolves within the near-resolution
+window is not sized down (`nearResolutionDays: null`).
+
+Replayed on every published Polymarket signal from 2026-06-29 to 2026-09-16 (1,048
+signals, 222 markets; `q-trade-analysis/signal-daily-hold-report.md`): +19.6% per lot
+with open lots marked (95% range +4.3 to +36.0), +17.7% on the last three weeks alone,
+about 1.3 lots a day, a lot held 8 days at the median. The literal rule, every signal a
+lot and a one-forecast flip, made +1.5% per lot because repeat signals piled into a few
+markets; the three changes above are the ones that held in both halves of the tape. The
+90c take-profit and the 7-day cap lower the mean on this book, so the preset turns them
+off; the 15pp floor is where the marginal lot stops losing money, and above 20pp the book
+gets too thin to trade daily.
+
+```sh
+cassie strategy <botId> --preset hold
+cassie strategy <botId> --lot-notional 25          # stake per market
+cassie strategy <botId> --max-window-days 30       # tighter window; off disables
+cassie strategy <botId> --flip-exit-max-remaining-edge-pp off --q-collapse-pp off --adverse-cross-confirmations off
+```
+
 ## Pending-entry reservation and order provenance
 
 An accepted entry is reserved durably by order id with its market, parent event, and
@@ -112,6 +142,7 @@ cassie strategy <botId> --near-resolution-days 3 --near-resolution-size-cut-pct 
 cassie strategy <botId> --daily-budget 100 --position-budget-pct 25
 cassie strategy <botId> --max-entry-edge unlimited
 cassie strategy <botId> --scenario-exit on
+cassie strategy <botId> --preset hold
 ```
 
 Every entry still passes the engine's per-order, liquidity, slippage, and volume guardrails.

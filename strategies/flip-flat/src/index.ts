@@ -2,7 +2,9 @@
 // Reference strategy (§8): buy, sell at the take-profit price floor, and
 // enforce a maximum holding period. Behind `scenarioExitEnabled`, held
 // prediction positions run the confirmed seven-day signal-exit state machine
-// around those two exits.
+// around those two exits. The `hold` preset (fixed-notional lots, no
+// take-profit, no time stop, flip exit at any remaining edge, resolution
+// window) is the same strategy with those knobs set; see the README.
 // Pure decisions — the engine sizes, risk-checks, and executes.
 
 import { z } from "zod";
@@ -23,8 +25,12 @@ import {
 } from "@quotient-forecasting/cassie-core";
 
 const FlipFlatConfigObjectSchema = z.object({
-  /** Portfolio targets are the new default; legacy configs retain their daily-budget allocator. */
-  allocationMode: z.enum(["portfolio-kelly", "daily-budget"]).default("portfolio-kelly"),
+  /**
+   * Portfolio targets are the default; legacy configs retain their daily-budget
+   * allocator. `fixed-notional` places `lotNotionalUsd` on every entry, one lot
+   * per market, with no top-ups and no daily reset (the hold preset).
+   */
+  allocationMode: z.enum(["portfolio-kelly", "daily-budget", "fixed-notional"]).default("portfolio-kelly"),
   /** Fraction of full Kelly used for binary prediction-market targets. */
   kellyFraction: z.number().positive().max(1).default(0.25),
   /** Maximum capital-at-risk in one market as a percentage of current equity. */
@@ -45,12 +51,20 @@ const FlipFlatConfigObjectSchema = z.object({
    * the ceiling.
    */
   maxEntrySpreadPp: z.number().positive().nullable().default(30),
+  /**
+   * Entry-only resolution window: skip a signal whose market resolves more than
+   * this many days after now. A signal with no resolution date is skipped while
+   * the window is set. Null disables the check.
+   */
+  maxWindowDays: z.number().positive().nullable().default(null),
   /** Optional position-count cap; null means no artificial strategy cap. */
   topN: z.number().int().positive().nullable().default(null),
   /** Cumulative entry notional allowed per UTC day. */
   dailyBudgetUsd: z.number().positive().default(100),
   /** Desired notional for each entry as a percentage of the daily budget. */
   positionBudgetPct: z.number().positive().max(100).default(25),
+  /** Dollars placed on every entry in fixed-notional mode, before liquidity and risk caps. */
+  lotNotionalUsd: z.number().positive().default(10),
   /** Entry-only floor after sizing and capacity caps. Exits are never subject to it. */
   minEntryNotional: z.number().nonnegative().default(1),
   /** Explicit marketRefs, or "from-signals" to trade whatever is signaled. */
@@ -82,16 +96,16 @@ const FlipFlatConfigObjectSchema = z.object({
   adverseCrossEdgePp: z.number().default(0),
   /** Adverse cross: executable P&L at or below this percent. */
   adverseCrossMaxPnlPct: z.number().default(0),
-  /** Adverse cross: distinct committed forecasts with a non-positive spread required to exit. */
-  adverseCrossConfirmations: z.number().int().positive().default(2),
-  /** Q collapse: immediate exit once held-side Q has retreated by at least this many pp from entry. */
-  qCollapsePp: z.number().positive().default(30),
+  /** Adverse cross: distinct committed forecasts with a non-positive spread required to exit; null turns the exit off. */
+  adverseCrossConfirmations: z.number().int().positive().nullable().default(2),
+  /** Q collapse: immediate exit once held-side Q has retreated by at least this many pp from entry; null turns the exit off. */
+  qCollapsePp: z.number().positive().nullable().default(30),
   /** Q collapse: only when remaining edge is at or below this many pp. */
   qCollapseMaxRemainingEdgePp: z.number().default(0),
   /** Q flip: consecutive distinct committed forecasts below 50% on the held side required to confirm. */
   flipConfirmations: z.number().int().positive().default(2),
-  /** Q flip: exit a confirmed flip once remaining edge is at or below this many pp. */
-  flipExitMaxRemainingEdgePp: z.number().default(5),
+  /** Q flip: exit a confirmed flip once remaining edge is at or below this many pp; null exits on confirmation at any edge. */
+  flipExitMaxRemainingEdgePp: z.number().nullable().default(5),
   /** Fee rate, in basis points, deducted from executable sell proceeds in the P&L gates. */
   exitFeeBps: z.number().nonnegative().default(0),
   /**
@@ -371,6 +385,7 @@ export function evaluateScenarioExit(input: ScenarioExitInput, cfg: ScenarioExit
 
   if (input.resolved) return { reason: "market_resolved", ...metrics };
   if (
+    cfg.qCollapsePp !== null &&
     qRetreatPp !== undefined &&
     remainingEdgePp !== undefined &&
     qRetreatPp + EPSILON >= cfg.qCollapsePp &&
@@ -379,6 +394,7 @@ export function evaluateScenarioExit(input: ScenarioExitInput, cfg: ScenarioExit
     return { reason: "q_collapse", ...metrics };
   }
   if (
+    cfg.adverseCrossConfirmations !== null &&
     remainingEdgePp !== undefined &&
     pnl !== undefined &&
     remainingEdgePp <= cfg.adverseCrossEdgePp + EPSILON &&
@@ -389,8 +405,8 @@ export function evaluateScenarioExit(input: ScenarioExitInput, cfg: ScenarioExit
   }
   if (
     input.flipConfirmed &&
-    remainingEdgePp !== undefined &&
-    remainingEdgePp <= cfg.flipExitMaxRemainingEdgePp + EPSILON
+    (cfg.flipExitMaxRemainingEdgePp === null ||
+      (remainingEdgePp !== undefined && remainingEdgePp <= cfg.flipExitMaxRemainingEdgePp + EPSILON))
   ) {
     return { reason: "q_flip", ...metrics };
   }
@@ -528,7 +544,7 @@ export function formatScenarioExitReason(t: ScenarioExitTelemetry, cfg: Pick<Fli
   return (
     `${t.exitReason ?? "hold"}: entryQ ${fmtPct(t.entryQPct)} → Q ${fmtPct(t.currentQPct)}, ` +
     `mid ${fmtPx(t.midHeld)}, bid ${fmtPx(t.executableBid)}, edge ${fmtPp(t.remainingEdgePp)}, ` +
-    `retreat ${fmtPp(t.qRetreatPp)}, pnl ${pnl}, adverse ${t.adverseCrossConfirmations}/${cfg.adverseCrossConfirmations}, ` +
+    `retreat ${fmtPp(t.qRetreatPp)}, pnl ${pnl}, adverse ${t.adverseCrossConfirmations}/${cfg.adverseCrossConfirmations ?? "off"}, ` +
     `flip ${t.flipConfirmations}/${cfg.flipConfirmations}, age ${t.positionAgeDays.toFixed(2)}d, ` +
     `forecasts [${t.confirmingForecastIds.join(", ")}]`
   );
@@ -613,6 +629,7 @@ export class FlipFlatStrategy implements Strategy {
     await this.syncAdaptiveEntries(ctx, cfg, reservations, now);
     const holdStarts = await this.syncHoldStarts(ctx, now, reservations.markets);
     let remainingBudgetUsd = Number.POSITIVE_INFINITY;
+    let fixedCashUsd: number | undefined;
     if (cfg.allocationMode === "daily-budget") {
       const budget = await this.dailyBudgetState(ctx, now);
       const utcDay = new Date(now).toISOString().slice(0, 10);
@@ -708,9 +725,10 @@ export class FlipFlatStrategy implements Strategy {
       const held = ctx.positions.filter((position) => position.marketRef === marketRef && position.size > 0);
       const isTopUp = held.length > 0;
 
-      // The legacy allocator never added to an existing position. Portfolio
-      // mode may top up only when every existing lot is on the signaled side.
-      if (isTopUp && cfg.allocationMode === "daily-budget") continue;
+      // The legacy and fixed-notional allocators never add to an existing
+      // position. Portfolio mode may top up only when every existing lot is on
+      // the signaled side.
+      if (isTopUp && cfg.allocationMode !== "portfolio-kelly") continue;
       if (isTopUp && held.some((position) => position.side !== sig.side)) continue;
 
       // One active order per market: its unfilled commitment is already
@@ -755,6 +773,36 @@ export class FlipFlatStrategy implements Strategy {
           },
         });
         remainingBudgetUsd -= notional;
+        openCount += 1;
+        continue;
+      }
+
+      if (cfg.allocationMode === "fixed-notional") {
+        if (!(await this.entryOk(ctx, cfg, sig, spreadPp))) continue;
+        fixedCashUsd ??= await this.availableCashUsd(ctx);
+        const notional = this.fixedEntryNotional(ctx, cfg, sig, fixedCashUsd);
+        if (notional <= 0) continue;
+        actions.push({
+          kind: "enter",
+          marketRef,
+          side: sig.side,
+          notional,
+          minNotional: cfg.minEntryNotional,
+          reason: `signal ${sig.id}${spreadPp !== undefined ? ` spread ${spreadPp.toFixed(1)}pp` : ""}`,
+          provenance: {
+            allocationMode: "fixed-notional",
+            signalId: sig.id,
+            signalTs: sig.ts,
+            side: sig.side,
+            ...(sig.prob !== undefined ? { qHeld: sig.prob } : {}),
+            signalRefPrice: sig.refPrice,
+            ...(spreadPp !== undefined ? { signalEdgePp: spreadPp } : {}),
+            ...(sig.endsAt !== undefined ? { resolvesAt: sig.endsAt } : {}),
+            lotNotionalUsd: cfg.lotNotionalUsd,
+            requestedNotionalUsd: notional,
+          },
+        });
+        fixedCashUsd -= notional;
         openCount += 1;
         continue;
       }
@@ -1716,6 +1764,7 @@ export class FlipFlatStrategy implements Strategy {
       );
       return undefined;
     }
+    if (!this.withinEntryWindow(ctx, cfg, sig)) return undefined;
 
     // Entry eligibility asks whether the position could be unwound near the
     // touch. This is separate from the engine's ask-side entry capacity and
@@ -1816,6 +1865,60 @@ export class FlipFlatStrategy implements Strategy {
     return { notional, eventRef, liveEdgePp, provenance };
   }
 
+  /**
+   * Entry-only resolution window. A market that resolves more than
+   * `maxWindowDays` after now is skipped, as is one with no known resolution
+   * date while the window is set; held positions are never affected.
+   */
+  private withinEntryWindow(ctx: StrategyContext, cfg: FlipFlatConfig, sig: Signal): boolean {
+    if (cfg.maxWindowDays === null) return true;
+    if (sig.endsAt === undefined) {
+      ctx.log.info(`${sig.marketRef} has no resolution date; maxWindowDays ${cfg.maxWindowDays} cannot be checked, skipping`);
+      return false;
+    }
+    const daysOut = (sig.endsAt - ctx.now()) / DAY_MS;
+    if (daysOut > cfg.maxWindowDays + EPSILON) {
+      ctx.log.info(`${sig.marketRef} resolves in ${daysOut.toFixed(1)}d > maxWindowDays ${cfg.maxWindowDays}; skipping`);
+      return false;
+    }
+    return true;
+  }
+
+  /** Spendable cash after entries still reserved by working buy executions. */
+  private async availableCashUsd(ctx: StrategyContext): Promise<number> {
+    let available = ctx.equity;
+    try {
+      const balances = await ctx.venue.balances();
+      available = balances.reduce((s, x) => s + x.available, 0);
+    } catch {
+      /* fall back to equity */
+    }
+    available -= ctx.execution?.parents.filter((parent) => parent.side === "BUY")
+      .reduce((sum, parent) => sum + parent.reservedNotionalUsd, 0) ?? 0;
+    return available;
+  }
+
+  /**
+   * USD notional for a fixed-notional entry: the configured lot, bounded by
+   * spendable cash, with the same near-resolution cut as the other allocators.
+   */
+  private fixedEntryNotional(ctx: StrategyContext, cfg: FlipFlatConfig, sig: Signal, cashUsd: number): number {
+    const sizeFactor = nearResolutionSizeFactor(sig.endsAt, ctx.now(), cfg);
+    const notional = Math.min(cfg.lotNotionalUsd, cashUsd * 0.95) * sizeFactor;
+    if (sizeFactor < 1) {
+      ctx.log.info(
+        `${sig.marketRef} resolves within ${cfg.nearResolutionDays}d; lot sized down ${cfg.nearResolutionSizeCutPct}% to $${notional.toFixed(2)}`,
+      );
+    }
+    if (notional < cfg.minEntryNotional) {
+      ctx.log.info(
+        `lot $${notional.toFixed(2)} < minEntryNotional $${cfg.minEntryNotional.toFixed(2)} (cash $${cashUsd.toFixed(2)}); skipping ${sig.marketRef}`,
+      );
+      return 0;
+    }
+    return notional;
+  }
+
   /** USD notional for a legacy entry, bounded by today's remaining budget and cash. */
   private async dailyEntryNotional(
     ctx: StrategyContext,
@@ -1861,6 +1964,7 @@ export class FlipFlatStrategy implements Strategy {
   ): Promise<boolean> {
     if (sig.side === "YES" || sig.side === "NO") {
       if (spreadPp === undefined || spreadPp < cfg.entrySpreadPp) return false;
+      if (!this.withinEntryWindow(ctx, cfg, sig)) return false;
       if (cfg.maxEntrySpreadPp !== null && spreadPp > cfg.maxEntrySpreadPp) {
         ctx.log.info(
           `signal edge ${spreadPp.toFixed(1)}pp > maxEntrySpreadPp ${cfg.maxEntrySpreadPp.toFixed(1)}pp; skipping ${sig.marketRef}`,

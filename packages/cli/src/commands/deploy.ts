@@ -11,6 +11,7 @@ import { QuotientSwingConfigSchema } from "@quotient-forecasting/strategy-quotie
 import { QUOTIENT_POLYMARKET_FEE_DISCLOSURE, type BotConfig } from "@quotient-forecasting/cassie-core";
 import { buildRuntimeCreds, confirm } from "../context.js";
 import { describeTelegramSettings, resolveTelegramSettings } from "../telegram-settings.js";
+import { describeWebhookSettings, resolveWebhookSettings } from "../webhook-settings.js";
 import { atomicWritePrivateFile, dirs, loadBotConfig, saveBotConfig } from "../paths.js";
 import { resolveQuotientToken } from "../quotient-token.js";
 import { resolveSurplusApiKey, verifySurplusApiKey } from "../surplus-config.js";
@@ -582,6 +583,8 @@ export async function runDeploy(botId: string, opts: DeployOpts = {}): Promise<v
   }
   const telegram = await resolveTelegramSettings(botId, cfg.alerts.telegram);
   console.log(pc.dim(describeTelegramSettings(telegram)));
+  const webhook = await resolveWebhookSettings(botId);
+  console.log(pc.dim(describeWebhookSettings(webhook)));
 
   const dashboard = await resolveDashboardConfig(cfg, opts);
   if (dashboard.passwordOrigin) console.log(pc.dim(`dashboard password: ${dashboard.passwordOrigin}`));
@@ -763,6 +766,8 @@ export async function runDeploy(botId: string, opts: DeployOpts = {}): Promise<v
     ["QUOTIENT_API_TOKEN", quotientToken],
     ["TELEGRAM_BOT_TOKEN", telegram.token ?? null],
     ["TELEGRAM_CHAT_ID", telegram.chatId ?? null],
+    ["CASSIE_WEBHOOK_URL", webhook.url ?? null],
+    ["CASSIE_WEBHOOK_SECRET", webhook.secret ?? null],
     ["SURPLUS_API_KEY", surplusApiKey],
     ...dashboardEnvLines(deployedCfg),
   ];

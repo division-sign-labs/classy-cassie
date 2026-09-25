@@ -131,7 +131,7 @@ shows current state only and says so; redeploy to start recording.
 | `packages/core`        | venue adapters, wallet/keystore, strategy engine, risk module, signal client, alerts, thesis sizing |
 | `packages/cli`         | the `cassie` binary: wizard, wallet, fund, run, deploy, status, logs, dashboard, portfolio, trade, orders, ticket |
 | `packages/runtime-node` | the bot process: engine loop, SQLite state, unix-socket control API. Same code for `cassie run` and a droplet |
-| `strategies/flip-flat` | the `signals` strategy: follow Quotient signals; prediction positions exit at a 90¢ bid, a confirmed Q flip, or the seven-day maximum hold |
+| `strategies/flip-flat` | the `signals` strategy: follow Quotient signals; prediction positions exit at a 90¢ bid, a confirmed Q flip, or the seven-day maximum hold; its `hold` preset (`--preset hold`) buys one fixed lot per market at 15pp+ edge and holds to resolution unless Q flips |
 | `skills/cassie`        | agent-facing operator manual ([SKILL.md](skills/cassie/SKILL.md)) + thesis policy (`thesis/mappings.json`) |
 | `fixtures/`            | signal + order-book fixtures for the offline e2e                     |
 

@@ -10,7 +10,7 @@ import { registerSplitsSigner, runFund } from "./commands/fund.js";
 import { runWithdraw } from "./commands/withdraw.js";
 import { runStrategy } from "./commands/strategy.js";
 import { runBot } from "./commands/run.js";
-import { alertsTest, showOrders, showPortfolio, venueStatus } from "./commands/ops.js";
+import { alertsTest, alertsWebhook, showOrders, showPortfolio, venueStatus } from "./commands/ops.js";
 import { runSsh, showLogs, showStatus } from "./commands/monitor.js";
 import { runTrade } from "./commands/trade.js";
 import { runDeploy } from "./commands/deploy.js";
@@ -201,17 +201,26 @@ program
   .action(wrap(showLogs));
 
 const alerts = program.command("alerts").description("alerting");
-alerts.command("test <botId>").description("send a Telegram test ping").action(wrap(alertsTest));
+alerts.command("test <botId>").description("send a test alert to every configured sink").action(wrap(alertsTest));
+alerts
+  .command("webhook <botId>")
+  .description("post this bot's alerts to a webhook URL (prompts for the URL and an optional signing secret)")
+  .option("--format <format>", "json (default), slack, or discord")
+  .option("--kinds <kinds>", "comma-separated alert kinds to deliver, default all")
+  .option("--show", "print the current webhook settings")
+  .option("--off", "turn webhook alerts off and remove the stored URL and secret")
+  .action(wrap(alertsWebhook));
 
 program
   .command("strategy <botId>")
   .description("view or change strategy settings")
+  .option("--preset <recommended|hold>", "replace the settings with a named preset: recommended (quarter-Kelly, 90¢ take-profit, 7-day hold) or hold (fixed lot per market, 15pp+ edge, sell only on a confirmed Q flip, otherwise hold to resolution)")
   .option("--execution <adaptive|legacy>", "Polymarket signals: maker-first managed limits or legacy crossing limits")
   .option("--entry-deadline-seconds <seconds>", "Polymarket signals: maker phase of an adaptive entry (default 120)")
   .option("--entry-crossing-seconds <seconds>", "Polymarket signals: after the deadline, take the offer inside the price bound for this long (default 60; 0 keeps entries maker-only)")
   .option("--exit-passive-seconds <seconds>", "Polymarket signals: passive exit phase before bounded immediate execution (default 60; 0 skips)")
   .option("--top <n|unlimited>", "optional signal-position cap; widest eligible edges enter first")
-  .option("--allocation-mode <mode>", "portfolio-kelly or daily-budget")
+  .option("--allocation-mode <mode>", "portfolio-kelly, daily-budget or fixed-notional")
   .option("--kelly-fraction <fraction>", "fraction of full Kelly, from 0 to 1 (0.25 = quarter Kelly)")
   .option("--market-cap-pct <pct>", "maximum portfolio equity allocated to one prediction market")
   .option("--event-cap-pct <pct>", "maximum portfolio equity allocated across one parent event")
@@ -220,7 +229,9 @@ program
   .option("--min-exit-depth-2c-usd <usd>", "minimum held-side bid depth within 2¢ for an entry; 0 disables")
   .option("--daily-budget <usd>", "legacy mode: maximum entry notional placed per UTC day")
   .option("--position-budget-pct <pct>", "legacy mode: percentage of the daily budget requested per entry")
+  .option("--lot-notional <usd>", "fixed-notional mode: dollars placed on every entry, one lot per market")
   .option("--max-entry-edge <pp|unlimited>", "maximum forecast entry edge; unlimited removes the guardrail")
+  .option("--max-window-days <days|off>", "skip signals whose market resolves more than this many days out; off disables")
   .option("--min-entry-notional <usd>", "entry-only floor after sizing and capacity caps")
   .option("--take-profit-price <price|off>", "sell a prediction position once the held-side bid reaches this price (0–1); off disables")
   .option("--max-hold-days <days|unlimited>", "unconditional maximum holding period")
@@ -232,11 +243,11 @@ program
   .option("--scenario-exit <on|off>", "run the seven-day signal-exit state machine around the take-profit and hold deadline")
   .option("--adverse-cross-edge-pp <pp>", "adverse cross: remaining edge at or below this counts as non-positive")
   .option("--adverse-cross-max-pnl-pct <pct>", "adverse cross: executable P&L at or below this")
-  .option("--adverse-cross-confirmations <n>", "adverse cross: distinct committed forecasts required")
-  .option("--q-collapse-pp <pp>", "Q collapse: immediate exit once held-side Q retreated this far from entry")
+  .option("--adverse-cross-confirmations <n|off>", "adverse cross: distinct committed forecasts required; off disables the exit")
+  .option("--q-collapse-pp <pp|off>", "Q collapse: immediate exit once held-side Q retreated this far from entry; off disables the exit")
   .option("--q-collapse-max-remaining-edge-pp <pp>", "Q collapse: only when remaining edge is at or below this")
   .option("--flip-confirmations <n>", "Q flip: consecutive distinct forecasts below 50% required")
-  .option("--flip-exit-max-remaining-edge-pp <pp>", "Q flip: exit once remaining edge is at or below this")
+  .option("--flip-exit-max-remaining-edge-pp <pp|off>", "Q flip: exit once remaining edge is at or below this; off exits on confirmation at any edge")
   .option("--exit-fee-bps <bps>", "fee deducted from executable sell proceeds in the P&L gates")
   .option("--exit-retry-seconds <seconds>", "how long a submitted exit stays pending before a still-held position may resubmit")
   .option("--pending-entry-reservation-seconds <seconds>", "how long an accepted entry stays reserved against caps while the venue shows neither position nor order")
