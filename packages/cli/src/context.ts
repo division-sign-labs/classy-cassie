@@ -335,7 +335,9 @@ export async function adapterFor(cfg: BotConfig, opts: { needCreds?: boolean; fi
     return undefined;
   });
   return createAdapter(cfg.venue, { urls: withOperatorRpc(cfg), creds, fixtureBooks: opts.fixtureBooks,
-    perpDex: cfg.strategy.id === "quotient-swing" ? "xyz" : undefined });
+    perpDex: cfg.strategy.id === "quotient-swing" ? "xyz" : undefined,
+    additionalPerpDexs: cfg.strategy.id === "quotient-swing" ? [""] : undefined,
+    allowUnifiedPerps: cfg.strategy.id === "quotient-swing" });
 }
 
 export async function getKeystoreSecret(botId: string, role: string): Promise<string | null> {

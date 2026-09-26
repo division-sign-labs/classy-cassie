@@ -28,8 +28,14 @@ export function allocateSwing(c: SwingCandidate, m: SwingMarketSnapshot, s: Swin
     .reduce((sum, l) => sum + l.price * l.size, 0);
   maximum = Math.min(maximum, depth / cfg.minDepthMultiple);
   const share = (s.nav * cfg.totalMarginPct / 100 - marginUsed) / Math.max(1, Math.floor(slots));
+  const dex = (ref: string) => ref.includes(":") ? ref.split(":")[0]! : "";
+  const marketDex = dex(c.marketRef);
+  const dexAvailable = s.sharedCollateral ? s.availableMarginUsd
+    : s.availableMarginByDex?.[marketDex] ?? (marketDex === "xyz" && !s.availableMarginByDex ? s.availableMarginUsd : 0);
+  const pending = entries.filter(e => e.status !== "held");
   const marginCap = Math.min(s.nav * cfg.singleMarginPct / 100, share,
-    Math.max(0, s.availableMarginUsd - entries.filter(e => e.status !== "held").reduce((sum, e) => sum + e.marginUsd, 0)));
+    Math.max(0, s.availableMarginUsd - pending.reduce((sum, e) => sum + e.marginUsd, 0)),
+    Math.max(0, dexAvailable - pending.filter(e => dex(e.marketRef) === marketDex).reduce((sum, e) => sum + e.marginUsd, 0)));
   if (maximum <= 0 || marginCap <= 0) return "portfolio_capacity";
   let best: SwingAllocation | undefined;
   for (let leverage = 1; leverage <= Math.min(cfg.maxLeverage, m.maxLeverage); leverage++) {

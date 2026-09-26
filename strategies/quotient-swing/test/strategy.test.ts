@@ -57,6 +57,35 @@ describe("configuration", () => {
 });
 
 describe("outlook eligibility", () => {
+  it("respects main-DEX collateral when the account still uses Standard mode", () => {
+    const markets = ["BTC", "ETH"].map(coin => market({ assetKey: `crypto:${coin.toLowerCase()}`, marketRef: coin, assetClass: "crypto",
+      outlooks: [outlook({ id: `outlook-${coin}`, assetKey: `crypto:${coin.toLowerCase()}`, marketRef: coin })],
+      book: { ...market().book, marketRef: coin } }));
+    const s = snapshot({ markets, coveredAssetKeys: markets.map(m => m.assetKey), availableMarginByDex: { xyz: 960, "": 40 } });
+    const result = reduceSwing(s, createSwingState(1000), cfg);
+    const entries = result.decisions.filter(d => d.kind === "enter");
+    expect(entries.length).toBeGreaterThan(0);
+    expect(entries.reduce((sum, d) => sum + d.marginUsd, 0)).toBeLessThanOrEqual(40.000001);
+    expect(reduceSwing({ ...s, availableMarginByDex: { xyz: 1000, "": 0 } }, createSwingState(1000), cfg)
+      .decisions.filter(d => d.kind === "enter")).toEqual([]);
+    expect(reduceSwing({ ...s, availableMarginByDex: undefined }, createSwingState(1000), cfg)
+      .decisions.filter(d => d.kind === "enter")).toEqual([]);
+    expect(buildCandidate({ ...markets[0]!, marketRef: "SOL" }, s, cfg)).toBe("instrument_unavailable");
+    expect(buildCandidate({ ...markets[0]!, marketRef: "xyz:BTC" }, s, cfg)).toBe("instrument_unavailable");
+  });
+
+  it("allocates BTC, ETH and equities from one shared budget in Unified mode", () => {
+    const markets = [market(), ...["BTC", "ETH"].map(coin => market({ assetKey: `crypto:${coin.toLowerCase()}`, marketRef: coin, assetClass: "crypto",
+      outlooks: [outlook({ id: `outlook-${coin}`, assetKey: `crypto:${coin.toLowerCase()}`, marketRef: coin })],
+      book: { ...market().book, marketRef: coin } }))];
+    const config = QuotientSwingConfigSchema.parse({ totalMarginPct: 30, singleMarginPct: 20, totalStopRiskPct: 90, themeStopRiskPct: 90, themeNotionalNav: 10 });
+    const s = snapshot({ markets, coveredAssetKeys: markets.map(m => m.assetKey), sharedCollateral: true, availableMarginUsd: 250 });
+    const entries = reduceSwing(s, createSwingState(1000), config).decisions.filter(d => d.kind === "enter");
+    expect(entries.map(d => d.candidate.marketRef).sort()).toEqual(["BTC", "ETH", "xyz:NVDA"]);
+    expect(entries.reduce((sum, d) => sum + d.marginUsd, 0)).toBeLessThanOrEqual(250.000001);
+    expect(entries.every(d => d.marginUsd <= 200)).toBe(true);
+  });
+
   it("requires a published direction whose gap sits inside the configured sigma window", () => {
     expect(entryProblem(outlook({ directionalSide: "neutral" }), cfg)).toBe("neutral_horizon");
     expect(entryProblem(outlook({ medianPrice: 102 }), cfg)).toBe("gap_below_min");

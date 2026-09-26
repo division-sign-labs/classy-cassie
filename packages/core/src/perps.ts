@@ -31,15 +31,23 @@ export interface PerpMarketSnapshot {
   ts: number;
 }
 
-export interface PerpAccountSnapshot {
+export interface PerpDexBalance {
+  dex: string;
   /** Authoritative DEX account value, already including unrealized P&L. */
   equity: number;
   availableCollateral: number;
   marginUsed: number;
   grossNotional: number;
+}
+
+export interface PerpAccountSnapshot extends PerpDexBalance {
   abstraction: string;
   collateral: "USDC";
-  dex: string;
+  /** Separate Standard-mode balances, whose totals equal the account fields. Multi-DEX snapshots use dex="multi". */
+  dexBalances?: PerpDexBalance[];
+  /** Unified accounts have one authoritative USDC balance covering these DEXs. */
+  sharedCollateral?: boolean;
+  dexes?: string[];
   positions: Position[];
   openOrders: Order[];
   ts: number;
@@ -50,6 +58,8 @@ export interface PerpCashFlow {
   ts: number;
   /** Positive deposits / negative withdrawals into this DEX; excludes trading and funding. */
   amount: number;
+  /** Includes both sides of internal DEX transfers; their aggregate is zero. */
+  byDex?: Record<string, number>;
 }
 
 export interface PerpCashFlowResult {

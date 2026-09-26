@@ -550,7 +550,7 @@ export async function runInit(): Promise<void> {
   ];
   if (venue === "kalshi") strategyChoices.unshift({ value: "kalshi-commodities", title: "kalshi-commodities", description: "oil, gold, BTC, copper and silver; diversified exact-contract Q with bounded limits" });
   if (venue === "hyperliquid") strategyChoices.splice(0, strategyChoices.length,
-    { value: "quotient-swing", title: "quotient-swing", description: "1–5 day equity/commodity perps, NAV sizing, native stops" },
+    { value: "quotient-swing", title: "quotient-swing", description: "1–5 day equity, commodity, BTC and ETH perps; shared NAV sizing" },
     { value: "signals", title: "signals", description: "legacy Quotient signal follower" });
   if (existing?.strategy.id === "quotient-swing") {
     const swing = strategyChoices.find(choice => choice.value === "quotient-swing");
@@ -588,7 +588,7 @@ export async function runInit(): Promise<void> {
     strategyConfig = QuotientSwingConfigSchema.parse(existing?.strategy.id === "quotient-swing" ? existingStrategy : {});
     tickIntervalMin = Number(strategyConfig.tickIntervalMin);
     console.log("Running or deploying starts live trading.");
-    console.log("Collateral: Standard account mode, xyz USDC balance.");
+    console.log("Collateral: Unified USDC for shared BTC, ETH and xyz trading; Standard mode uses each DEX’s available balance.");
     console.log("Planned stop risk: 5–10% of NAV per trade.");
     console.log("Gross exposure limit: 4× NAV.");
     console.log("Gaps and liquidation can exceed planned losses.");

@@ -6,7 +6,7 @@ import type { PerpAccountSnapshot, PerpCashFlowResult, PerpCycle, PerpExecutionS
 import { getJson, setJson } from "../state.js";
 import { closingPnl } from "../alerts/format.js";
 import { checkCapacity } from "../risk/capacity.js";
-import { formatBoundedHlPrice } from "../venues/hyperliquid-perps.js";
+import { formatBoundedHlPrice, hyperliquidDex } from "../venues/hyperliquid-perps.js";
 import { HyperliquidOrderNotSubmittedError, HyperliquidOrderRejectedError, toCloid } from "../venues/hyperliquid.js";
 import { isTransientVenueError, retryAfterMs } from "../venues/transient.js";
 import { RefusalLog } from "./refusal-log.js";
@@ -74,6 +74,9 @@ interface Ledger extends Omit<PerpExecutionState, "cycles"> {
   seenFlows: string[];
   cumulativeCashFlow: number;
   lastEquity: number;
+  /** Persist the accounted DEX set so adding a funded DEX is capital, not trading profit. */
+  accountDexes?: string[];
+  sharedCollateral?: boolean;
   /** Local read-budget backpressure clears after a complete reconciliation, independently of safety halts. */
   deferredRead?: "cash-flow-deferred" | "fill-history-deferred";
   /** A failed final fill read remains required even after the venue becomes flat. */
@@ -296,8 +299,18 @@ export class PerpExecutor {
     const { adapter, account } = this.d;
     if (!adapter.perpAccountSnapshot) throw new Error("venue lacks authoritative perp accounting");
     const a = await adapter.perpAccountSnapshot(account);
-    if (a.abstraction !== "standard" || a.dex !== "xyz" || a.collateral !== "USDC") throw new Error("Quotient Swing requires a Standard-mode xyz USDC account");
+    const balances = a.dexBalances ?? [a];
+    const dexes = a.sharedCollateral ? a.dexes ?? [] : balances.map(b => b.dex);
+    if (a.abstraction !== (a.sharedCollateral ? "unified" : "standard") || a.collateral !== "USDC" || !dexes.length
+      || dexes.some(dex => dex !== "xyz" && dex !== "") || new Set(dexes).size !== dexes.length
+      || (a.sharedCollateral && a.dexBalances !== undefined)
+      || a.dex !== (dexes.length > 1 ? "multi" : dexes[0]!)) throw new Error("Quotient Swing requires Standard or Unified main/xyz USDC accounts");
     if (![a.equity, a.availableCollateral, a.marginUsed, a.grossNotional].every(n => Number.isFinite(n) && n >= 0) || !Number.isFinite(a.ts) || this.now() - a.ts > 60_000 || a.ts > this.now() + 5_000) throw new Error("invalid or stale perp account snapshot");
+    for (const key of ["equity", "availableCollateral", "marginUsed", "grossNotional"] as const) {
+      if (balances.some(b => !Number.isFinite(b[key]) || b[key] < 0)
+        || Math.abs(balances.reduce((sum, b) => sum + b[key], 0) - a[key]) > 1e-6) throw new Error("perp DEX balances do not match account totals");
+    }
+    if ([...a.positions, ...a.openOrders].some(p => !dexes.includes(hyperliquidDex(p.marketRef)))) throw new Error("perp exposure is outside account DEX scope");
     return a;
   }
   /** The operator stop: entries halt and working entries are canceled; protection keeps running. */
@@ -370,15 +383,46 @@ export class PerpExecutor {
     // Keep the prior equity and cursor together until the full cash-flow interval is known.
     // Otherwise a delayed withdrawal can look like a loss and latch the drawdown halt.
     if (flow?.complete) {
+      const balances = a.dexBalances ?? [a];
+      const dexes = a.sharedCollateral ? a.dexes! : balances.map(b => b.dex);
+      const previousDexes = s.accountDexes ?? (s.lastEquity > 0 ? ["xyz"] : dexes);
+      if (previousDexes.some(dex => !dexes.includes(dex))) throw new Error("cannot remove a DEX from existing perp accounting");
+      if (s.sharedCollateral && !a.sharedCollateral) throw new Error("cannot split an existing shared collateral ledger");
+      const migrating = a.sharedCollateral && !s.sharedCollateral && s.lastEquity > 0;
+      const added = a.sharedCollateral ? [] : balances.filter(b => !previousDexes.includes(b.dex));
       let netFlow = 0;
       for (const f of flow.flows) {
         if (s.seenFlows.includes(f.id)) continue;
         if (!Number.isFinite(f.amount) || !Number.isFinite(f.ts)) throw new Error("invalid perp cash flow");
-        netFlow += f.amount; s.seenFlows.push(f.id); s.flowSince = Math.max(s.flowSince, f.ts);
+        if (f.byDex && (Object.values(f.byDex).some(v => !Number.isFinite(v))
+          || Math.abs(Object.values(f.byDex).reduce((sum, v) => sum + v, 0) - f.amount) > 1e-6)) throw new Error("invalid DEX cash flow");
+        if (added.length && !f.byDex) throw new Error("DEX expansion requires cash-flow attribution");
+        netFlow += added.length ? previousDexes.reduce((sum, dex) => sum + (f.byDex?.[dex] ?? 0), 0) : f.amount;
+      }
+      // A mode change must be made while flat and preserve the reconciled balance.
+      // Do not silently absorb extra spot capital or reset the existing loss history.
+      if (migrating && (a.positions.length || a.openOrders.length || s.cycles.some(c => c.status !== "closed")
+        || Math.abs(a.equity - s.lastEquity - netFlow) > .01)) {
+        throw new Error("shared collateral migration requires a flat account with unchanged reconciled equity");
+      }
+      for (const f of flow.flows) {
+        if (!s.seenFlows.includes(f.id)) s.seenFlows.push(f.id);
+        s.flowSince = Math.max(s.flowSince, f.ts);
       }
       // Unitize deposits/withdrawals: they change capital, not the return high-water mark.
       if (s.lastEquity > 0 && netFlow !== 0) s.highWaterEquity *= Math.max(0, (s.lastEquity + netFlow) / s.lastEquity);
       s.cumulativeCashFlow += netFlow;
+      if (added.length) {
+        const addedEquity = added.reduce((sum, b) => sum + b.equity, 0);
+        const oldEquity = a.equity - addedEquity;
+        s.highWaterEquity = Math.max(s.highWaterEquity, oldEquity);
+        // Preserve the existing drawdown percentage when bringing another DEX into scope.
+        if (oldEquity > 0) s.highWaterEquity *= a.equity / oldEquity;
+        else if (s.highWaterEquity > 0) { s.halted = true; s.haltReason = "drawdown"; s.highWaterEquity += addedEquity; }
+        s.cumulativeCashFlow += addedEquity;
+      }
+      s.accountDexes = dexes;
+      s.sharedCollateral = a.sharedCollateral === true;
       s.highWaterEquity = Math.max(s.highWaterEquity, a.equity);
       s.lastEquity = a.equity;
       s.drawdownPct = s.highWaterEquity > 0 ? Math.max(0, 100 * (1 - a.equity / s.highWaterEquity)) : 0;
@@ -789,7 +833,10 @@ export class PerpExecutor {
       s.halted = true; s.haltReason = "drawdown"; await this.save(s); return refuse("halted: drawdown");
     }
     const m = await adapter.perpMarketSnapshot(account, action.marketRef);
-    if (m.instrument.dex !== "xyz" || m.instrument.marketRef !== action.marketRef || m.instrument.collateralToken !== 0 || !m.instrument.active || a.equity <= 0) return refuse("instrument inactive, wrong dex or collateral, or no equity");
+    const instrumentDex = hyperliquidDex(action.marketRef);
+    const supported = instrumentDex === "xyz" || (instrumentDex === "" && ["BTC", "ETH"].includes(action.marketRef));
+    const dexBalance = a.sharedCollateral ? a : (a.dexBalances ?? [a]).find(b => b.dex === instrumentDex);
+    if (!supported || !dexBalance || m.instrument.dex !== instrumentDex || m.instrument.marketRef !== action.marketRef || m.instrument.collateralToken !== 0 || !m.instrument.active || a.equity <= 0) return refuse("instrument inactive, wrong dex or collateral, or no equity");
     const now = this.now(); const bookAge = this.n("maxBookAgeSec", 30) * 1000;
     const horizon = (action.anchorAt! - now) / 3_600_000;
     if (horizon < Math.max(24, this.n("minHorizonHours", 24)) || horizon > Math.min(120, this.n("maxHorizonHours", 120))) return refuse("horizon outside the configured bounds", { horizonHours: horizon });
@@ -844,12 +891,14 @@ export class PerpExecutor {
       (c.fundingStressHourly ?? 0) * Math.max(0, (c.anchorAt - now) / 3_600_000)), 0);
     // Standard-mode withdrawable collateral need not reserve unfilled orders.
     // Deduct locally reserved, not-yet-posted margin before issuing another ticket.
-    const pendingMargin = active.reduce((sum, c) => {
+    const pendingMarginFor = (cycles: Cycle[]) => cycles.reduce((sum, c) => {
       const p = a.positions.find(p => p.marketRef === c.marketRef);
       const held = (p?.size ?? 0) * (p?.currentPrice ?? c.entryPrice);
       return sum + Math.max(0, reserved(c) - held) / c.leverage + reserved(c) *
         (c.fundingStressHourly ?? 0) * Math.max(0, (c.anchorAt - now) / 3_600_000);
     }, 0);
+    const pendingMargin = pendingMarginFor(active);
+    const dexPendingMargin = pendingMarginFor(active.filter(c => hyperliquidDex(c.marketRef) === instrumentDex));
     const marginPerUnit = 1 / leverage + funding;
     const themes = [...new Set(action.themes ?? [])];
     if (!themes.length || themes.some(t => typeof t !== "string" || t.trim() === "")) return refuse("entry names no themes");
@@ -859,7 +908,8 @@ export class PerpExecutor {
       a.equity * this.n("riskMaxPct", 10) / 100 / perUnitRisk,
       a.equity * this.n("singleMarginPct", 15) / 100 / marginPerUnit,
       (a.equity * this.n("totalMarginPct", 50) / 100 - margin) / marginPerUnit,
-      Math.max(0, a.availableCollateral - pendingMargin) / marginPerUnit);
+      Math.max(0, a.availableCollateral - pendingMargin) / marginPerUnit,
+      Math.max(0, dexBalance.availableCollateral - dexPendingMargin) / marginPerUnit);
     for (const theme of themes) {
       const peers = active.filter(c => c.themes.includes(theme));
       const exposure = peers.reduce((v, c) => v + reserved(c), 0);

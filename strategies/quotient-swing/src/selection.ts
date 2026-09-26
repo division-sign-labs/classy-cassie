@@ -45,7 +45,10 @@ export function outlookSide(o: SwingOutlook): SwingSide | undefined {
 }
 
 export function marketProblem(m: SwingMarketSnapshot, now: number, config: QuotientSwingConfig): string | undefined {
-  if (!m.active || !m.isolatedSupported || !m.marketRef.startsWith("xyz:")) return "instrument_unavailable";
+  const supported = m.assetClass === "crypto"
+    ? (m.assetKey === "crypto:btc" && m.marketRef === "BTC") || (m.assetKey === "crypto:eth" && m.marketRef === "ETH")
+    : m.marketRef.startsWith("xyz:");
+  if (!m.active || !m.isolatedSupported || !supported) return "instrument_unavailable";
   const bid = m.book.bids[0]?.price, ask = m.book.asks[0]?.price;
   if (!bid || !ask || !finitePositive(bid) || !finitePositive(ask) || ask <= bid || !finitePositive(m.priceTick)
     || m.book.bids.some((l, i, xs) => !finitePositive(l.price) || !finitePositive(l.size) || (i > 0 && l.price > xs[i - 1]!.price))

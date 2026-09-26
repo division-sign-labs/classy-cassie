@@ -56,7 +56,7 @@ commodities.command("history <botId>").option("--from <iso>", "inclusive start")
 commodities.command("resume <botId>").option("--acknowledge-loss-reset", "reset reviewed loss limits while flat")
   .description("explicitly activate automated trading").action(wrap(commodityResume));
 
-const swing = program.command("swing").description("Quotient equity and commodity perps");
+const swing = program.command("swing").description("Quotient equity, commodity, BTC and ETH perps");
 swing.command("configure <botId>").option("--config <file>", "strategy JSON")
   .action(wrap(configureSwing));
 swing.command("status <botId>").description("NAV, risk, research, and protection").action(wrap(swingStatus));

@@ -14,7 +14,7 @@ const clone = <T>(v: T): T => structuredClone(v);
 export interface SwingCoveredAsset {
   assetKey: string;
   marketRef: string;
-  assetClass: "equity" | "commodity";
+  assetClass: "equity" | "commodity" | "crypto";
   name: string;
 }
 export interface SwingExcludedOutlook { assetKey: string; outlookId: string | null; reason: string }
@@ -49,12 +49,13 @@ export function normalizeSwingAssets(value: unknown): SwingCoveredAsset[] {
     const a = row(raw), key = str(a?.assetKey), name = str(a?.name);
     if (!a || !key || !name || !Array.isArray(a.identifiers)) continue;
     const assetClass = key.startsWith("commodity:") && a.asset_type === "commodity" ? "commodity"
-      : key.startsWith("company:") && ["company", "equity"].includes(String(a.asset_type)) ? "equity" : null;
+      : key.startsWith("company:") && ["company", "equity"].includes(String(a.asset_type)) ? "equity"
+      : ["crypto:btc", "crypto:eth"].includes(key) && a.asset_type === "crypto" ? "crypto" : null;
     if (!assetClass) continue;
     const coins = [...new Set(a.identifiers.flatMap((rawId: unknown) => {
       const id = row(rawId);
       return id?.platform === "hyperliquid" && id.kind === "coin" && typeof id.value === "string"
-        && /^xyz:[A-Za-z0-9._-]+$/.test(id.value) ? [id.value] : [];
+        && (assetClass === "crypto" ? id.value === key.slice(7).toUpperCase() : /^xyz:[A-Za-z0-9._-]+$/.test(id.value)) ? [id.value] : [];
     }))];
     // Ambiguous mappings remain unavailable; no arbitrary first-symbol selection.
     if (coins.length === 1) candidates.push({ assetKey: key, name, assetClass, marketRef: coins[0]! });

@@ -31,12 +31,13 @@ function state(extra: Record<string, unknown> = {}) {
 function order(extra: Record<string, unknown> = {}) {
   return { oid: 42, coin: "xyz:AAPL", cloid: toCloid("stop-one"), side: "A", limitPx: "85.5", origSz: "2", sz: "2", timestamp: NOW - 86_400_000, isTrigger: true, isPositionTpsl: true, triggerPx: "90", orderType: "Stop Market", reduceOnly: true, ...extra };
 }
-function fixture(options: { scoped?: boolean } = {}) {
+function fixture(options: { scoped?: boolean; additionalPerpDexs?: string[]; allowUnifiedPerps?: boolean } = {}) {
   let now = NOW;
   const info = {
     perpDexs: vi.fn().mockResolvedValue([null, { name: "other" }, { name: "xyz" }]),
     metaAndAssetCtxs: vi.fn().mockResolvedValue([metadata(), [context()]]),
     userAbstraction: vi.fn().mockResolvedValue("disabled"),
+    spotClearinghouseState: vi.fn().mockResolvedValue({ balances: [{ coin: "USDC", token: 0, total: "1000", hold: "40" }], tokenToAvailableAfterMaintenance: [[0, "950"]] }),
     clearinghouseState: vi.fn().mockResolvedValue(state()),
     frontendOpenOrders: vi.fn().mockResolvedValue([]),
     l2Book: vi.fn().mockImplementation(async () => ({ coin: "xyz:AAPL", time: now - 100, levels: [[{ px: "99.9", sz: "1000" }], [{ px: "100.1", sz: "1000" }]] })),
@@ -59,12 +60,87 @@ function fixture(options: { scoped?: boolean } = {}) {
     scheduleCancel: vi.fn().mockResolvedValue({ status: "ok" }),
     cancel: vi.fn().mockResolvedValue({ status: "ok", response: { type: "cancel", data: { statuses: ["success"] } } }),
   };
-  const adapter = new HyperliquidAdapter({ urls: VenueUrlsSchema.parse({}), ...(options.scoped === false ? {} : { perpDex: "xyz" }) }, {
+  const adapter = new HyperliquidAdapter({ urls: VenueUrlsSchema.parse({}), ...(options.scoped === false ? {} : { perpDex: "xyz" }), additionalPerpDexs: options.additionalPerpDexs, allowUnifiedPerps: options.allowUnifiedPerps }, {
     info: info as unknown as InfoClient, exchange: exchange as unknown as ExchangeClient, now: () => now, actionGapMs: 0,
   });
   return { adapter, info, exchange, setTime: (ts: number) => { now = ts; } };
 }
 const intent: OrderIntent = { marketRef: "xyz:AAPL", side: "BUY", size: 2.12349, limitPrice: 100.129, tif: "GTC", clientId: "entry-one", postOnly: true };
+
+describe("Hyperliquid main and xyz accounts", () => {
+  function multi() {
+    const h = fixture({ additionalPerpDexs: ["", "xyz", ""], allowUnifiedPerps: true });
+    h.info.metaAndAssetCtxs.mockImplementation(async (request: { dex?: string }) => [
+      { ...metadata(), universe: [universe(request.dex ? "xyz:AAPL" : "BTC")] }, [context()],
+    ]);
+    h.info.clearinghouseState.mockImplementation(async ({ dex }: { dex?: string }) => state({
+      marginSummary: { accountValue: dex ? "800" : "200", totalMarginUsed: "20", totalNtlPos: "200" },
+      withdrawable: dex ? "780" : "180", assetPositions: [position({ coin: dex ? "xyz:AAPL" : "BTC" })],
+    }));
+    h.info.frontendOpenOrders.mockImplementation(async ({ dex }: { dex?: string }) => [order({ coin: dex ? "xyz:AAPL" : "BTC", oid: dex ? 42 : 43 })]);
+    return h;
+  }
+  it("aggregates NAV once, preserving separate collateral, positions and protective orders", async () => {
+    const { adapter, info } = multi();
+    const a = await adapter.perpAccountSnapshot(ACCOUNT);
+    expect(a).toMatchObject({ dex: "multi", equity: 1000, availableCollateral: 960, marginUsed: 40, grossNotional: 400,
+      dexBalances: [{ dex: "xyz", equity: 800, availableCollateral: 780 }, { dex: "", equity: 200, availableCollateral: 180 }] });
+    expect(a.positions.map(p => p.marketRef)).toEqual(["xyz:AAPL", "BTC"]);
+    expect(a.openOrders.map(o => o.marketRef)).toEqual(["xyz:AAPL", "BTC"]);
+    expect(info.clearinghouseState).toHaveBeenCalledTimes(2);
+    expect((await adapter.perpInstruments()).map(i => i.assetId)).toEqual([120000, 0]);
+    await expect(adapter.balances(ACCOUNT)).resolves.toEqual([{ asset: "USDC", total: 1000, available: 960 }]);
+    expect(await adapter.portfolioScope(ACCOUNT)).toMatchObject({ dex: "multi", dexes: ["xyz", ""], fundingBalance: 0, fundingAvailable: 0 });
+  });
+  it("rejects a stale or mismatched DEX response instead of double-counting collateral", async () => {
+    const h = multi();
+    h.info.clearinghouseState.mockResolvedValue(state());
+    await expect(h.adapter.perpAccountSnapshot(ACCOUNT)).rejects.toThrow("another DEX");
+    h.info.clearinghouseState.mockResolvedValue(state({ time: NOW - 60_001, assetPositions: [] }));
+    await expect(h.adapter.perpAccountSnapshot(ACCOUNT)).rejects.toThrow("stale");
+  });
+  it("nets transfers between the two DEXs to zero and records true external deposits once", async () => {
+    const { adapter, info } = multi();
+    info.userNonFundingLedgerUpdates.mockResolvedValue([
+      { hash: "transfer", time: NOW, delta: { type: "send", user: USER, destination: USER, sourceDex: "xyz", destinationDex: "", token: "USDC:0x1", amount: "100" } },
+      { hash: "deposit", time: NOW, delta: { type: "deposit", usdc: "50" } },
+    ]);
+    const result = await adapter.perpCashFlows(ACCOUNT, NOW - 3_600_000);
+    expect(result.complete).toBe(true);
+    expect(result.flows.map(f => [f.amount, f.byDex])).toEqual([[0, { xyz: -100, "": 100 }], [50, { xyz: 0, "": 50 }]]);
+  });
+  it("uses one spot USDC balance in Unified mode, ignoring overlapping DEX equities", async () => {
+    const { adapter, info } = multi();
+    info.userAbstraction.mockResolvedValue("unifiedAccount");
+    const a = await adapter.perpAccountSnapshot(ACCOUNT);
+    expect(a).toMatchObject({ abstraction: "unified", sharedCollateral: true, dexes: ["xyz", ""], equity: 1000,
+      availableCollateral: 950, marginUsed: 60, grossNotional: 400 });
+    expect(a.dexBalances).toBeUndefined();
+    expect(a.positions.map(p => p.marketRef)).toEqual(["xyz:AAPL", "BTC"]);
+    await expect(adapter.balances(ACCOUNT)).resolves.toEqual([{ asset: "USDC", total: 1000, available: 950 }]);
+  });
+  it("refuses unified collateral without a confirmed available amount", async () => {
+    const { adapter, info } = multi();
+    info.userAbstraction.mockResolvedValue("unifiedAccount");
+    info.spotClearinghouseState.mockResolvedValue({ balances: [], tokenToAvailableAfterMaintenance: [] });
+    await expect(adapter.perpAccountSnapshot(ACCOUNT)).rejects.toThrow("unconfirmed");
+  });
+  it("nets unified internal spot/perp transfers and keeps external cash flows", async () => {
+    const { adapter, info } = multi();
+    info.userAbstraction.mockResolvedValue("unifiedAccount");
+    info.userNonFundingLedgerUpdates.mockResolvedValue([
+      { hash: "move", time: NOW, delta: { type: "send", user: USER, destination: USER, sourceDex: "xyz", destinationDex: "spot", token: "USDC:0x1", amount: "100" } },
+      { hash: "class", time: NOW, delta: { type: "accountClassTransfer", usdc: "100", toPerp: true } },
+      { hash: "in", time: NOW, delta: { type: "spotTransfer", user: OTHER, destination: USER, token: "USDC", amount: "50" } },
+      { hash: "out", time: NOW, delta: { type: "withdraw", usdc: "10" } },
+    ]);
+    const result = await adapter.perpCashFlows(ACCOUNT, NOW - 1000);
+    expect(result.complete).toBe(true);
+    expect(result.flows.map(f => f.amount)).toEqual([50, -10]);
+    info.userNonFundingLedgerUpdates.mockResolvedValue([{ hash: "unknown", time: NOW, delta: { type: "newOperation", amount: "1" } }]);
+    expect((await adapter.perpCashFlows(ACCOUNT, NOW - 1000)).complete).toBe(false);
+  });
+});
 
 describe("Hyperliquid order rejection receipts", () => {
   const reason = "Post only order would have immediately matched, bbo was 4395.5@4395.6. asset=110003";

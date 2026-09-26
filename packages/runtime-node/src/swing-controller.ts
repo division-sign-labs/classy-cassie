@@ -117,7 +117,8 @@ export class SwingController {
       for (const held of heldRecords) {
         if (!held?.assetKey || !held.marketRef || assets.some(a => a.marketRef === held.marketRef)) continue;
         const known = this.markets.find(m => m.marketRef === held.marketRef);
-        const assetClass = known?.assetClass ?? (held.assetKey.startsWith("company:") ? "equity" : held.assetKey.startsWith("commodity:") ? "commodity" : undefined);
+        const assetClass = known?.assetClass ?? (held.assetKey.startsWith("company:") ? "equity" : held.assetKey.startsWith("commodity:") ? "commodity"
+          : ["crypto:btc", "crypto:eth"].includes(held.assetKey) ? "crypto" : undefined);
         if (assetClass) assets.push({ assetKey: held.assetKey, marketRef: held.marketRef, name: held.assetKey, assetClass });
       }
       const trackedMarkets = new Set(assets.map(asset => asset.marketRef));
@@ -184,6 +185,8 @@ export class SwingController {
     const targetClientIds = new Set(cycles.flatMap(c => { const id = c.targetClientId ? cloid(c.targetClientId) : undefined; return id ? [id] : []; }));
     const snapshot: SwingSnapshot = { now, nav: account.equity,
       netCashFlow: 0, availableMarginUsd: account.availableCollateral,
+      sharedCollateral: account.sharedCollateral,
+      availableMarginByDex: account.sharedCollateral ? undefined : Object.fromEntries((account.dexBalances ?? [account]).map(b => [b.dex, b.availableCollateral])),
       coveredAssetKeys: this.data.cached()?.assets.map(a => a.assetKey) ?? [], markets: this.markets,
       positions: account.positions.filter(p => p.side === "LONG" || p.side === "SHORT").map(p => ({ ...p, side: p.side as "LONG" | "SHORT", isolatedMarginUsd: p.marginUsed })),
       openOrders: account.openOrders.map(o => ({ id: o.id, marketRef: o.marketRef, clientId: o.clientId,

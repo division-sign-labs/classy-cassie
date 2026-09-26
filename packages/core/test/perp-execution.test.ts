@@ -125,6 +125,58 @@ function harness(config: Record<string, unknown> = {}) {
 }
 
 describe("protected perp executor", () => {
+  function shared(h: ReturnType<typeof harness>) {
+    const snapshot = h.mock.perpAccountSnapshot.getMockImplementation()!;
+    h.mock.perpAccountSnapshot.mockImplementation(async () => ({ ...await snapshot(), abstraction: "unified", dex: "multi",
+      dexes: ["xyz", ""], sharedCollateral: true }));
+    h.mock.perpMarketSnapshot.mockImplementation(async (_acct, ref) => {
+      const m = h.market(ref); m.instrument.dex = ref.includes(":") ? "xyz" : ""; return m;
+    });
+  }
+  it("reserves one shared margin budget across equity, BTC and ETH orders", async () => {
+    const h = harness({ totalMarginPct: 15, singleMarginPct: 15, totalStopRiskPct: 90, themeStopRiskPct: 90 });
+    shared(h); await h.executor.reconcile();
+    for (const marketRef of ["xyz:AAPL", "BTC", "ETH"]) {
+      expect(await h.executor.execute(entry({ marketRef, clientId: `entry-${marketRef}` }))).toMatchObject({ placed: true });
+    }
+    const placed = h.entries().map(([, order]) => order);
+    expect(placed.map(o => o.marketRef)).toEqual(["xyz:AAPL", "BTC", "ETH"]);
+    expect(placed.reduce((sum, o) => sum + o.size * o.limitPrice / 5, 0)).toBeLessThanOrEqual(150.000001);
+    expect(placed[2]!.size).toBeLessThan(placed[0]!.size);
+    h.fillEntry("entry-BTC", placed[1]!.size); await h.executor.reconcile();
+    expect([...h.orders.values()].some(o => o.marketRef === "BTC" && o.reduceOnly && o.isTrigger)).toBe(true);
+    expect(await h.executor.execute(entry({ marketRef: "SOL", clientId: "sol" }))).toEqual({ placed: false });
+  });
+  it("preserves a legacy drawdown when the flat account migrates to shared collateral", async () => {
+    const h = harness(); await h.executor.reconcile();
+    h.setEquity(900); await h.executor.reconcile();
+    shared(h); await h.executor.reconcile();
+    const saved = JSON.parse((await h.store.get(PERP_EXECUTION_KEY))!);
+    expect(saved).toMatchObject({ highWaterEquity: 1000, lastEquity: 900, accountDexes: ["xyz", ""], sharedCollateral: true });
+    expect(saved.drawdownPct).toBeCloseTo(10);
+    const restarted = h.restart(); await restarted.reconcile();
+    expect((await restarted.status()).drawdownPct).toBeCloseTo(10);
+  });
+  it("refuses a shared migration with unexplained new capital", async () => {
+    const h = harness(); await h.executor.reconcile();
+    shared(h); h.setEquity(1100);
+    await expect(h.executor.reconcile()).rejects.toThrow("unchanged reconciled equity");
+    expect(h.mock.placeOrder).not.toHaveBeenCalled();
+    expect(JSON.parse((await h.store.get(PERP_EXECUTION_KEY))!).highWaterEquity).toBe(1000);
+  });
+  it("adds main-DEX capital without erasing the existing Standard-mode drawdown", async () => {
+    const h = harness(); await h.executor.reconcile(); h.setEquity(900); await h.executor.reconcile();
+    const snapshot = h.mock.perpAccountSnapshot.getMockImplementation()!;
+    h.mock.perpAccountSnapshot.mockImplementation(async () => ({ ...await snapshot(), equity: 1100, availableCollateral: 1100, dex: "multi",
+      dexBalances: [{ dex: "xyz", equity: 900, availableCollateral: 900, marginUsed: 0, grossNotional: 0 },
+        { dex: "", equity: 200, availableCollateral: 200, marginUsed: 0, grossNotional: 0 }] }));
+    await h.executor.reconcile();
+    const saved = JSON.parse((await h.store.get(PERP_EXECUTION_KEY))!);
+    expect(saved.drawdownPct).toBeCloseTo(10);
+    expect(saved.cumulativeCashFlow).toBe(200);
+    await h.executor.reconcile();
+    expect(JSON.parse((await h.store.get(PERP_EXECUTION_KEY))!).cumulativeCashFlow).toBe(200);
+  });
   it("trades a fresh ledger as soon as the first reconciliation in this process completes", async () => {
     const h = harness();
     expect(await h.executor.execute(entry())).toEqual({ placed: false });

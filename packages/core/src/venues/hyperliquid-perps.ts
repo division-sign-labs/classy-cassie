@@ -106,3 +106,19 @@ export function hyperliquidDexCashFlow(delta: Record<string, unknown>, user: str
   }
   return undefined;
 }
+
+/** Unified USDC includes spot and every USDC perp DEX; transfers within it are not capital flows. */
+export function hyperliquidUnifiedCashFlow(delta: Record<string, unknown>, user: string): number | undefined {
+  const same = (a: unknown) => typeof a === "string" && a.toLowerCase() === user.toLowerCase();
+  const usdc = () => typeof delta.token === "string" && delta.token.split(":")[0] === "USDC";
+  if (delta.type === "send" || delta.type === "spotTransfer") {
+    if (typeof delta.user !== "string" || typeof delta.destination !== "string" || typeof delta.token !== "string") throw new Error("invalid unified cash-flow identity");
+    if (!usdc()) return undefined;
+    return (Number(same(delta.destination)) - Number(same(delta.user))) * nonnegativeNumber(delta.amount, "cash flow amount");
+  }
+  if (delta.type === "accountClassTransfer" || delta.type === "activateDexAbstraction") return 0;
+  if (delta.type === "liquidation") return undefined;
+  if (["deposit", "withdraw", "internalTransfer", "subAccountTransfer"].includes(String(delta.type))) return hyperliquidDexCashFlow(delta, user, "");
+  // Do not certify an interval with unrelated treasury, lending or vault operations.
+  throw new Error("unsupported Hyperliquid unified cash-flow operation");
+}

@@ -32,13 +32,40 @@ function wire(hours = [6, 12, 24, 48, 120, 168]) {
 const jsonResponse = (value: unknown) => new Response(JSON.stringify(value), { status: 200 });
 
 describe("swing Quotient identity and outlook normalization", () => {
-  it("uses exact directory instruments, excluding crypto, namespace conflicts, and ambiguous mappings", () => {
+  it("uses exact directory instruments, excluding wrong classes, namespace conflicts, and ambiguous mappings", () => {
     const input = directory();
     input.assets.push({ assetKey: "crypto:btc", name: "Bitcoin", asset_type: "company", identifiers: [{ platform: "hyperliquid", kind: "coin", value: "xyz:BTC" }] });
     input.assets.push({ assetKey: "commodity:fake", name: "Fake", asset_type: "company", identifiers: [{ platform: "hyperliquid", kind: "coin", value: "xyz:FAKE" }] });
     expect(normalizeSwingAssets(input).map(a => [a.assetKey, a.marketRef])).toEqual([["commodity:wti", "xyz:CL"], ["company:nvda", "xyz:NVDA"]]);
     input.assets[0]!.identifiers.push({ platform: "hyperliquid", kind: "coin", value: "xyz:OTHER" });
     expect(normalizeSwingAssets(input).map(a => a.assetKey)).toEqual(["company:nvda"]);
+  });
+
+  it("adds only the directory's exact BTC/ETH main-DEX crypto mappings", () => {
+    const assets = [
+      { assetKey: "crypto:btc", name: "Bitcoin", asset_type: "crypto", identifiers: [{ platform: "hyperliquid", kind: "coin", value: "BTC" }] },
+      { assetKey: "crypto:eth", name: "Ether", asset_type: "crypto", identifiers: [{ platform: "hyperliquid", kind: "coin", value: "ETH" }] },
+      { assetKey: "crypto:sol", name: "Solana", asset_type: "crypto", identifiers: [{ platform: "hyperliquid", kind: "coin", value: "SOL" }] },
+    ];
+    expect(normalizeSwingAssets({ assets })).toEqual([
+      { assetKey: "crypto:btc", name: "Bitcoin", assetClass: "crypto", marketRef: "BTC" },
+      { assetKey: "crypto:eth", name: "Ether", assetClass: "crypto", marketRef: "ETH" },
+    ]);
+    for (const value of ["ETH", "xyz:BTC", "other:BTC", "btc"]) {
+      expect(normalizeSwingAssets({ assets: [{ ...assets[0], identifiers: [{ platform: "hyperliquid", kind: "coin", value }] }] })).toEqual([]);
+    }
+  });
+
+  it("normalizes an exact BTC outlook while rejecting a translated settlement reference", () => {
+    const input = wire([48]);
+    input.series[0]!.asset_key = "crypto:btc";
+    for (const g of input.series[0]!.basis_groups) {
+      for (const ref of [g.resolution_reference, g.execution_reference]) Object.assign(ref, { instrument_id: "BTC", symbol: "BTC" });
+    }
+    const assets = [{ assetKey: "crypto:btc", name: "Bitcoin", assetClass: "crypto" as const, marketRef: "BTC" }];
+    expect(normalizeSwingOutlooks(input, assets, NOW).outlooks).toMatchObject([{ assetKey: "crypto:btc", marketRef: "BTC" }]);
+    input.series[0]!.basis_groups[0]!.resolution_reference.provider = "kalshi-settlement";
+    expect(normalizeSwingOutlooks(input, assets, NOW).outlooks).toEqual([]);
   });
 
   it("retains every >=6h original horizon and exact full-curve moments, not only primary/p50", () => {

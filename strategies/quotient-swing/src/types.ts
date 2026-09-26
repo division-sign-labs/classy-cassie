@@ -3,7 +3,7 @@
 import type { OrderBook, Position, StrategyContext } from "@quotient-forecasting/cassie-core";
 
 export type SwingSide = "LONG" | "SHORT";
-export type SwingAssetClass = "equity" | "commodity";
+export type SwingAssetClass = "equity" | "commodity" | "crypto";
 
 export interface SwingOutlook {
   id: string;
@@ -90,6 +90,9 @@ export interface SwingSnapshot {
   /** Net transfers since the previous snapshot; excludes trade P&L and funding. */
   netCashFlow: number;
   availableMarginUsd: number;
+  /** Standard-mode collateral stays on its DEX; an empty key is Hyperliquid's main DEX. */
+  availableMarginByDex?: Record<string, number>;
+  sharedCollateral?: boolean;
   coveredAssetKeys: string[];
   markets: SwingMarketSnapshot[];
   positions: SwingHeldPosition[];

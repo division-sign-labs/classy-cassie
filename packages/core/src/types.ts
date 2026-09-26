@@ -33,6 +33,7 @@ export interface Balance {
 /** Read-only account context; funding collateral is not strategy NAV. */
 export interface PerpPortfolioScope {
   dex: string;
+  dexes?: string[];
   accountMode: string;
   fundingBalance: number;
   fundingAvailable: number;

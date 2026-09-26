@@ -17,6 +17,10 @@ export interface AdapterOpts {
   fixtureBooks?: string | BooksFixture;
   /** Selected HIP-3 DEX for explicitly scoped strategy accounts. */
   perpDex?: string;
+  /** Additional perp DEXs covered by this account snapshot and execution scope. */
+  additionalPerpDexs?: string[];
+  /** Opt into authoritative spot-USDC accounting for Hyperliquid unified accounts. */
+  allowUnifiedPerps?: boolean;
 }
 
 export type AdapterFactory = (opts: AdapterOpts) => VenueAdapter;

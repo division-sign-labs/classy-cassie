@@ -20,8 +20,8 @@
 // - Order price rules: max 5 significant figures and max (6 − szDecimals)
 //   decimals for perps; integer prices always allowed.
 // - HIP-3 asset IDs: 100000 + perpDexs index * 10000 + index in DEX metadata.
-// - Standard DEX balances are independent. Unified-account NAV requires spot
-//   accounting and is deliberately rejected by the swing strategy snapshot.
+// - Standard DEX balances are independent; unified USDC is read once from spot
+//   accounting (account-abstraction-modes and info-endpoint/spot, 2026-09-26).
 // - scheduleCancel cancels protective orders too. Swing disables it explicitly.
 // - Single-order rejection receipts verified 2026-09-08 against:
 //   https://hyperliquid.gitbook.io/hyperliquid-docs/for-developers/api/error-responses
@@ -71,6 +71,7 @@ import {
   hyperliquidAssetId,
   hyperliquidDex,
   hyperliquidDexCashFlow,
+  hyperliquidUnifiedCashFlow,
   hyperliquidFeeRates,
   nonnegativeNumber,
   positiveNumber,
@@ -147,7 +148,7 @@ export function classifyHyperliquidAgent(
 
 export class HyperliquidAdapter implements VenueAdapter {
   readonly id = "hyperliquid" as const;
-  readonly verifiedAgainst = "2026-09-08";
+  readonly verifiedAgainst = "2026-09-26";
   readonly supportsNativeTriggers = true;
 
   private readonly opts: AdapterOpts;
@@ -425,6 +426,11 @@ export class HyperliquidAdapter implements VenueAdapter {
 
   private async preparePerpFunding(ctx: SetupContext, acct: VenueAccount): Promise<void> {
     if (!this.opts.perpDex) return;
+    if (this.opts.allowUnifiedPerps && await this.info.userAbstraction({ user: this.masterAddress(acct) }) === "unifiedAccount") {
+      const balance = await this.perpAccountSnapshot(acct);
+      ctx.print(`Shared trading balance: ${balance.equity} USDC`);
+      return;
+    }
     const masterPk = await ctx.getSecret(KeyRoles.master);
     if (!masterPk) throw new Error("Master key missing from keystore.");
     const wallet = privateKeyToAccount(masterPk as `0x${string}`);
@@ -513,10 +519,15 @@ export class HyperliquidAdapter implements VenueAdapter {
     // authorization requires an explicitly selected Standard account mode.
     if (this.opts.perpDex !== undefined) {
       const mode = await this.info.userAbstraction({ user: this.masterAddress(acct) });
+      if (mode === "unifiedAccount" && this.opts.allowUnifiedPerps) {
+        const a = await this.perpAccountSnapshot(acct);
+        return [{ asset: "USDC", total: a.equity, available: a.availableCollateral }];
+      }
       if (mode !== "default" && mode !== "disabled") throw new Error(`Cannot value separate DEX balances in ${mode} mode.`);
     }
-    const st = await this.accountState(acct);
-    return [{ asset: "USDC", total: Number(st.marginSummary.accountValue), available: Number(st.withdrawable) }];
+    const states = await this.accountStates(acct);
+    return [{ asset: "USDC", total: states.reduce((sum, { state }) => sum + finiteNumber(state.marginSummary.accountValue, "account equity"), 0),
+      available: states.reduce((sum, { state }) => sum + nonnegativeNumber(state.withdrawable, "available collateral"), 0) }];
   }
 
   async portfolioScope(acct: VenueAccount) {
@@ -525,28 +536,35 @@ export class HyperliquidAdapter implements VenueAdapter {
       this.info.userAbstraction({ user }), this.info.clearinghouseState({ user }),
     ]);
     return {
-      dex: this.opts.perpDex ?? "", accountMode,
-      fundingBalance: this.opts.perpDex ? finiteNumber(funding.marginSummary.accountValue, "funding balance") : 0,
-      fundingAvailable: this.opts.perpDex ? nonnegativeNumber(funding.withdrawable, "funding available") : 0,
+      dex: this.selectedDexs().length > 1 ? "multi" : this.selectedDexs()[0]!, accountMode,
+      ...(this.selectedDexs().length > 1 ? { dexes: this.selectedDexs() } : {}),
+      fundingBalance: accountMode !== "unifiedAccount" && !this.selectedDexs().includes("") ? finiteNumber(funding.marginSummary.accountValue, "funding balance") : 0,
+      fundingAvailable: accountMode !== "unifiedAccount" && !this.selectedDexs().includes("") ? nonnegativeNumber(funding.withdrawable, "funding available") : 0,
     };
   }
 
   async positions(acct: VenueAccount): Promise<Position[]> {
-    const st = await this.accountState(acct);
-    return this.mapPositions(st);
+    return (await this.accountStates(acct)).flatMap(({ dex, state }) => this.mapPositions(state, dex));
   }
 
-  private accountState(acct: VenueAccount) {
-    return this.info.clearinghouseState({ user: this.masterAddress(acct), ...(this.opts.perpDex !== undefined ? { dex: this.opts.perpDex } : {}) });
+  private selectedDexs(): string[] {
+    return [...new Set([this.opts.perpDex ?? "", ...(this.opts.additionalPerpDexs ?? [])])];
   }
 
-  private mapPositions(st: Awaited<ReturnType<InfoClient["clearinghouseState"]>>): Position[] {
+  private async accountStates(acct: VenueAccount) {
+    return Promise.all(this.selectedDexs().map(async dex => ({ dex,
+      state: await this.info.clearinghouseState({ user: this.masterAddress(acct), ...(dex || this.opts.perpDex !== undefined ? { dex } : {}) }),
+    })));
+  }
+
+  private mapPositions(st: Awaited<ReturnType<InfoClient["clearinghouseState"]>>, dex: string): Position[] {
     return st.assetPositions
       .filter((ap) => finiteNumber(ap.position.szi, "position size") !== 0)
       .map((ap) => {
         const p = ap.position;
         const szi = finiteNumber(p.szi, "position size");
         this.assertScope(p.coin);
+        if (hyperliquidDex(p.coin) !== dex) throw new Error("Hyperliquid account position belongs to another DEX");
         return {
           marketRef: p.coin,
           side: szi > 0 ? ("LONG" as const) : ("SHORT" as const),
@@ -564,7 +582,7 @@ export class HyperliquidAdapter implements VenueAdapter {
   }
 
   private assertScope(coin: string): void {
-    if (this.opts.perpDex !== undefined && hyperliquidDex(coin) !== this.opts.perpDex) {
+    if (this.opts.perpDex !== undefined && !this.selectedDexs().includes(hyperliquidDex(coin))) {
       throw new Error(`Hyperliquid instrument is outside configured DEX "${this.opts.perpDex}"`);
     }
   }
@@ -579,7 +597,8 @@ export class HyperliquidAdapter implements VenueAdapter {
     }
     // "default" is not an explicit Standard-mode guarantee. The venue's
     // default can change; require a positively identified disabled mode.
-    if (abstraction !== "disabled") throw new Error(`Hyperliquid perp strategy requires explicit Standard account mode; found ${abstraction}`);
+    if (abstraction === "unifiedAccount" && this.opts.allowUnifiedPerps) return "unified";
+    if (abstraction !== "disabled") throw new Error(`Hyperliquid perp strategy requires explicit Standard account mode${this.opts.allowUnifiedPerps ? " or Unified account mode" : ""}; found ${abstraction}`);
     return "standard";
   }
 
@@ -612,28 +631,56 @@ export class HyperliquidAdapter implements VenueAdapter {
   }
 
   async perpInstruments(): Promise<PerpInstrument[]> {
-    const dex = this.opts.perpDex ?? "";
-    await this.loadDex(dex);
-    return [...this.dexCache.get(dex)!.meta].map(([coin, meta]) => this.instrument(coin, meta));
+    const dexes = this.selectedDexs();
+    await Promise.all(dexes.map(dex => this.loadDex(dex)));
+    return dexes.flatMap(dex => [...this.dexCache.get(dex)!.meta].map(([coin, meta]) => this.instrument(coin, meta)));
   }
 
   async perpAccountSnapshot(acct: VenueAccount): Promise<PerpAccountSnapshot> {
     const abstraction = await this.assertStandard(acct, true);
-    const dex = this.opts.perpDex ?? "";
-    await this.loadDex(dex);
-    const metadata = [...this.dexCache.get(dex)!.meta.values()];
+    const dexes = this.selectedDexs();
+    await Promise.all(dexes.map(dex => this.loadDex(dex)));
+    const metadata = dexes.flatMap(dex => [...this.dexCache.get(dex)!.meta.values()]);
     if (metadata.length === 0 || metadata.some((m) => m.collateralToken !== 0)) {
       throw new Error("Hyperliquid perp strategy requires a USDC collateral DEX");
     }
-    const [st, openOrders] = await Promise.all([this.accountState(acct), this.openOrders(acct)]);
-    const venueTime = nonnegativeNumber(st.time, "account timestamp");
-    if (this.now() - venueTime > 60_000 || venueTime > this.now() + 5_000) throw new Error("Hyperliquid account state is stale");
+    const [states, openOrders] = await Promise.all([this.accountStates(acct), this.openOrders(acct)]);
+    if (abstraction === "unified") {
+      // DEX marginSummary balances overlap in unified mode. The venue documents
+      // spotClearinghouseState as the balance/hold source of truth, including perps.
+      const spot = await this.info.spotClearinghouseState({ user: this.masterAddress(acct) });
+      const usdc = spot.balances.filter(b => "token" in b && b.token === 0);
+      if (usdc.length > 1 || (usdc[0] && usdc[0].coin !== "USDC")) throw new Error("invalid unified USDC balance identity");
+      const equity = usdc[0] ? nonnegativeNumber(usdc[0].total, "unified USDC total") : 0;
+      const hold = usdc[0] ? nonnegativeNumber(usdc[0].hold, "unified USDC hold") : 0;
+      const available = spot.tokenToAvailableAfterMaintenance?.filter(([token]) => token === 0);
+      if (!available || available.length !== 1 || hold > equity) throw new Error("unified USDC available collateral is unconfirmed");
+      const availableCollateral = Math.max(0, Math.min(equity - hold, nonnegativeNumber(available[0]![1], "unified available collateral")));
+      for (const { state } of states) {
+        const time = nonnegativeNumber(state.time, "account timestamp");
+        if (this.now() - time > 60_000 || time > this.now() + 5_000) throw new Error("Hyperliquid account state is stale");
+      }
+      const positions = states.flatMap(({ dex, state }) => this.mapPositions(state, dex));
+      return { equity, availableCollateral, marginUsed: positions.reduce((sum, p) => sum + (p.marginUsed ?? 0), 0),
+        grossNotional: positions.reduce((sum, p) => sum + p.size * p.currentPrice!, 0),
+        abstraction, collateral: "USDC", dex: dexes.length > 1 ? "multi" : dexes[0]!, dexes,
+        sharedCollateral: true, positions, openOrders, ts: this.now() };
+    }
+    const dexBalances = states.map(({ dex, state: st }) => {
+      const venueTime = nonnegativeNumber(st.time, "account timestamp");
+      if (this.now() - venueTime > 60_000 || venueTime > this.now() + 5_000) throw new Error("Hyperliquid account state is stale");
+      return { dex, equity: nonnegativeNumber(st.marginSummary.accountValue, "account equity"),
+        availableCollateral: nonnegativeNumber(st.withdrawable, "available collateral"),
+        marginUsed: nonnegativeNumber(st.marginSummary.totalMarginUsed, "account margin"),
+        grossNotional: nonnegativeNumber(st.marginSummary.totalNtlPos, "gross notional") };
+    });
     return {
-      equity: finiteNumber(st.marginSummary.accountValue, "account equity"),
-      availableCollateral: nonnegativeNumber(st.withdrawable, "available collateral"),
-      marginUsed: nonnegativeNumber(st.marginSummary.totalMarginUsed, "account margin"),
-      grossNotional: nonnegativeNumber(st.marginSummary.totalNtlPos, "gross notional"),
-      abstraction, collateral: "USDC", dex, positions: this.mapPositions(st), openOrders, ts: this.now(),
+      equity: dexBalances.reduce((sum, b) => sum + b.equity, 0),
+      availableCollateral: dexBalances.reduce((sum, b) => sum + b.availableCollateral, 0),
+      marginUsed: dexBalances.reduce((sum, b) => sum + b.marginUsed, 0),
+      grossNotional: dexBalances.reduce((sum, b) => sum + b.grossNotional, 0),
+      abstraction, collateral: "USDC", dex: dexes.length > 1 ? "multi" : dexes[0]!, dexBalances,
+      positions: states.flatMap(({ dex, state }) => this.mapPositions(state, dex)), openOrders, ts: this.now(),
     };
   }
 
@@ -674,22 +721,31 @@ export class HyperliquidAdapter implements VenueAdapter {
 
   async perpCashFlows(acct: VenueAccount, sinceTs: number): Promise<PerpCashFlowResult> {
     const user = this.masterAddress(acct);
-    const dex = this.opts.perpDex ?? "";
+    const dexes = this.selectedDexs();
+    const unified = await this.assertStandard(acct, true) === "unified";
     const endTime = this.now();
     let startTime = Math.max(0, Math.floor(nonnegativeNumber(sinceTs, "cash-flow cursor")));
     let understood = true;
-    const flows = new Map<string, { id: string; ts: number; amount: number }>();
+    const flows = new Map<string, PerpCashFlowResult["flows"][number]>();
     for (let page = 0; page < 100; page++) {
       const rows = await this.info.userNonFundingLedgerUpdates({ user, startTime, endTime });
       for (const row of rows) {
         const ts = nonnegativeNumber(row.time, "cash-flow timestamp");
         if (ts < startTime || ts > endTime) throw new Error("Hyperliquid cash-flow response is outside requested range");
-        let amount: number | undefined;
-        try { amount = hyperliquidDexCashFlow(row.delta as unknown as Record<string, unknown>, user, dex); }
+        let byDex: Record<string, number> = {};
+        let amount: number;
+        try {
+          const delta = row.delta as unknown as Record<string, unknown>;
+          if (unified) amount = hyperliquidUnifiedCashFlow(delta, user) ?? 0;
+          else {
+            byDex = Object.fromEntries(dexes.map(dex => [dex, hyperliquidDexCashFlow(delta, user, dex) ?? 0]));
+            amount = Object.values(byDex).reduce((sum, value) => sum + value, 0);
+          }
+        }
         catch { understood = false; continue; }
-        if (amount !== undefined && amount !== 0) {
+        if (amount !== 0 || Object.values(byDex).some(value => value !== 0)) {
           const id = `${row.hash}:${ts}:${JSON.stringify(row.delta)}`;
-          flows.set(id, { id, ts, amount });
+          flows.set(id, { id, ts, amount, ...(!unified && dexes.length > 1 ? { byDex } : {}) });
         }
       }
       // Time-range endpoints may truncate at 500 records. Repeat the boundary
@@ -791,8 +847,12 @@ export class HyperliquidAdapter implements VenueAdapter {
   }
 
   async openOrders(acct: VenueAccount): Promise<Order[]> {
-    const rows = await this.info.frontendOpenOrders({ user: this.masterAddress(acct), ...(this.opts.perpDex !== undefined ? { dex: this.opts.perpDex } : {}) });
-    return rows.map((o) => this.mapOrder(o));
+    const groups = await Promise.all(this.selectedDexs().map(async dex => {
+      const rows = await this.info.frontendOpenOrders({ user: this.masterAddress(acct), ...(dex || this.opts.perpDex !== undefined ? { dex } : {}) });
+      if (rows.some(o => hyperliquidDex(o.coin) !== dex)) throw new Error("Hyperliquid open order belongs to another DEX");
+      return rows.map(o => this.mapOrder(o));
+    }));
+    return groups.flat();
   }
 
   private mapOrder(o: HlOpenOrder): Order {
@@ -821,7 +881,7 @@ export class HyperliquidAdapter implements VenueAdapter {
       user: this.masterAddress(acct),
       startTime: Math.max(0, sinceTs),
     });
-    return rows.filter((f) => this.opts.perpDex === undefined || hyperliquidDex(f.coin) === this.opts.perpDex).map((f) => ({
+    return rows.filter((f) => this.opts.perpDex === undefined || this.selectedDexs().includes(hyperliquidDex(f.coin))).map((f) => ({
       id: String(f.tid),
       orderId: String(f.oid),
       marketRef: f.coin,

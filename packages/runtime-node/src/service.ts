@@ -342,6 +342,8 @@ export class BotService {
       polymarketGaslessAuth: opts.polymarketGaslessAuth,
       fixtureBooks: opts.fixtureBooksPath ? readFileSync(opts.fixtureBooksPath, "utf8") : undefined,
       perpDex: opts.config.strategy.id === "quotient-swing" ? "xyz" : undefined,
+      additionalPerpDexs: opts.config.strategy.id === "quotient-swing" ? [""] : undefined,
+      allowUnifiedPerps: opts.config.strategy.id === "quotient-swing",
     }), this.metrics);
     const alerter = buildAlerter(opts, this.log, this.counters);
     this.alerter = alerter;
