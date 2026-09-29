@@ -128,6 +128,8 @@ interface Parent extends Omit<PredictionExecutionParentSummary, "reservedNotiona
   minOrderSize?: number;
   inventoryObserved?: boolean;
   lastValidatedBookAt?: number;
+  /** SELL only: the held position's size-weighted average entry price at admission, the P&L basis for its fills. */
+  entryAvgPrice?: number;
 }
 
 interface Child {
@@ -475,6 +477,9 @@ export class PredictionExecutor {
       const reserved = Object.values(c.parents).filter(p => active(p) && p.side === "BUY").reduce((sum, p) => sum + this.remaining(p) * p.maximumPrice, 0);
       const budget = action.kind === "enter" ? Math.min(action.notional, this.d.config.risk.maxOrderNotional, Math.max(0, cash - reserved)) : 0;
       const heldSize = held.reduce((sum, p) => sum + p.size, 0);
+      const pricedSize = held.reduce((sum, p) => sum + (p.avgPrice > 0 ? p.size : 0), 0);
+      const entryAvgPrice = action.kind === "exit" && pricedSize > EPS
+        ? held.reduce((sum, p) => sum + (p.avgPrice > 0 ? p.size * p.avgPrice : 0), 0) / pricedSize : undefined;
       const desiredSize = action.kind === "enter" ? budget / this.entryUnitCost(maximumPrice, provenance) : heldSize * Math.min(1, Math.max(0, action.fraction ?? 1));
       const cap = checkCapacity({ side: action.kind === "enter" ? "BUY" : "SELL", desiredSize, refPrice: action.kind === "enter" ? maximumPrice : bid, book: external,
         quote: { ...market.quote, bid, ask, mid: (bid + ask) / 2 }, risk: action.kind === "exit" ? { ...this.d.config.risk, minDailyVolume: 0 } : this.d.config.risk,
@@ -502,6 +507,7 @@ export class PredictionExecutor {
         ...(action.kind === "exit" && action.limitPrice !== undefined ? { minimumPrice: action.limitPrice } : {}), budgetUsd: budget,
         minimumEdge, minimumNotional: action.kind === "enter" ? Math.max(this.d.config.risk.minViableNotional, action.minNotional ?? 0) : 0,
         filledSize: 0, filledNotionalUsd: 0, feeUsd: 0, children: [], priorMarketSize: heldSize,
+        ...(entryAvgPrice !== undefined ? { entryAvgPrice } : {}),
         arrivalBid: bid, ...(external.asks.length ? { arrivalAsk: ask } : {}),
         reason: action.reason ?? (action.kind === "enter" ? "signal entry" : "position exit"), urgent: action.kind === "exit" && action.urgent === true,
         ...(typeof provenance?.signalId === "string" ? { signalId: provenance.signalId } : {}),
@@ -1101,7 +1107,7 @@ export class PredictionExecutor {
       const held = this.portfolio?.positions.find(p => parent.tokenId !== undefined && p.tokenId === parent.tokenId)
         ?? this.portfolio?.positions.find(p => p.marketRef === parent.marketRef && (p.outcome ?? p.side) === parent.outcome);
       const pnl = parent.side === "SELL"
-        ? closingPnl(held?.avgPrice, parent.outcome, fill.quantity, fill.price, fill.fee, "realized")
+        ? closingPnl(parent.entryAvgPrice ?? held?.avgPrice, parent.outcome, fill.quantity, fill.price, fill.fee, "realized")
           ?? (typeof parent.provenance?.executablePnlPct === "number" ? { pct: parent.provenance.executablePnlPct, basis: "executable" as const } : undefined)
         : undefined;
       void this.rpc("fill notification", () => this.d.alerter!.send({
@@ -1159,7 +1165,9 @@ export class PredictionExecutor {
       const day = new Date(fill.ts).toISOString().slice(0, 10);
       c.dailySpentUsd[day] = (c.dailySpentUsd[day] ?? 0) + quantity * fill.price + (fill.fee ?? 0);
     }
-    this.d.log.info("prediction fill confirmed", { executionId: parent.id, orderId: child.venueId, size: quantity, price: fill.price, fee: fill.fee ?? 0 });
+    const pnl = parent.side === "SELL" ? closingPnl(parent.entryAvgPrice, parent.outcome, quantity, fill.price, fill.fee, "realized") : undefined;
+    this.d.log.info("prediction fill confirmed", { executionId: parent.id, orderId: child.venueId, side: parent.side, size: quantity, price: fill.price, fee: fill.fee ?? 0,
+      ...(parent.entryAvgPrice !== undefined ? { entryAvgPrice: parent.entryAvgPrice } : {}), ...(pnl ? { pnlUsd: pnl.usd, pnlPct: pnl.pct } : {}) });
   }
 
   private async cancel(child: Child, reason: string): Promise<void> {

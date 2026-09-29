@@ -490,6 +490,20 @@ export class PerpExecutor {
           ...(tpPnl ? { pnl: tpPnl } : {}), reason: "target" });
         continue;
       }
+      // A protective stop fires on the venue, so its fill has no submission of its own.
+      const stopped = f.orderId === undefined ? undefined
+        : s.cycles.find(c => c.stopOrderId === f.orderId || (c.stopOrderIds ?? []).includes(f.orderId!));
+      if (stopped) {
+        stopped.exitReason ??= "protective-stop";
+        s.seenFills.push(f.id); s.fillSince = Math.max(s.fillSince, f.ts);
+        const stopPnl = closingPnl(stopped.entryPrice, stopped.side, f.size, f.price, f.fee, "realized");
+        await this.alert("fill", `${f.side} ${f.size} ${f.marketRef} @ ${f.price} (stop)`, { fee: f.fee, orderId: f.orderId, reason: stopped.exitReason, fillId: f.id }, {
+          at: new Date(f.ts).toISOString(), market: this.perpMarket(f.marketRef),
+          trade: { side: f.side, size: f.size, price: f.price, notionalUsd: f.size * f.price, ...(f.fee !== undefined ? { feeUsd: f.fee } : {}),
+            ...(f.orderId ? { orderId: f.orderId } : {}), positionSide: stopped.side, filled: true },
+          ...(stopPnl ? { pnl: stopPnl } : {}), reason: stopped.exitReason });
+        continue;
+      }
       const sub = Object.values(s.submissions).find(o => o.orderId === f.orderId);
       if (!sub) continue;
       const c = s.cycles.find(cycle => cycle.id === sub.cycleId);

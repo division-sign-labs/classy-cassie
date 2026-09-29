@@ -1095,6 +1095,17 @@ describe("executor-owned take-profit", () => {
     expect(await h.executor.status()).toMatchObject({ halted: false });
   });
 
+  it("alerts a venue-side stop fill with its realized P&L and closes as a protective stop", async () => {
+    const h = await opened();
+    const stop = [...h.orders.values()].find(isProtectiveOrder)!;
+    h.advance(6 * 60_000); h.fillOrder(stop.id, 3); h.advance(); await h.executor.reconcile();
+    const alert = h.alerts.send.mock.calls.map(c => c[0]).find(a => a.kind === "fill" && a.reason === "protective-stop");
+    expect(alert?.pnl).toMatchObject({ basis: "realized" });
+    expect(alert!.pnl!.usd!).toBeLessThan(0);
+    h.advance(6_000); await h.executor.reconcile();
+    expect((await h.executor.status()).cycles[0]).toMatchObject({ status: "closed", exitReason: "protective-stop" });
+  });
+
   it("cancels the take-profit once the position is flat after a stop fill", async () => {
     const h = await opened();
     const target = h.targets()[0]!; const stop = [...h.orders.values()].find(isProtectiveOrder)!;

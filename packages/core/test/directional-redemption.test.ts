@@ -39,7 +39,8 @@ describe("directional resolution settlement", () => {
     const s = setup();
     expect((await s.engine().tick(1)).errors).toBe(0);
     expect(s.redeem).toHaveBeenCalledOnce();
-    expect(s.send).toHaveBeenCalledWith(expect.objectContaining({ kind: "resolution", data: expect.objectContaining({ transactionId: "relay-123" }) }));
+    expect(s.send).toHaveBeenCalledWith(expect.objectContaining({ kind: "resolution", data: expect.objectContaining({ transactionId: "relay-123" }),
+      pnl: { usd: -0.6, pct: -100, basis: "realized" } }));
     await s.engine().tick(2);
     expect(s.redeem).toHaveBeenCalledOnce();
   });

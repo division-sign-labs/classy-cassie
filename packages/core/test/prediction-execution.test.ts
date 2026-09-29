@@ -818,6 +818,16 @@ describe("adaptive prediction execution", () => {
     expect(metrics.makerShare).toBe(1); expect(metrics.fillRatio).toBe(.2); expect(metrics.priceImprovementUsd).toBeCloseTo(.2);
   });
 
+  it("reports realized P&L on an exit fill that closes the whole position", async () => {
+    const h = harness(); h.setHeld(100); await h.ready();
+    await h.executor.admit({ kind: "exit", marketRef: "yes", reason: "take-profit" }, h.positions());
+    expect(h.submissions[0]).toMatchObject({ side: "SELL", limitPrice: .59 });
+    h.fill("order-1", 100); await h.executor.supervise();
+    expect(h.positions()).toHaveLength(0);
+    expect(h.alerter.send).toHaveBeenCalledWith(expect.objectContaining({ kind: "exit", pnl: { usd: 8, pct: 15.69, basis: "realized" } }));
+    expect(h.log.info).toHaveBeenCalledWith("prediction fill confirmed", expect.objectContaining({ side: "SELL", entryAvgPrice: .51, pnlUsd: 8, pnlPct: 15.69 }));
+  });
+
   it("does not block execution on a failed fill notification", async () => {
     vi.useFakeTimers();
     const h = harness(); await h.ready(); await h.executor.admit(enter(), []);

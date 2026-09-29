@@ -535,13 +535,16 @@ export class Engine {
         });
         await setJson(this.d.state, key, { status: "confirmed", at, receipt });
         await this.disarmTriggers(pos.marketRef);
+        // A resolved token pays its final price per share: 1 for the winner, 0 for the loser.
+        const payout = pos.currentPrice;
         await this.alert({
           kind: "resolution",
           botId: this.d.botId,
           message: `redeemed resolved position ${pos.side} ${shortRef(action.marketRef)}`,
-          data: { size: pos.size, conditionId: pos.conditionId, ...receipt },
+          data: { size: pos.size, conditionId: pos.conditionId, entryAvgPrice: pos.avgPrice, ...(payout !== undefined ? { payout } : {}), ...receipt },
           ...this.baseAlert(),
           market: this.alertMarket(action.marketRef, pos.outcome ?? (pos.side === "YES" || pos.side === "NO" ? pos.side : undefined), pos.label),
+          ...(payout !== undefined ? optionalPnl(closingPnl(pos.avgPrice, pos.side, pos.size, payout, 0, "realized")) : {}),
           reason: "market resolved; position redeemed",
         });
         return { placed: false };
