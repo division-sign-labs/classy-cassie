@@ -61,9 +61,11 @@ Exits are evaluated in this order and exactly one reason is emitted:
    distinct committed forecasts observed with the spread non-positive. A new forecast that
    restores positive edge resets the run.
 4. `q_flip` — two consecutive distinct committed forecasts below 50% on the held side
-   confirm the flip; exit once remaining edge is at or below 5pp. The confirmation is
-   retained while Q stays flipped, so a later market move can still trigger it. A forecast
-   back above 50% resets it.
+   confirm the flip, and the position is sold on confirmation at any remaining edge. A
+   forecast back above 50% resets the count. `flipExitMaxRemainingEdgePp` adds an optional
+   edge gate: with it set, a confirmed flip waits until remaining edge is at or below that
+   many pp, and the confirmation is retained while Q stays flipped so a later market move
+   can still trigger it. Replayed, the gate made no difference to returns.
 5. `take_profit` — the held outcome's executable best bid is at or above
    `takeProfitPrice` (90¢), whatever edge the forecast still shows.
 6. `time_stop` — position age at or above `maxHoldDays` (7) measured from the actual entry
@@ -84,7 +86,7 @@ adverse-cross, flip, take-profit, and time stop still apply.
 ```sh
 cassie strategy <botId> --scenario-exit on
 cassie strategy <botId> --take-profit-price 0.9 --adverse-cross-confirmations 2 \
-  --q-collapse-pp 30 --flip-confirmations 2 --flip-exit-max-remaining-edge-pp 5 --max-hold-days 7
+  --q-collapse-pp 30 --flip-confirmations 2 --flip-exit-max-remaining-edge-pp off --max-hold-days 7
 ```
 
 ## Hold-to-resolution preset

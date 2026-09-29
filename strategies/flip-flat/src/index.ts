@@ -104,8 +104,8 @@ const FlipFlatConfigObjectSchema = z.object({
   qCollapseMaxRemainingEdgePp: z.number().default(0),
   /** Q flip: consecutive distinct committed forecasts below 50% on the held side required to confirm. */
   flipConfirmations: z.number().int().positive().default(2),
-  /** Q flip: exit a confirmed flip once remaining edge is at or below this many pp; null exits on confirmation at any edge. */
-  flipExitMaxRemainingEdgePp: z.number().nullable().default(5),
+  /** Q flip: exit a confirmed flip once remaining edge is at or below this many pp; null (the default) exits on confirmation at any edge. */
+  flipExitMaxRemainingEdgePp: z.number().nullable().default(null),
   /** Fee rate, in basis points, deducted from executable sell proceeds in the P&L gates. */
   exitFeeBps: z.number().nonnegative().default(0),
   /**

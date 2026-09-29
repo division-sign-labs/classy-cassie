@@ -212,7 +212,7 @@ describe("scenario exit configuration", () => {
     expect(cfg.adverseCrossConfirmations).toBe(2);
     expect(cfg.qCollapsePp).toBe(30);
     expect(cfg.flipConfirmations).toBe(2);
-    expect(cfg.flipExitMaxRemainingEdgePp).toBe(5);
+    expect(cfg.flipExitMaxRemainingEdgePp).toBeNull();
     expect(cfg.maxHoldDays).toBe(7);
   });
 
@@ -334,8 +334,21 @@ describe("seven-day signal exit state machine", () => {
     expect((got[0]!.provenance as { confirmingForecastIds: string[] }).confirmingForecastIds).toHaveLength(2);
   });
 
-  it("3. holds a confirmed flip while YES remains cheap versus Q (market 30, edge +15pp), then exits when the edge closes", async () => {
+  it("3. exits a confirmed flip even while YES remains cheap versus Q (market 30, edge +15pp)", async () => {
     const e = env();
+    const strategy = new FlipFlatStrategy();
+    await enter(strategy, e, { side: "YES", entryQ: 0.8, avgPrice: 0.6 });
+    setYesMid(e, 0.3);
+    e.forecasts = [forecast("f", HOUR_MS, 0.45)];
+    expect(await exits(strategy, e)).toHaveLength(0);
+    e.forecasts = [forecast("f", 2 * HOUR_MS, 0.45)];
+    const got = await exits(strategy, e);
+    expect(got).toHaveLength(1);
+    expect(got[0]!.reason).toMatch(/^q_flip: .*edge \+15\.0pp/);
+  });
+
+  it("3b. with a 5pp edge gate, holds a confirmed flip at +15pp, then exits when the edge closes", async () => {
+    const e = env({ config: { flipExitMaxRemainingEdgePp: 5 } });
     const strategy = new FlipFlatStrategy();
     await enter(strategy, e, { side: "YES", entryQ: 0.8, avgPrice: 0.6 });
     setYesMid(e, 0.3);
@@ -558,11 +571,24 @@ describe("seven-day signal exit state machine", () => {
       expect(got[0]!.reason).toMatch(/^q_flip: entryQ 80\.0% → Q 45\.0%, mid 0\.430/);
     });
 
-    it("holds a NO flip while NO remains cheap versus Q", async () => {
+    it("exits a NO flip even while NO remains cheap versus Q", async () => {
       const e = env();
       const strategy = new FlipFlatStrategy();
       await enter(strategy, e, { side: "NO", entryQ: 0.8, avgPrice: 0.6 });
       // YES mid 0.70 → NO mid 0.30 against Q_no 45%: +15pp.
+      setYesMid(e, 0.7);
+      e.forecasts = [forecast("f", HOUR_MS, 0.55)];
+      await exits(strategy, e);
+      e.forecasts = [forecast("f", 2 * HOUR_MS, 0.55)];
+      const got = await exits(strategy, e);
+      expect(got).toHaveLength(1);
+      expect(got[0]!.reason).toMatch(/^q_flip: .*edge \+15\.0pp/);
+    });
+
+    it("holds a NO flip behind a 5pp edge gate while NO remains cheap versus Q", async () => {
+      const e = env({ config: { flipExitMaxRemainingEdgePp: 5 } });
+      const strategy = new FlipFlatStrategy();
+      await enter(strategy, e, { side: "NO", entryQ: 0.8, avgPrice: 0.6 });
       setYesMid(e, 0.7);
       e.forecasts = [forecast("f", HOUR_MS, 0.55)];
       await exits(strategy, e);
@@ -787,14 +813,19 @@ describe("hold preset gates", () => {
       takeProfitPrice: null,
       maxHoldDays: null,
     });
-    // Remaining edge is +20pp here; the default 5pp gate would hold.
+    // Remaining edge is +20pp here; a 5pp gate would hold.
     expect(evaluateScenarioExit(base, cfg).reason).toBe("q_flip");
     expect(evaluateScenarioExit({ ...base, midHeld: undefined }, cfg).reason).toBe("q_flip");
     expect(evaluateScenarioExit({ ...base, flipConfirmed: false }, cfg).reason).toBeUndefined();
   });
 
-  it("keeps the default 5pp gate on a confirmed flip", () => {
+  it("exits a confirmed flip at any edge by default", () => {
     const cfg = FlipFlatConfigSchema.parse({ scenarioExitEnabled: true, takeProfitPrice: null });
+    expect(evaluateScenarioExit(base, cfg).reason).toBe("q_flip");
+  });
+
+  it("holds a confirmed flip behind an explicit 5pp gate", () => {
+    const cfg = FlipFlatConfigSchema.parse({ scenarioExitEnabled: true, takeProfitPrice: null, flipExitMaxRemainingEdgePp: 5 });
     expect(evaluateScenarioExit(base, cfg).reason).toBeUndefined();
     expect(evaluateScenarioExit({ ...base, midHeld: 0.36 }, cfg).reason).toBe("q_flip");
   });

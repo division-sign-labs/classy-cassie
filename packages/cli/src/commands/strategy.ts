@@ -274,7 +274,7 @@ export const SCENARIO_EXIT_DEFAULTS = {
   qCollapsePp: 30,
   qCollapseMaxRemainingEdgePp: 0,
   flipConfirmations: 2,
-  flipExitMaxRemainingEdgePp: 5,
+  flipExitMaxRemainingEdgePp: null,
   exitFeeBps: 0,
   exitRetrySec: 300,
   pendingEntryReservationSec: 900,
