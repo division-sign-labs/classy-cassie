@@ -1,6 +1,6 @@
 {
   "name": "@quotient-forecasting/cassie-runtime-node",
-  "version": "0.4.19",
+  "version": "0.4.20",
   "type": "module",
   "license": "Apache-2.0",
   "description": "Node runtime for Cassie trading bots: engine loop, SQLite state, and a unix-socket control API",
@@ -16,9 +16,6 @@
   "engines": {
     "node": ">=24"
   },
-  "publishConfig": {
-    "access": "public"
-  },
   "bin": {
     "cassie-runtime": "./dist/main.js"
   },
@@ -26,7 +23,8 @@
     ".": {
       "types": "./dist/index.d.ts",
       "import": "./dist/index.js"
-    }
+    },
+    "./main": "./dist/main.js"
   },
   "files": [
     "dist",
@@ -34,7 +32,6 @@
   ],
   "scripts": {
     "build": "rm -rf dist && tsc -p tsconfig.json && mkdir -p dist/dashboard/ui && cp src/dashboard/ui/* dist/dashboard/ui/",
-    "prepack": "pnpm build",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "start": "node dist/main.js"
   },
@@ -51,5 +48,6 @@
     "@types/better-sqlite3": "7.6.13",
     "@types/node": "24.2.1",
     "typescript": "5.9.2"
-  }
+  },
+  "private": true
 }

@@ -38,6 +38,7 @@ function fixture() {
   write("skills/cassie/SKILL.md", "runtime reference\n");
   const compile = () => {
     for (const path of ["packages/core", "packages/cli", "strategies/example"]) write(`${path}/dist/index.js`);
+    write("packages/cli/dist/main.js");
     write("packages/core/dist/extra.js", "export const extra = true;\n");
   };
   const runCommand = vi.fn(async () => { compile(); return { code: 0 }; });
@@ -119,7 +120,7 @@ describe("workspace build cache", () => {
     const changed = vi.fn(async () => { h.compile(); h.write("packages/core/src/index.ts", "changed\n"); return { code: 0 }; });
     await expect(ensureWorkspaceBuild(h.root, { ...h.options, runCommand: changed })).rejects.toThrow("changed during the build");
     expect(existsSync(join(h.options.cacheDirectory, "build.json"))).toBe(false);
-    rmSync(join(h.root, "packages/cli/dist/index.js"));
+    rmSync(join(h.root, "packages/cli/dist/main.js"));
     await expect(ensureWorkspaceBuild(h.root, { ...h.options, runCommand: async () => ({ code: 0 }) })).rejects.toThrow("without the required CLI outputs");
   });
 
@@ -164,7 +165,7 @@ describe("workspace CLI process", () => {
     await expect(runWorkspaceCli(args, { ...h.options, env, cwd, runCommand })).resolves.toBe(7);
     expect(runCommand.mock.calls).toEqual([
       [process.execPath, [env.npm_execpath, "build"], { cwd: h.root, env, quiet: true }],
-      [process.execPath, [join(h.root, "packages/cli/dist/index.js"), ...args], { cwd, env }],
+      [process.execPath, [join(h.root, "packages/cli/dist/main.js"), ...args], { cwd, env }],
     ]);
   });
 

@@ -57,6 +57,25 @@ node packages/cli/dist/index.js deploy <botId>
 `pnpm test` runs the suite (engine idempotency, capacity checks, the offline e2e,
 thesis arithmetic, keystore round-trips).
 
+## Release
+
+`pnpm release:check` builds and tests the workspace, then packs and installs one archive
+in a temporary directory. It checks the CLI, bundled runtime, dashboard files, native
+SQLite dependency, and operator skill.
+
+`pnpm release:publish` runs those checks and publishes that same archive. Run it from a
+clean, pushed `main` branch. Set the release version in `packages/cli/package.json`;
+the archive gives every bundled module that version. A version already published with
+different contents must be changed before release.
+
+Only `@quotient-forecasting/cassie` is published. Core, runtime, strategies, and the skill
+remain private workspace modules bundled inside it. One release uses one npm publish
+operation. If npm accepts the upload but the final check fails, re-run the command;
+it verifies the matching archive without publishing again.
+
+The command reports `release ready` after npm exposes the version and a fresh install
+passes. New droplet deployments install the same package and start `cassie runtime`.
+
 ## Venues
 
 | venue       | status | TP/SL     | deploy | notes |

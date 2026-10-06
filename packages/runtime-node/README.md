@@ -4,8 +4,9 @@ The process a [cassie](https://www.npmjs.com/package/@quotient-forecasting/cassi
 in. Engine loop, SQLite state, and a control API on a unix socket. The same code serves
 `cassie run` on a laptop and a deployed bot on a droplet.
 
-You do not install this by hand. `cassie deploy` installs it on the droplet, pinned to the
-CLI's version, and `cassie run` uses the copy that came with the CLI.
+This is a private workspace module bundled in `@quotient-forecasting/cassie`.
+`cassie deploy` installs that package on the droplet, pinned to the CLI's version.
+`cassie run` uses the same bundled runtime locally.
 
 For the signals strategy, the engine reconciles positions and re-reads venue odds every
 60 seconds. Every five minutes it separately refreshes entry signals and batches the latest
@@ -15,7 +16,7 @@ published.
 
 ## As a service
 
-`cassie deploy` writes a systemd unit that runs the `cassie-runtime` binary with an
+`cassie deploy` writes a systemd unit that runs `cassie runtime` with an
 environment file:
 
 | | |

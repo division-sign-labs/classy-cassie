@@ -79,7 +79,7 @@ function exportedFiles(value) {
 export function workspaceOutputFingerprint(root) {
   const files = [];
   const packages = packagesWithBuild(root);
-  if (!packages.length || !existsSync(join(root, "packages/cli/dist/index.js"))) return null;
+  if (!packages.length || !existsSync(join(root, "packages/cli/dist/main.js"))) return null;
   for (const { path, manifest } of packages) {
     const outputs = [];
     walk(join(path, "dist"), outputs);
@@ -189,7 +189,7 @@ export async function runWorkspaceCli(args, options = {}) {
   const { root = ROOT, cwd = process.cwd(), env = process.env, runCommand = runChild } = options;
   const build = await ensureWorkspaceBuild(root, { ...options, env, runCommand });
   if (build.code !== 0) return build.code;
-  const result = await runCommand(process.execPath, [join(root, "packages/cli/dist/index.js"), ...args], { cwd, env });
+  const result = await runCommand(process.execPath, [join(root, "packages/cli/dist/main.js"), ...args], { cwd, env });
   return result.code;
 }
 

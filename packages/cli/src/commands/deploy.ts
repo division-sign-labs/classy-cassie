@@ -298,7 +298,7 @@ async function waitForSsh(target: Target): Promise<true> {
 
 async function waitForProvisioning(target: Target, fromWorkspace = false): Promise<true> {
   return waitFor("running first-boot setup", 10_000, 90, async () => {
-    const result = sshExec(target, `test -f ${READY_MARKER} && command -v ${fromWorkspace ? "node" : "cassie-runtime"} >/dev/null`);
+    const result = sshExec(target, `test -f ${READY_MARKER} && command -v ${fromWorkspace ? "node" : "cassie"} >/dev/null`);
     return result.ok ? true : null;
   });
 }
@@ -690,7 +690,7 @@ export async function runDeploy(botId: string, opts: DeployOpts = {}): Promise<v
     await waitForSsh(target);
     // A redeploy from a newer CLI has to move the droplet's runtime with it, or
     // the box keeps running whatever the first deploy installed.
-    const installed = workspaceArtifact ? undefined : sshExec(target, "cassie-runtime --version 2>/dev/null || true").stdout.trim();
+    const installed = workspaceArtifact ? undefined : sshExec(target, "cassie runtime --version 2>/dev/null || true").stdout.trim();
     if (!workspaceArtifact && installed !== version) {
       process.stdout.write(pc.dim(`updating the runtime to ${version}… `));
       sshExecOrThrow(target, installRuntimeCommand(version));

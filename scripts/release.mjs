@@ -1,22 +1,16 @@
 // scripts/release.mjs
-// Publishes public workspace packages in dependency order. Each version must
-// become visible through npm's consumer read path before any dependent is
-// published, making interrupted or partially propagated releases resumable.
+// Build, check and publish one archive containing all Cassie workspace modules.
 
-import { mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
+import { copyFileSync, existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
+import { parseArgs } from "node:util";
+import { RELEASE_PACKAGE, stageReleasePackage } from "./package-release.mjs";
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
-const PUBLISH_BRANCH = "main";
 const VISIBILITY_TIMEOUT_MS = 10 * 60_000;
-const VISIBILITY_POLL_MS = 2_000;
-
-function fail(message) {
-  throw new Error(message);
-}
 
 function capture(command, args, options = {}) {
   const result = spawnSync(command, args, {
@@ -24,11 +18,12 @@ function capture(command, args, options = {}) {
     env: options.env ?? process.env,
     encoding: "utf8",
     timeout: options.timeout ?? 30_000,
+    maxBuffer: 10 * 1024 * 1024,
   });
   if (result.error) throw result.error;
   if (result.status !== 0) {
     const detail = [result.stdout, result.stderr].filter(Boolean).join("\n").trim();
-    fail(`${command} ${args.join(" ")} failed${detail ? `:\n${detail}` : ""}`);
+    throw new Error(`${command} failed${detail ? `:\n${detail}` : ""}`);
   }
   return result.stdout.trim();
 }
@@ -40,212 +35,169 @@ function inherit(command, args, options = {}) {
     stdio: "inherit",
   });
   if (result.error) throw result.error;
-  if (result.status !== 0) fail(`${command} ${args.join(" ")} failed with exit code ${result.status}`);
-}
-
-export function orderWorkspacePackages(packages) {
-  const byName = new Map(packages.map((pkg) => [pkg.name, pkg]));
-  const ordered = [];
-  const visiting = new Set();
-  const visited = new Set();
-
-  const visit = (pkg, chain = []) => {
-    if (visited.has(pkg.name)) return;
-    if (visiting.has(pkg.name)) fail(`workspace dependency cycle: ${[...chain, pkg.name].join(" -> ")}`);
-    visiting.add(pkg.name);
-
-    const dependencyNames = Object.keys({
-      ...pkg.manifest.dependencies,
-      ...pkg.manifest.optionalDependencies,
-      ...pkg.manifest.peerDependencies,
-    }).sort();
-    for (const name of dependencyNames) {
-      const dependency = byName.get(name);
-      if (dependency) visit(dependency, [...chain, pkg.name]);
-    }
-
-    visiting.delete(pkg.name);
-    visited.add(pkg.name);
-    ordered.push(pkg);
-  };
-
-  for (const pkg of [...packages].sort((a, b) => a.name.localeCompare(b.name))) visit(pkg);
-  return ordered;
-}
-
-export function parseVisibleVersion(raw) {
-  try {
-    const parsed = JSON.parse(raw);
-    return typeof parsed === "string" ? parsed : undefined;
-  } catch {
-    const trimmed = raw.trim();
-    return trimmed || undefined;
-  }
+  if (result.status !== 0) throw new Error(`${command} failed with exit code ${result.status}`);
 }
 
 function workspacePackages() {
   const listed = JSON.parse(capture("pnpm", ["-r", "list", "--depth", "-1", "--json"]));
-  return listed
-    .filter((pkg) => !pkg.private)
-    .map((pkg) => {
-      const manifest = JSON.parse(readFileSync(join(pkg.path, "package.json"), "utf8"));
-      if (manifest.publishConfig?.access !== "public") {
-        fail(`${pkg.name} must declare publishConfig.access=public or private=true`);
-      }
-      return { name: pkg.name, version: pkg.version, path: pkg.path, manifest };
-    });
+  return listed.map(pkg => {
+    const manifest = JSON.parse(readFileSync(join(pkg.path, "package.json"), "utf8"));
+    if (!manifest.private) throw new Error(`${pkg.name} must be private; publish the assembled Cassie archive instead`);
+    return { name: pkg.name, version: pkg.version, path: pkg.path, manifest };
+  });
 }
 
 function assertReleaseGitState() {
-  if (capture("git", ["status", "--porcelain"])) fail("release requires a clean working tree");
+  if (capture("git", ["status", "--porcelain"])) throw new Error("release requires a clean working tree");
   const branch = capture("git", ["branch", "--show-current"]);
-  if (branch !== PUBLISH_BRANCH) fail(`release requires branch ${PUBLISH_BRANCH}; current branch is ${branch || "detached"}`);
-  const local = capture("git", ["rev-parse", "HEAD"]);
-  const upstream = capture("git", ["rev-parse", "@{upstream}"]);
-  if (local !== upstream) fail("release commit must be pushed before publishing");
+  if (branch !== "main") throw new Error(`release requires branch main; current branch is ${branch || "detached"}`);
+  if (capture("git", ["rev-parse", "HEAD"]) !== capture("git", ["rev-parse", "@{upstream}"])) {
+    throw new Error("release commit must be pushed before publishing");
+  }
 }
 
-export async function registryContainsVersion(registry, pkg, fetchImpl = fetch) {
-  const base = registry.endsWith("/") ? registry : `${registry}/`;
-  const url = new URL(encodeURIComponent(pkg.name), base);
-  url.searchParams.set("cassie_release_check", String(Date.now()));
+export async function registryVersion(registry, pkg, { consumer = false, fetchImpl = fetch } = {}) {
+  // Use npm install's exact URL and metadata format for the final visibility check.
+  const url = new URL(pkg.name.replace("/", "%2f"), registry.endsWith("/") ? registry : `${registry}/`);
+  if (!consumer) url.searchParams.set("cassie_release_check", String(Date.now()));
   const response = await fetchImpl(url, {
-    headers: { accept: "application/json", "cache-control": "no-cache" },
+    headers: {
+      accept: consumer ? "application/vnd.npm.install-v1+json" : "application/json",
+      "cache-control": "no-cache",
+    },
     cache: "no-store",
     signal: AbortSignal.timeout(30_000),
   });
-  if (response.status === 404) return false;
-  if (!response.ok) fail(`npm registry returned HTTP ${response.status} for ${pkg.name}`);
+  if (response.status === 404) return undefined;
+  if (!response.ok) throw new Error(`npm registry returned HTTP ${response.status} for ${pkg.name}`);
   const document = await response.json();
-  return Object.hasOwn(document.versions ?? {}, pkg.version);
+  return document.versions?.[pkg.version];
 }
 
-function versionVisibleToNpm(pkg) {
-  const result = spawnSync(
-    "npm",
-    ["view", `${pkg.name}@${pkg.version}`, "version", "--json", "--prefer-online"],
-    { cwd: ROOT, encoding: "utf8", timeout: 30_000 },
-  );
-  if (result.error || result.status !== 0) return false;
-  return parseVisibleVersion(result.stdout) === pkg.version;
-}
-
-async function waitForConsumerVisibility(pkg, timeoutMs = VISIBILITY_TIMEOUT_MS) {
-  const startedAt = Date.now();
-  let lastNoticeAt = 0;
-  while (Date.now() - startedAt < timeoutMs) {
-    if (versionVisibleToNpm(pkg)) {
-      console.log(`npm visible: ${pkg.name}@${pkg.version}`);
-      return;
+export async function waitForConsumerVisibility(registry, pkg, {
+  timeoutMs = VISIBILITY_TIMEOUT_MS,
+  check = registryVersion,
+  now = Date.now,
+  sleep = ms => new Promise(resolvePromise => setTimeout(resolvePromise, ms)),
+  log = console.log,
+} = {}) {
+  const startedAt = now();
+  let lastNoticeAt = -Infinity;
+  let lastError;
+  while (now() - startedAt < timeoutMs) {
+    try {
+      if (await check(registry, pkg, { consumer: true })) {
+        log(`npm visible: ${pkg.name}@${pkg.version}`);
+        return;
+      }
+      lastError = undefined;
+    } catch (error) { lastError = error; }
+    if (now() - lastNoticeAt >= 10_000) {
+      log(`waiting for npm: ${pkg.name}@${pkg.version}`);
+      lastNoticeAt = now();
     }
-    if (Date.now() - lastNoticeAt >= 10_000) {
-      console.log(`waiting for npm: ${pkg.name}@${pkg.version}`);
-      lastNoticeAt = Date.now();
-    }
-    await new Promise((resolvePromise) => setTimeout(resolvePromise, VISIBILITY_POLL_MS));
+    await sleep(Math.min(2_000, Math.max(0, timeoutMs - (now() - startedAt))));
   }
-  fail(`npm did not expose ${pkg.name}@${pkg.version} within ${Math.round(timeoutMs / 1000)} seconds`);
+  throw new Error(`npm did not expose ${pkg.name}@${pkg.version} within ${Math.round(timeoutMs / 1000)} seconds${lastError ? `: ${lastError.message}` : ""}. Re-run pnpm release:publish to verify the accepted release.`);
 }
 
-function smokeInstall(cliPackage) {
-  const directory = mkdtempSync(join(tmpdir(), "cassie-registry-install-"));
-  writeFileSync(
-    join(directory, "package.json"),
-    `${JSON.stringify({ name: "cassie-registry-install-check", private: true }, null, 2)}\n`,
-  );
+function smokeInstall(pkg, source, registry, preferOnline = false) {
+  const directory = mkdtempSync(join(tmpdir(), "cassie-install-check-"));
+  const env = { ...process.env, CASSIE_SKILLS_DIR: join(directory, "skills"), CASSIE_SKIP_SKILL_INSTALL: "0" };
   try {
-    console.log(`installing ${cliPackage.name}@${cliPackage.version} from npm`);
-    inherit("npm", ["install", `${cliPackage.name}@${cliPackage.version}`, "--prefer-online", "--no-audit", "--no-fund"], {
-      cwd: directory,
-      env: { ...process.env, CASSIE_SKILLS_DIR: join(directory, "skills") },
+    console.log(`checking installation: ${source}`);
+    inherit("npm", ["install", "--global", "--prefix", directory, source,
+      preferOnline ? "--prefer-online" : "--prefer-offline", "--registry", registry, "--no-audit", "--no-fund"], {
+      cwd: directory, env,
     });
-    const executable = join(directory, "node_modules", ".bin", process.platform === "win32" ? "cassie.cmd" : "cassie");
-    const installedVersion = capture(executable, ["--version"], { cwd: directory });
-    if (installedVersion !== cliPackage.version) {
-      fail(`installed cassie reported ${installedVersion}; expected ${cliPackage.version}`);
+    const executable = process.platform === "win32" ? join(directory, "cassie.cmd") : join(directory, "bin", "cassie");
+    for (const args of [["--version"], ["runtime", "--version"]]) {
+      const installedVersion = capture(executable, args, { cwd: directory, env });
+      if (installedVersion !== pkg.version) throw new Error(`installed ${args.join(" ")} reported ${installedVersion}; expected ${pkg.version}`);
     }
-    console.log(`registry install passed: cassie ${installedVersion}`);
+    const installed = join(directory, ...(process.platform === "win32" ? [] : ["lib"]), "node_modules", pkg.name);
+    const manifest = JSON.parse(readFileSync(join(installed, "package.json"), "utf8"));
+    if (JSON.stringify(manifest.bundleDependencies) !== JSON.stringify(pkg.bundled)) {
+      throw new Error("installed Cassie is missing bundled modules; use a new CLI version for the single-package release");
+    }
+    const runtime = join(installed, "node_modules", "@quotient-forecasting", "cassie-runtime-node");
+    for (const path of ["index.html", "app.js", "app.css"]) {
+      if (!existsSync(join(runtime, "dist", "dashboard", "ui", path))) throw new Error(`missing dashboard asset: ${path}`);
+    }
+    if (!existsSync(join(directory, "skills", "cassie", "SKILL.md")) ||
+        !existsSync(join(directory, "skills", "cassie", "thesis", "mappings.json"))) {
+      throw new Error("installed Cassie did not install the operator skill");
+    }
+    capture(process.execPath, ["--input-type=module", "-e",
+      `import {createRequire} from 'node:module'; const require=createRequire(${JSON.stringify(join(installed, "package.json"))}); const Database=require('better-sqlite3'); const db=new Database(':memory:'); db.exec('select 1'); db.close();`], { cwd: directory, env });
+    console.log(`install check passed: cassie and runtime ${pkg.version}`);
   } finally {
     rmSync(directory, { recursive: true, force: true });
   }
 }
 
-function packAndSmokeInstall(packages) {
-  const packDirectory = mkdtempSync(join(tmpdir(), "cassie-release-pack-"));
-  const installDirectory = mkdtempSync(join(tmpdir(), "cassie-release-install-"));
-  writeFileSync(
-    join(installDirectory, "package.json"),
-    `${JSON.stringify({ name: "cassie-release-install-check", private: true }, null, 2)}\n`,
-  );
-  try {
-    for (const pkg of packages) {
-      inherit("pnpm", ["pack", "--pack-destination", packDirectory], { cwd: pkg.path });
+export async function publishRelease(pkg, archive, registry, publishArgs = [], {
+  lookup = registryVersion,
+  publish = () => inherit("npm", ["publish", archive.path, "--access", "public", "--registry", registry, ...publishArgs]),
+  wait = waitForConsumerVisibility,
+  smoke = () => smokeInstall(pkg, `${pkg.name}@${pkg.version}`, registry, true),
+  log = console.log,
+} = {}) {
+  const existing = await lookup(registry, pkg);
+  if (existing) {
+    if (existing.dist?.integrity !== archive.integrity) {
+      throw new Error(`${pkg.name}@${pkg.version} already exists with different contents. Bump the CLI version before publishing.`);
     }
-    const tarballs = readdirSync(packDirectory)
-      .filter((name) => name.endsWith(".tgz"))
-      .sort()
-      .map((name) => join(packDirectory, name));
-    if (tarballs.length !== packages.length) {
-      fail(`packed ${tarballs.length} tarballs; expected ${packages.length}`);
-    }
-    inherit("npm", ["install", ...tarballs, "--prefer-offline", "--no-audit", "--no-fund"], {
-      cwd: installDirectory,
-      env: { ...process.env, CASSIE_SKILLS_DIR: join(installDirectory, "skills") },
-    });
-    const cliPackage = packages.find((pkg) => pkg.name === "@quotient-forecasting/cassie");
-    if (!cliPackage) fail("release set does not contain @quotient-forecasting/cassie");
-    const executable = join(
-      installDirectory,
-      "node_modules",
-      ".bin",
-      process.platform === "win32" ? "cassie.cmd" : "cassie",
-    );
-    const installedVersion = capture(executable, ["--version"], { cwd: installDirectory });
-    if (installedVersion !== cliPackage.version) {
-      fail(`packed cassie reported ${installedVersion}; expected ${cliPackage.version}`);
-    }
-    console.log(`local package install passed: cassie ${installedVersion}`);
-  } finally {
-    rmSync(packDirectory, { recursive: true, force: true });
-    rmSync(installDirectory, { recursive: true, force: true });
+    log(`already published: ${pkg.name}@${pkg.version}`);
+  } else {
+    await publish();
   }
+  await wait(registry, pkg);
+  await smoke();
+  log(`release ready: npm install --global ${pkg.name}@${pkg.version}`);
+}
+
+export function packAndCheckRelease(packages, registry, directory) {
+  const pkg = stageReleasePackage(packages, join(directory, "package"));
+  copyFileSync(join(ROOT, "LICENSE"), join(pkg.path, "LICENSE"));
+  const [packed] = JSON.parse(capture("npm", ["pack", "--ignore-scripts", "--json", "--pack-destination", directory], { cwd: pkg.path }));
+  const archive = { path: join(directory, packed.filename), integrity: packed.integrity };
+  if (JSON.stringify([...packed.bundled].sort()) !== JSON.stringify(pkg.bundled)) throw new Error("npm archive is missing bundled modules");
+  console.log(`packed ${RELEASE_PACKAGE}@${pkg.version}: ${pkg.bundled.length} internal modules, one archive`);
+  smokeInstall(pkg, archive.path, registry);
+  return { pkg, archive };
 }
 
 async function main() {
-  const args = process.argv.slice(2);
-  const dryRun = args.includes("--dry-run");
-  const publishArgs = args.filter((arg) => arg !== "--dry-run");
-  const packages = orderWorkspacePackages(workspacePackages());
-
-  console.log(packages.map((pkg, index) => `${index + 1}. ${pkg.name}@${pkg.version}`).join("\n"));
-
-  if (dryRun) {
-    packAndSmokeInstall(packages);
-    console.log(`release package check passed for ${packages.length} packages`);
-    return;
-  }
-
-  assertReleaseGitState();
-  const registry = capture("npm", ["config", "get", "registry"]);
-  for (const pkg of packages) {
-    if (await registryContainsVersion(registry, pkg)) {
-      console.log(`already published: ${pkg.name}@${pkg.version}`);
-    } else {
-      inherit("pnpm", ["publish", "--access", "public", "--publish-branch", PUBLISH_BRANCH, ...publishArgs], {
-        cwd: pkg.path,
-      });
+  const { values } = parseArgs({ options: {
+    "dry-run": { type: "boolean", default: false },
+    tag: { type: "string" },
+    registry: { type: "string" },
+    provenance: { type: "boolean" },
+  } });
+  if (!values["dry-run"]) assertReleaseGitState();
+  const packages = workspacePackages();
+  const registry = values.registry ?? capture("npm", ["config", "get", "registry"]);
+  inherit("pnpm", ["test"]); // Includes the only workspace build.
+  inherit("pnpm", ["typecheck"]);
+  const directory = mkdtempSync(join(tmpdir(), "cassie-release-"));
+  try {
+    const { pkg, archive } = packAndCheckRelease(packages, registry, directory);
+    if (values["dry-run"]) {
+      console.log("release check passed; one package is ready to publish");
+      return;
     }
-    await waitForConsumerVisibility(pkg);
+    assertReleaseGitState();
+    const publishArgs = [...(values.tag ? ["--tag", values.tag] : []), ...(values.provenance ? ["--provenance"] : [])];
+    await publishRelease(pkg, archive, registry, publishArgs);
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
   }
-
-  const cliPackage = packages.find((pkg) => pkg.name === "@quotient-forecasting/cassie");
-  if (!cliPackage) fail("release set does not contain @quotient-forecasting/cassie");
-  smokeInstall(cliPackage);
 }
 
 const invokedDirectly = process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url);
 if (invokedDirectly) {
-  main().catch((error) => {
+  main().catch(error => {
     console.error(error instanceof Error ? error.message : String(error));
     process.exitCode = 1;
   });

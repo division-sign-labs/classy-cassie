@@ -1,6 +1,6 @@
 {
   "name": "@quotient-forecasting/cassie",
-  "version": "0.4.19",
+  "version": "0.4.20",
   "type": "module",
   "license": "Apache-2.0",
   "description": "Self-hosted, non-custodial trading bots for prediction markets and perps venues",
@@ -28,11 +28,8 @@
   "engines": {
     "node": ">=24"
   },
-  "publishConfig": {
-    "access": "public"
-  },
   "bin": {
-    "cassie": "./dist/index.js"
+    "cassie": "./dist/main.js"
   },
   "exports": {
     ".": {
@@ -45,8 +42,7 @@
     "README.md"
   ],
   "scripts": {
-    "build": "rm -rf dist && tsc -p tsconfig.json && chmod +x dist/index.js",
-    "prepack": "pnpm build",
+    "build": "rm -rf dist && tsc -p tsconfig.json && chmod +x dist/index.js dist/main.js",
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {
@@ -65,5 +61,6 @@
     "@types/node": "24.2.1",
     "@types/prompts": "2.4.9",
     "typescript": "5.9.2"
-  }
+  },
+  "private": true
 }

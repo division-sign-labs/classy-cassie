@@ -6,7 +6,7 @@
 export const DROPLET_IMAGE = "ubuntu-24-04-x64";
 export const DEFAULT_REGION = "blr1";
 export const DEFAULT_SIZE = "s-1vcpu-1gb";
-export const RUNTIME_PACKAGE = "@quotient-forecasting/cassie-runtime-node";
+export const RUNTIME_PACKAGE = "@quotient-forecasting/cassie";
 /** Written by cloud-init when provisioning finishes, and polled by `cassie deploy`. */
 export const READY_MARKER = "/var/lib/cassie/.provisioned";
 export const UNIT_PATH = "/etc/systemd/system/cassie@.service";
@@ -26,7 +26,7 @@ EnvironmentFile=/etc/cassie/%i.env
 Environment=CASSIE_STATE_PATH=/var/lib/cassie/%i.sqlite
 Environment=CASSIE_CONTROL_SOCKET=/run/cassie/%i.sock
 Environment=CASSIE_RUNTIME_VERSION=${runtimeVersion}
-ExecStart=/usr/bin/cassie-runtime
+ExecStart=/usr/bin/cassie runtime
 Restart=always
 RestartSec=5
 # The stop path cancels resting orders before exit. Give it room.

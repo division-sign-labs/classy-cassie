@@ -368,7 +368,11 @@ venue.command("status").description("adapters and when they were last verified a
 const skill = program.command("skill").description("agent operator skill");
 skill.command("install").description("install or refresh the Cassie skill for Codex and Claude Code").action(wrap(installSkill));
 
-if (import.meta.main) program.parseAsync().catch(fail);
+export async function runCli(): Promise<void> {
+  await program.parseAsync().catch(fail);
+}
+
+if (import.meta.main) void runCli();
 
 function parsePort(raw: string): number {
   const value = Number(raw);

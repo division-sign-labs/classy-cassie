@@ -18,6 +18,7 @@ const f = vi.hoisted(() => ({
   buildId: "a".repeat(64),
   artifact: { id: "a".repeat(64), dependencyId: "b".repeat(64), version: "1.2.3", pnpmVersion: "10.15.0", archiveBase64: "YXJ0aWZhY3Q=" },
   createdUserData: "",
+  installedVersion: "1.2.3",
 }));
 
 vi.mock("../src/context.js", () => ({
@@ -81,7 +82,7 @@ vi.mock("../src/ssh.js", () => ({
     f.commands.push(command);
     if (command.startsWith("systemctl stop")) f.events.push("stop");
     return { ok: true, code: 0, stderr: "", stdout: command.includes("tar -C /var/lib/cassie") ? "c3RhdGU=" :
-      command.includes("--version") ? "1.2.3" : command.includes("/health") ? '{"ok":true}' : "" };
+      command.includes("--version") ? f.installedVersion : command.includes("/health") ? '{"ok":true}' : "" };
   },
   sshExecOrThrow: (_target: unknown, command: string, stdin?: string) => {
     f.commands.push(command);
@@ -118,7 +119,7 @@ beforeEach(() => {
   f.events.length = 0; f.commands.length = 0; f.environments.length = 0;
   f.cfg = config(); f.existing = true; f.buildFails = false; f.stageFails = false;
   f.dropletRegion = "sgp1"; f.namedDropletId = null; f.surplusReady = false;
-  f.buildId = f.artifact.id; f.createdUserData = "";
+  f.buildId = f.artifact.id; f.createdUserData = ""; f.installedVersion = "1.2.3";
 });
 
 describe("workspace deployment integration", () => {
@@ -182,7 +183,7 @@ describe("workspace deployment integration", () => {
     expect(f.createdUserData).toContain("awaiting workspace runtime");
     expect(f.createdUserData).not.toContain("npm install");
     expect(f.commands.some(command => command.includes(".provisioned") && command.includes("command -v node"))).toBe(true);
-    expect(f.commands.some(command => command.includes(".provisioned") && command.includes("command -v cassie-runtime"))).toBe(false);
+    expect(f.commands.some(command => command.includes(".provisioned") && command.includes("command -v cassie"))).toBe(false);
     expect(f.events.indexOf("stage")).toBeGreaterThan(f.events.indexOf("create"));
     expect(f.events.indexOf("start")).toBeGreaterThan(f.events.indexOf("activate"));
   });
@@ -194,5 +195,15 @@ describe("workspace deployment integration", () => {
     expect(f.events).not.toContain("activate");
     expect(f.commands).toContain("rm -f '/etc/systemd/system/cassie@workspace-bot.service.d/workspace-runtime.conf'");
     expect(f.commands.filter(command => command.startsWith("rm"))).toHaveLength(1);
+  });
+
+  it("replaces the old split-package runtime with the bundled runtime on redeploy", async () => {
+    f.installedVersion = ""; // An old droplet has cassie-runtime, but no cassie command.
+    await runDeploy("workspace-bot", { yes: true });
+    expect(f.commands).toContain("cassie runtime --version 2>/dev/null || true");
+    expect(f.commands).toContain("npm install --global --omit=dev --no-audit --no-fund @quotient-forecasting/cassie@1.2.3");
+    expect(f.commands.join("\n")).not.toContain("npm uninstall");
+    expect(f.commands).toContain("systemctl daemon-reload");
+    expect(f.events.indexOf("start")).toBeGreaterThan(f.events.indexOf("stop"));
   });
 });

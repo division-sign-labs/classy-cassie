@@ -7,8 +7,11 @@ describe("renderCloudInit", () => {
   const rendered = renderCloudInit({ runtimeVersion: "1.2.3" });
 
   it("pins the runtime to the version it was given", () => {
+    expect(RUNTIME_PACKAGE).toBe("@quotient-forecasting/cassie");
     expect(rendered).toContain(`${RUNTIME_PACKAGE}@1.2.3`);
     expect(rendered).toContain("Environment=CASSIE_RUNTIME_VERSION=1.2.3");
+    expect(rendered).toContain("ExecStart=/usr/bin/cassie runtime");
+    expect(rendered).not.toContain("@quotient-forecasting/cassie-runtime-node@");
   });
 
   it("carries no credential", () => {

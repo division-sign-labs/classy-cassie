@@ -4,17 +4,13 @@ The engine behind [cassie](https://www.npmjs.com/package/@quotient-forecasting/c
 venue adapters, the strategy engine, the risk module, the encrypted keystore, the signal
 client, and alerting.
 
-Most people want the CLI, not this package:
+This is a private workspace module bundled in the Cassie package:
 
 ```sh
 npm install --global @quotient-forecasting/cassie
 ```
 
-Install this one to build a strategy or a runtime against the same primitives.
-
-```sh
-npm install @quotient-forecasting/cassie-core
-```
+Within the source workspace, strategies and the runtime import these primitives:
 
 ```ts
 import { Engine, createAdapter, parseBotConfig } from "@quotient-forecasting/cassie-core";

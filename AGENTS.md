@@ -25,6 +25,9 @@ confirm every live order, confirm funding transfers, read `cassie status` and
   a venue-contract change that must re-verify against live docs and bump `verifiedAgainst`.
 - `pnpm test` builds the workspace, then runs vitest (`packages/core/test/**`).
   `pnpm -r typecheck` must stay clean.
+- All source workspaces are private. `pnpm release:publish` assembles and publishes
+  only `@quotient-forecasting/cassie`, with the internal modules bundled in one archive.
+  Use `pnpm release:check` for the complete check without publishing.
 - Strategies return `Action[]`; they never touch keys and never call `placeOrder` — the
   engine executes through the risk module. Don't add adapter calls to strategy code.
 - Master/L1 private keys are local-keystore-only. Anything pushed to a runtime must be a

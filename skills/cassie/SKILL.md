@@ -460,7 +460,7 @@ cassie destroy <botId>                  # cancel resting orders, then delete the
 destroy creates a fresh droplet; the bot's SQLite state does not survive it, and the
 engine rebuilds what it needs from the venue on the next tick.
 
-On the droplet: the service is `cassie@<botId>`, the binary is `/usr/bin/cassie-runtime`,
+On the droplet: the service is `cassie@<botId>`, the command is `/usr/bin/cassie runtime`,
 state is `/var/lib/cassie/<botId>.sqlite`, and the process runs as the unprivileged
 `cassie` user with `ProtectSystem=strict`. `systemctl stop` sends SIGTERM, which cancels
 resting orders before exit, with 45 seconds to do it.
