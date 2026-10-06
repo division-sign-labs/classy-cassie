@@ -3,7 +3,7 @@
 // HARD RULE enforced by this type surface: nothing here accepts account state.
 // The live client sends only the API key header and market-scope query params.
 //
-// Live contract (verified against the running gateway on 2026-08-13):
+// Live contract (verified against the running gateway on 2026-10-06):
 //   GET {gateway}/api/v1/signals  with header  x-quotient-api-key: <token>
 //   → { signals: [{ id, side, latest_q, current_cost_cents, entry_spread_pp,
 //        forecast_updated_at, published_at, is_active, thesis,
@@ -22,8 +22,9 @@ import type {
 } from "../types.js";
 import { DEFAULT_SIGNAL_MAX_AGE_SEC, type SignalsConfig } from "../config.js";
 import { boundFetch } from "../http.js";
-import { QuotientResearchClient } from "../quotient/research.js";
+import { QuotientResearchClient, QuotientSportsSchema } from "../quotient/research.js";
 import { QuotientApiError, withQuotientRetries, type RetryOptions } from "../quotient/retry.js";
+import { outcomeTokensOf } from "../venues/polymarket.js";
 
 export const SignalSchema = z.object({
   id: z.string(),
@@ -31,6 +32,7 @@ export const SignalSchema = z.object({
   venue: z.enum(["polymarket", "kalshi", "hyperliquid", "lighter", "fixture"]),
   marketRef: z.string(),
   side: z.enum(["YES", "NO", "LONG", "SHORT"]),
+  sleeve: z.string().optional(),
   prob: z.number().min(0).max(1).optional(),
   refPrice: z.number(),
   spreadPp: z.number().optional(),
@@ -72,6 +74,10 @@ type LiveSignalConfig = Pick<SignalsConfig, "baseUrl" | "path"> &
 const GatewaySignalSchema = z.object({
   id: z.string(),
   side: z.enum(["YES", "NO"]),
+  sleeve: z.string().nullish(),
+  sleeve_group: z.string().nullish(),
+  sports: QuotientSportsSchema.nullish(),
+  pick_label: z.string().nullish(),
   latest_q: z.number().min(0).max(1).nullish(),
   q_value_cents: z.number().nullish(),
   current_cost_cents: z.number().nullish(),
@@ -93,6 +99,10 @@ const GatewaySignalSchema = z.object({
 });
 
 const GatewayResponseSchema = z.object({ signals: z.array(z.unknown()) });
+
+interface OutcomeToken { tokenId: string; outcome: string }
+interface MarketTokens { yes: OutcomeToken; no: OutcomeToken }
+interface PolymarketIdentity { marketKey: string; conditionId?: string }
 
 async function fetchGatewayRows(
   cfg: Pick<SignalsConfig, "baseUrl" | "path">,
@@ -122,10 +132,10 @@ export async function checkLiveSignalAccess(
 }
 
 export class LiveSignalSource implements SignalSource {
-  /** condition_id → YES-token CLOB id (marketRef per the signal contract). */
-  readonly #tokenCache = new Map<string, string>();
+  /** condition_id → both outcomes in the adapter's canonical YES/NO orientation. */
+  readonly #tokenCache = new Map<string, MarketTokens>();
   /** YES-token marketRef → Quotient's stable Polymarket marketKey. */
-  readonly #marketKeyCache = new Map<string, string>();
+  readonly #marketKeyCache = new Map<string, PolymarketIdentity>();
   readonly #cfg: Pick<SignalsConfig, "baseUrl" | "path" | "maxAgeSec">;
   readonly #retry: RetryOptions | undefined;
   readonly #token: string;
@@ -167,7 +177,7 @@ export class LiveSignalSource implements SignalSource {
       if (!parsed.success) continue;
       const sig = await mapGatewayRow(
         parsed.data,
-        (conditionId) => resolveYesToken(conditionId, this.#tokenCache, this.#fetchImpl, this.#clobBase),
+        (conditionId) => resolveMarketTokens(conditionId, this.#tokenCache, this.#fetchImpl, this.#clobBase),
         this.#cfg.maxAgeSec,
       );
       if (!sig) continue;
@@ -190,7 +200,7 @@ export class LiveSignalSource implements SignalSource {
       const resolved = await Promise.all(
         marketRefs.map(async (marketRef) => ({
           marketRef,
-          marketKey: await resolvePolymarketMarketKey(
+          identity: await resolvePolymarketMarketKey(
             marketRef,
             this.#marketKeyCache,
             this.#fetchImpl,
@@ -200,28 +210,39 @@ export class LiveSignalSource implements SignalSource {
       );
       const byKey = new Map(
         resolved
-          .filter((row): row is { marketRef: string; marketKey: string } => Boolean(row.marketKey))
-          .map((row) => [row.marketKey.toLowerCase(), row.marketRef]),
+          .filter((row): row is { marketRef: string; identity: PolymarketIdentity } => Boolean(row.identity))
+          .map((row) => [row.identity.marketKey.toLowerCase(), row]),
       );
       if (byKey.size === 0) return [];
       const rows = await withQuotientRetries(() => this.#research.lookup({
         marketKeys: [...byKey.keys()],
         venue: "polymarket",
       }), this.#retry);
-      return rows.flatMap((row) => {
+      const forecasts = await Promise.all(rows.map(async (row): Promise<MarketForecast | null> => {
         const marketKey = row.marketKey?.toLowerCase();
-        const marketRef = marketKey ? byKey.get(marketKey) : undefined;
-        if (!marketRef || row.qProbability === undefined) return [];
+        const resolved = marketKey ? byKey.get(marketKey) : undefined;
+        if (!resolved || row.qProbability === undefined) return null;
+        const { marketRef, identity } = resolved;
+        let probYes = row.qProbability;
+        if (row.sports) {
+          const conditionId = row.conditionId ?? identity.conditionId;
+          const tokens = conditionId ? await resolveMarketTokens(conditionId, this.#tokenCache, this.#fetchImpl, this.#clobBase) : null;
+          if (!tokens || tokens.yes.tokenId !== marketRef) return null;
+          const qYes = sportsYesOutcome(tokens, row.sports.yesSideName, row.sports.yesSideCanonicalName);
+          if (!qYes) return null;
+          if (qYes === "NO") probYes = 1 - probYes;
+        }
         const endsAt = epochMs(row.endDate);
-        return [{
+        return {
           id: row.marketKey ?? "forecast:" + marketRef,
           ts: row.forecastAt ?? new Date(0).toISOString(),
           venue: "polymarket" as const,
           marketRef,
-          probYes: row.qProbability,
+          probYes,
           ...(endsAt !== undefined ? { endsAt } : {}),
-        }];
-      });
+        };
+      }));
+      return forecasts.filter((forecast): forecast is MarketForecast => forecast !== null);
     }
 
     if (query.venue === "kalshi") {
@@ -251,7 +272,7 @@ export class LiveSignalSource implements SignalSource {
 
 async function mapGatewayRow(
   g: z.output<typeof GatewaySignalSchema>,
-  resolveToken: (conditionId: string) => Promise<string | null>,
+  resolveTokens: (conditionId: string) => Promise<MarketTokens | null>,
   ttlSec: number,
 ): Promise<Signal | null> {
   if (g.is_active === false) return null;
@@ -259,16 +280,29 @@ async function mapGatewayRow(
   if (!venue) return null;
 
   let marketRef: string | null = null;
+  let side = g.side;
+  const sports = g.sleeve === "sports" || g.sleeve_group === "sports" || Boolean(g.sports);
   if (venue === "polymarket") {
-    marketRef = g.market?.condition_id ? await resolveToken(g.market.condition_id) : null;
+    const tokens = g.market?.condition_id ? await resolveTokens(g.market.condition_id) : null;
+    if (!tokens) return null;
+    marketRef = tokens.yes.tokenId;
+    if (sports) {
+      const qYes = sportsYesOutcome(tokens, g.sports?.yes_side?.name, g.sports?.yes_side?.canonical_name);
+      if (!qYes) return null;
+      if (qYes === "NO") side = g.side === "YES" ? "NO" : "YES";
+      // Named picks must agree with the selected token. Do not guess through contradictory metadata.
+      if (g.pick_label && !["yes", "no"].includes(outcomeLabel(g.pick_label)) &&
+          outcomeLabel(g.pick_label) !== outcomeLabel((side === "YES" ? tokens.yes : tokens.no).outcome)) return null;
+    }
   } else {
     marketRef = g.market?.nativeMarketId ?? null;
   }
   if (!marketRef) return null;
 
-  // latest_q is Q's YES probability; express prob/refPrice for the signaled side.
-  const qYes = g.latest_q ?? (g.q_value_cents != null ? g.q_value_cents / 100 : undefined);
-  const prob = qYes === undefined ? undefined : g.side === "YES" ? qYes : 1 - qYes;
+  // Keep the picked outcome's probability when remapping its YES/NO label.
+  // latest_q refers to Q's YES side; q_value_cents is already expressed for the pick.
+  const prob = g.latest_q != null ? (g.side === "YES" ? g.latest_q : 1 - g.latest_q)
+    : g.q_value_cents != null ? g.q_value_cents / 100 : undefined;
   const costCents = g.current_cost_cents ?? g.entry_pm;
   if (costCents == null) return null;
   const refPrice = costCents / 100;
@@ -281,7 +315,8 @@ async function mapGatewayRow(
     ts: g.forecast_updated_at ?? g.published_at ?? new Date(0).toISOString(),
     venue,
     marketRef,
-    side: g.side,
+    side,
+    ...(sports ? { sleeve: "sports" } : g.sleeve ? { sleeve: g.sleeve } : {}),
     prob,
     refPrice,
     spreadPp,
@@ -297,23 +332,39 @@ function epochMs(iso: string | null | undefined): number | undefined {
   return Number.isFinite(value) ? value : undefined;
 }
 
-/** Resolve a Polymarket condition_id to its YES-token CLOB id (cached, public endpoint). */
-async function resolveYesToken(
+function outcomeLabel(value: string): string {
+  return value.normalize("NFKC").trim().toLowerCase().replace(/\s+/g, " ");
+}
+
+/** Map Q's named YES outcome into the adapter's orientation. Unknown names fail closed. */
+function sportsYesOutcome(tokens: MarketTokens, name?: string | null, canonicalName?: string | null): "YES" | "NO" | null {
+  if (outcomeLabel(tokens.yes.outcome) === "yes" && outcomeLabel(tokens.no.outcome) === "no") return "YES";
+  const names = [name, canonicalName].filter((value): value is string => Boolean(value)).map(outcomeLabel);
+  const yes = names.includes(outcomeLabel(tokens.yes.outcome));
+  const no = names.includes(outcomeLabel(tokens.no.outcome));
+  return yes === no ? null : yes ? "YES" : "NO";
+}
+
+/** Resolve both tokens from the public CLOB endpoint, retaining the adapter's canonical marketRef. */
+async function resolveMarketTokens(
   conditionId: string,
-  cache: Map<string, string>,
+  cache: Map<string, MarketTokens>,
   fetchImpl: typeof fetch,
   clobBase: string,
-): Promise<string | null> {
+): Promise<MarketTokens | null> {
   const cached = cache.get(conditionId);
   if (cached) return cached;
   try {
     const res = await fetchImpl(`${clobBase}/markets/${conditionId}`);
     if (!res.ok) return null;
     const m = (await res.json()) as { tokens?: { token_id?: string; outcome?: string }[] };
-    const yes = m.tokens?.find((t) => t.outcome?.toLowerCase() === "yes") ?? m.tokens?.[0];
-    if (!yes?.token_id) return null;
-    cache.set(conditionId, yes.token_id);
-    return yes.token_id;
+    if (m.tokens?.length !== 2 || m.tokens.some(t => !t.token_id || !t.outcome)) return null;
+    const tokens = m.tokens.map(t => ({ tokenId: t.token_id!, outcome: t.outcome! }));
+    const ids = outcomeTokensOf(tokens);
+    if (ids.yes === ids.no) return null;
+    const outcomes = { yes: tokens.find(t => t.tokenId === ids.yes)!, no: tokens.find(t => t.tokenId === ids.no)! };
+    cache.set(conditionId, outcomes);
+    return outcomes;
   } catch {
     return null;
   }
@@ -322,10 +373,10 @@ async function resolveYesToken(
 /** Resolve a YES-token marketRef to Quotient's Polymarket marketKey (cached). */
 async function resolvePolymarketMarketKey(
   marketRef: string,
-  cache: Map<string, string>,
+  cache: Map<string, PolymarketIdentity>,
   fetchImpl: typeof fetch,
   gammaBase: string,
-): Promise<string | null> {
+): Promise<PolymarketIdentity | null> {
   const cached = cache.get(marketRef);
   if (cached) return cached;
   try {
@@ -340,9 +391,10 @@ async function resolvePolymarketMarketKey(
         ? (first as { id?: unknown }).id
         : undefined;
     if ((typeof id !== "string" && typeof id !== "number") || String(id).length === 0) return null;
-    const marketKey = "polymarket:" + String(id);
-    cache.set(marketRef, marketKey);
-    return marketKey;
+    const conditionId = (first as { conditionId?: unknown }).conditionId;
+    const identity = { marketKey: "polymarket:" + String(id), ...(typeof conditionId === "string" ? { conditionId } : {}) };
+    cache.set(marketRef, identity);
+    return identity;
   } catch {
     return null;
   }

@@ -36,8 +36,8 @@ import { installPolymarketUserAgent } from "./polymarket-user-agent.js";
 /**
  * Which token is the YES side of a binary market. Polymarket labels most markets
  * "Yes"/"No"; a matchup such as "Sabalenka vs Rybakina" labels its two tokens with
- * the names instead, and the first listed outcome is the one the question, Quotient's
- * forecast, and every published signal call YES.
+ * the names instead, and Cassie uses the first listed outcome as canonical YES.
+ * The signal source maps Quotient's named sports outcome into this orientation.
  */
 export function outcomeTokensOf(tokens: ReadonlyArray<{ tokenId: string | number | bigint; outcome: string }>): { yes: string; no: string } {
   const label = (token: { outcome: string }): string => token.outcome.trim().toLowerCase();

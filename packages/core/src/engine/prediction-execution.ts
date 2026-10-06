@@ -118,6 +118,8 @@ interface Parent extends Omit<PredictionExecutionParentSummary, "reservedNotiona
   minimumPrice?: number;
   budgetUsd: number;
   minimumEdge: number;
+  /** The publisher owns sports entry-edge eligibility; retain this through restarts. */
+  sportsSignal?: boolean;
   minimumNotional: number;
   children: string[];
   lastExitDecision?: "hold" | "normal" | "urgent";
@@ -467,10 +469,11 @@ export class PredictionExecutor {
       const provenance = action.provenance;
       const latestSignal = this.latestSignal(action.marketRef);
       const rawQ = provenance?.qHeld ?? (latestSignal?.side === outcome ? latestSignal.prob : undefined);
+      const sportsSignal = !this.commodities && action.kind === "enter" && latestSignal?.side === outcome && latestSignal.sleeve === "sports";
       const minimumEdge = this.strategyNumber("entrySpreadPp", 10) / 100;
       if (action.kind === "enter" && !probability(rawQ)) return this.refuse(action, "no usable Q probability");
       const maximumPrice = action.kind === "enter"
-        ? floorTick(Math.min(ask, (rawQ as number) - minimumEdge, action.limitPrice ?? 1), market.tickSize)
+        ? floorTick(Math.min(ask, sportsSignal ? ask : (rawQ as number) - minimumEdge, action.limitPrice ?? 1), market.tickSize)
         : 1;
       if (!(maximumPrice > 0) || (action.kind === "enter" && maximumPrice + EPS < bid)) return this.refuse(action, "price bound below the best bid", { maximumPrice, bid, ask });
       const cash = snapshot?.cash ?? 0;
@@ -505,7 +508,8 @@ export class PredictionExecutor {
         ...(action.kind === "enter" && this.entryCrossingDuration > 0 ? { crossingDeadlineAt: now + this.entryDuration + this.entryCrossingDuration } : {}),
         minOrderSize: market.minOrderSize,
         ...(action.kind === "exit" && action.limitPrice !== undefined ? { minimumPrice: action.limitPrice } : {}), budgetUsd: budget,
-        minimumEdge, minimumNotional: action.kind === "enter" ? Math.max(this.d.config.risk.minViableNotional, action.minNotional ?? 0) : 0,
+        minimumEdge, ...(sportsSignal ? { sportsSignal: true } : {}),
+        minimumNotional: action.kind === "enter" ? Math.max(this.d.config.risk.minViableNotional, action.minNotional ?? 0) : 0,
         filledSize: 0, filledNotionalUsd: 0, feeUsd: 0, children: [], priorMarketSize: heldSize,
         ...(entryAvgPrice !== undefined ? { entryAvgPrice } : {}),
         arrivalBid: bid, ...(external.asks.length ? { arrivalAsk: ask } : {}),
@@ -672,14 +676,14 @@ export class PredictionExecutor {
     if (p.side === "BUY" && this.signals) {
       const signal = this.latestSignal(p.marketRef);
       const ttl = Math.min(this.d.config.signals.maxAgeSec, signal?.ttlSec ?? this.d.config.signals.maxAgeSec) * 1000;
-      if (!signal || signal.side !== p.outcome || !probability(signal.prob) || !Number.isFinite(ttl) || ttl <= 0 || this.now() - Date.parse(signal.ts) > ttl || Date.parse(signal.ts) - this.now() > 1000) {
+      if (!signal || signal.side !== p.outcome || !probability(signal.prob) || (p.sportsSignal && signal.sleeve !== "sports") || !Number.isFinite(ttl) || ttl <= 0 || this.now() - Date.parse(signal.ts) > ttl || Date.parse(signal.ts) - this.now() > 1000) {
         await this.stopParent(p, "entry signal is no longer eligible"); return;
       }
       if (this.commodities && (signal.settlementBasis !== p.provenance?.settlementBasis || signal.rulesHash !== p.provenance?.rulesHash
         || !signal.endsAt || signal.endsAt - this.now() < this.strategyNumber("minHoursToClose", 2) * 3_600_000)) {
         await this.stopParent(p, "settlement terms changed or entry cutoff passed"); return;
       }
-      p.maximumPrice = Math.min(p.maximumPrice, signal.prob - p.minimumEdge);
+      if (!p.sportsSignal) p.maximumPrice = Math.min(p.maximumPrice, signal.prob - p.minimumEdge);
     }
     const m = supplied ?? await this.rpc("execution market", () => this.d.adapter.executionMarket!(p.marketRef, p.outcome));
     const crossing = entryCross || phase === "taker" || (p.side === "SELL" && (p.urgent || this.now() >= p.deadlineAt || this.remaining(p) + EPS < m.minOrderSize));
@@ -699,7 +703,7 @@ export class PredictionExecutor {
       const latestSignal = this.latestSignal(p.marketRef);
       const signalQ = latestSignal?.side === p.outcome ? latestSignal.prob : this.signals ? undefined : p.qHeld;
       const maximumEdge = this.d.config.strategy.config.maxEntrySpreadPp === null ? Number.POSITIVE_INFINITY : this.strategyNumber("maxEntrySpreadPp", 30) / 100;
-      if (!probability(signalQ) || (!this.commodities && (signalQ - (bid + ask) / 2 + EPS < p.minimumEdge || signalQ - (bid + ask) / 2 > maximumEdge + EPS))) {
+      if (!probability(signalQ) || (!this.commodities && !p.sportsSignal && (signalQ - (bid + ask) / 2 + EPS < p.minimumEdge || signalQ - (bid + ask) / 2 > maximumEdge + EPS))) {
         await this.stopParent(p, "live entry edge is outside its configured band"); return;
       }
       if (this.commodities) {
@@ -1342,7 +1346,7 @@ export class PredictionExecutor {
       const c = await this.load();
       const parents = Object.values(c.parents).map((p): PredictionExecutionParentSummary => {
         const remaining = this.remaining(p);
-        const { targetSize: _target, maximumPrice: _max, minimumPrice: _min, budgetUsd: _budget, minimumEdge: _edge, minimumNotional: _minimum,
+        const { targetSize: _target, maximumPrice: _max, minimumPrice: _min, budgetUsd: _budget, minimumEdge: _edge, sportsSignal: _sports, minimumNotional: _minimum,
           children: _children, lastExitDecision: _decision, lastExitEvaluationAt: _evaluated, fakSubmitted: _fak, crossingAt: _crossing, minOrderSize: _minSize,
           inventoryObserved: _inventory, lastValidatedBookAt: _bookTime, ...summary } = p;
         return { ...summary, remainingSize: remaining, reservedNotionalUsd: active(p) && p.side === "BUY" ? remaining * p.maximumPrice : 0,

@@ -652,6 +652,17 @@ to the YES-token marketRef, `latest_q` becomes the side-adjusted model probabili
 freshness by default; `signals.maxAgeSec` can override that per bot. Freshness never
 suppresses an exit.
 
+Published sports signals use the publisher's edge screening. The `signals` strategy
+skips its minimum and maximum entry-edge thresholds for the sports sleeve, including
+adaptive order supervision. Sports order prices stay capped at the admission ask or a
+lower explicit limit. Current Q and venue prices still determine Kelly sizing; a zero
+Kelly target produces no entry. Forecast age, liquidity, volume, cash, and exposure
+limits still apply. Other signal sleeves retain the configured edge thresholds.
+
+For sports markets with team names as outcomes, Cassie maps `sports.yes_side` to the
+venue tokens before selecting a side. The mapping also applies to held-market forecasts
+used for exits. A missing, ambiguous, or contradictory team mapping blocks that signal.
+
 For exits, held positions drive a batched market lookup independently of signal publication.
 Every Quotient read retries three times on a transient failure. After that the tick
 continues: the runtime serves its last signal snapshot and held-market forecasts, entries

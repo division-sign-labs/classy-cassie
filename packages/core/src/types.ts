@@ -335,6 +335,8 @@ export interface Signal {
   /** Polymarket: CLOB token ID of the YES token. Perps: instrument symbol. */
   marketRef: string;
   side: PositionSide;
+  /** Published signal sleeve. Sports entry edges are screened by the publisher. */
+  sleeve?: string;
   /** Model probability (prediction markets). */
   prob?: number;
   /** Market price at signal time. */

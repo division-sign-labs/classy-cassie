@@ -27,6 +27,14 @@ export const QUOTIENT_CALL_COST_USD = {
 
 export const QUOTIENT_LOOKUP_BATCH_LIMIT = 10;
 
+/** Sports probabilities refer to this named outcome, which may be the second venue token. */
+export const QuotientSportsSchema = z.object({
+  yes_side: z.object({
+    name: z.string().nullish(),
+    canonical_name: z.string().nullish(),
+  }).nullish(),
+});
+
 /** Lenient row shape: unknown fields pass through, malformed rows are skipped. */
 export const QuotientMarketRowSchema = z
   .object({
@@ -56,6 +64,7 @@ export const QuotientMarketRowSchema = z
     end_date: z.string().nullish(),
     condition_id: z.string().nullish(),
     nativeMarketId: z.string().nullish(),
+    sports: QuotientSportsSchema.nullish(),
   })
   .loose();
 
@@ -72,6 +81,7 @@ export interface QuotientMarketRow {
   endDate?: string;
   conditionId?: string;
   nativeMarketId?: string;
+  sports?: { yesSideName?: string; yesSideCanonicalName?: string };
 }
 
 function mapRow(raw: unknown): QuotientMarketRow | null {
@@ -96,6 +106,10 @@ function mapRow(raw: unknown): QuotientMarketRow | null {
     endDate: r.end_date ?? undefined,
     conditionId: r.condition_id ?? undefined,
     nativeMarketId: r.nativeMarketId ?? undefined,
+    ...(r.sports ? { sports: {
+      yesSideName: r.sports.yes_side?.name ?? undefined,
+      yesSideCanonicalName: r.sports.yes_side?.canonical_name ?? undefined,
+    } } : {}),
   };
 }
 

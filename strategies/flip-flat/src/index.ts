@@ -763,6 +763,7 @@ export class FlipFlatStrategy implements Strategy {
             allocationMode: "daily-budget",
             signalId: sig.id,
             signalTs: sig.ts,
+            ...(sig.sleeve ? { signalSleeve: sig.sleeve } : {}),
             side: sig.side,
             ...(sig.prob !== undefined ? { qHeld: sig.prob } : {}),
             signalRefPrice: sig.refPrice,
@@ -793,6 +794,7 @@ export class FlipFlatStrategy implements Strategy {
             allocationMode: "fixed-notional",
             signalId: sig.id,
             signalTs: sig.ts,
+            ...(sig.sleeve ? { signalSleeve: sig.sleeve } : {}),
             side: sig.side,
             ...(sig.prob !== undefined ? { qHeld: sig.prob } : {}),
             signalRefPrice: sig.refPrice,
@@ -1754,11 +1756,11 @@ export class FlipFlatStrategy implements Strategy {
     const yesMid = sig.side === "NO" ? 1 - price : price;
     if (!(price > 0 && price < 1)) return undefined;
 
-    // Revalidate both edges against the live held-side price. A formerly good
-    // signal must not be topped up after the venue has already converged.
+    // Sports publication owns entry-edge eligibility. Kelly still sizes from
+    // the current held-side probability and executable market price.
     const liveEdgePp = (sig.prob - price) * 100;
-    if (liveEdgePp < cfg.entrySpreadPp) return undefined;
-    if (cfg.maxEntrySpreadPp !== null && liveEdgePp - cfg.maxEntrySpreadPp > 1e-9) {
+    if (sig.sleeve !== "sports" && liveEdgePp < cfg.entrySpreadPp) return undefined;
+    if (sig.sleeve !== "sports" && cfg.maxEntrySpreadPp !== null && liveEdgePp - cfg.maxEntrySpreadPp > 1e-9) {
       ctx.log.info(
         `live edge ${liveEdgePp.toFixed(1)}pp > maxEntrySpreadPp ${cfg.maxEntrySpreadPp.toFixed(1)}pp; skipping ${sig.marketRef}`,
       );
@@ -1830,6 +1832,7 @@ export class FlipFlatStrategy implements Strategy {
       allocationMode: "portfolio-kelly",
       signalId: sig.id,
       signalTs: sig.ts,
+      ...(sig.sleeve ? { signalSleeve: sig.sleeve } : {}),
       side: sig.side,
       qHeld: sig.prob,
       signalRefPrice: sig.refPrice,
@@ -1963,6 +1966,7 @@ export class FlipFlatStrategy implements Strategy {
     spreadPp: number | undefined,
   ): Promise<boolean> {
     if (sig.side === "YES" || sig.side === "NO") {
+      if (sig.sleeve === "sports") return this.withinEntryWindow(ctx, cfg, sig);
       if (spreadPp === undefined || spreadPp < cfg.entrySpreadPp) return false;
       if (!this.withinEntryWindow(ctx, cfg, sig)) return false;
       if (cfg.maxEntrySpreadPp !== null && spreadPp > cfg.maxEntrySpreadPp) {

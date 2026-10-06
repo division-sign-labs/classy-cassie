@@ -145,6 +145,28 @@ describe("portfolio Kelly target", () => {
 });
 
 describe("flip-flat portfolio allocation", () => {
+  it.each(["portfolio-kelly", "daily-budget", "fixed-notional"])("uses publication edge eligibility for sports in %s mode", async (allocationMode) => {
+    const ctx = context({ config: { allocationMode, entrySpreadPp: 15, maxEntrySpreadPp: 30 }, signals: [
+      signal("sport-low", 5, { sleeve: "sports" }), signal("sport-high", 40, { sleeve: "sports" }),
+      signal("other-low", 5), signal("other-high", 40),
+    ] });
+    const got = await entries(ctx);
+    expect(got.map(action => action.marketRef).sort()).toEqual(["sport-high", "sport-low"]);
+    expect(got.every(action => action.provenance?.signalSleeve === "sports")).toBe(true);
+    if (allocationMode === "portfolio-kelly") expect(got.find(action => action.marketRef === "sport-low")!.notional).toBeCloseTo(25);
+  });
+
+  it("still rejects stale sports forecasts and insufficient sports exit liquidity", async () => {
+    const ctx = context({ signals: [signal("old", 5, { sleeve: "sports", ts: new Date(NOW - 86_400_001).toISOString() }),
+      signal("thin", 5, { sleeve: "sports" })] });
+    ctx.venue.book = async marketRef => ({ marketRef, bids: [{ price: .49, size: 100 }], asks: [{ price: .51, size: 100 }], ts: NOW });
+    expect(await entries(ctx)).toEqual([]);
+  });
+
+  it("uses current probability for sports Kelly sizing even when publication approved the entry", async () => {
+    expect(await entries(context({ signals: [signal("no-kelly-stake", -5, { sleeve: "sports" })] }))).toEqual([]);
+  });
+
   it("opens a new eligible market at its capped Kelly target", async () => {
     const got = await entries(context({ signals: [signal("m-new")] }));
     expect(got).toHaveLength(1);

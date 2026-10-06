@@ -125,6 +125,44 @@ function harness(strategy: Record<string, unknown> = {}, execution?: Record<stri
 describe("adaptive prediction execution", () => {
   afterEach(() => { vi.useRealTimers(); });
 
+  it.each([.58, .95])("executes published sports at Q=%s without applying the local edge band", async prob => {
+    const h = harness({ entrySpreadPp: 15, maxEntrySpreadPp: 30 });
+    const signal: Signal = { id: "sports", marketRef: "yes", venue: "polymarket", side: "YES", sleeve: "sports", prob,
+      refPrice: .6, ts: new Date(NOW).toISOString(), ttlSec: 10800 };
+    await h.executor.supervise({ signals: [signal], refreshedAt: h.now() });
+    await h.executor.admit(enter({ provenance: { qHeld: prob, signalId: signal.id, signalTs: signal.ts } }), []);
+    expect(h.submissions).toHaveLength(1);
+    expect(h.submissions[0]).toMatchObject({ limitPrice: .59, postOnly: true });
+    h.restart(); h.advance(5000);
+    await h.executor.supervise({ signals: [{ ...signal, prob: .57 }], refreshedAt: h.now() });
+    expect([...h.orders.values()]).toHaveLength(1);
+    h.advance(115_000);
+    await h.executor.supervise({ signals: [{ ...signal, prob: .57 }], refreshedAt: h.now() });
+    await h.settleCancel();
+    expect(h.submissions).toContainEqual(expect.objectContaining({ postOnly: false, limitPrice: .6 }));
+  });
+
+  it("does not accept sports provenance as a substitute for a published sports signal", async () => {
+    const h = harness({ entrySpreadPp: 15 });
+    await h.executor.supervise({ signals: [{ id: "plain", marketRef: "yes", venue: "polymarket", side: "YES", prob: .58,
+      refPrice: .6, ts: new Date(NOW).toISOString(), ttlSec: 10800 }], refreshedAt: h.now() });
+    await h.executor.admit(enter({ provenance: { qHeld: .58, signalSleeve: "sports" } }), []);
+    expect(h.submissions).toEqual([]);
+  });
+
+  it.each(["withdrawn", "stale", "side-flipped"])("cancels a working sports entry when its signal is %s", async reason => {
+    const h = harness({ entrySpreadPp: 15 });
+    const signal: Signal = { id: "sports", marketRef: "yes", venue: "polymarket", side: "YES", sleeve: "sports", prob: .58,
+      refPrice: .6, ts: new Date(NOW).toISOString(), ttlSec: 10800 };
+    await h.executor.supervise({ signals: [signal], refreshedAt: h.now() });
+    await h.executor.admit(enter({ provenance: { qHeld: .58 } }), []);
+    expect(h.submissions).toHaveLength(1);
+    h.advance(5000);
+    const changed: Signal = { ...signal, ...(reason === "stale" ? { ts: new Date(NOW - 10_800_001).toISOString() } : { side: "NO" }) };
+    await h.executor.supervise({ signals: reason === "withdrawn" ? [] : [changed], refreshedAt: h.now() });
+    expect(h.adapter.cancelOrderChecked).toHaveBeenCalled();
+  });
+
   it("checks idle accounts every thirty seconds while preserving signal refreshes and explicit reads", async () => {
     const h = harness(); await h.ready();
     for (let i = 0; i < 5; i++) {

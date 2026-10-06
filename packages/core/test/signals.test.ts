@@ -89,7 +89,7 @@ describe("signal configuration", () => {
   });
 });
 
-describe("LiveSignalSource (gateway contract, verified 2026-08-13)", () => {
+describe("LiveSignalSource (gateway contract, verified 2026-10-06)", () => {
   const gatewayRow = {
     id: "gw-1",
     side: "YES",
@@ -109,10 +109,10 @@ describe("LiveSignalSource (gateway contract, verified 2026-08-13)", () => {
   };
 
   /** Routes gateway vs CLOB token-resolution requests. */
-  function routedFetch(rows: unknown[] = [gatewayRow]) {
+  function routedFetch(rows: unknown[] = [gatewayRow], market = clobMarket) {
     return vi.fn(async (url: string | URL | Request) => {
       const u = String(url);
-      if (u.includes("/markets/")) return new Response(JSON.stringify(clobMarket), { status: 200 });
+      if (u.includes("/markets/")) return new Response(JSON.stringify(market), { status: 200 });
       return new Response(JSON.stringify({ signals: rows }), { status: 200 });
     }) as unknown as typeof fetch;
   }
@@ -187,6 +187,45 @@ describe("LiveSignalSource (gateway contract, verified 2026-08-13)", () => {
     const [sig] = await src.latest({});
     expect(sig!.prob).toBeCloseTo(0.7, 9); // 1 − latest_q
     expect(sig!.refPrice).toBe(0.6);
+  });
+
+  it.each([
+    { side: "NO", pick: "Los Angeles Dodgers", expectedSide: "YES", probability: .66 },
+    { side: "YES", pick: "Atlanta Braves", expectedSide: "NO", probability: .34 },
+  ])("maps sports $side to the named pick when Q's YES is the second token", async ({ side, pick, expectedSide, probability }) => {
+    const row = { ...gatewayRow, side, latest_q: .34, sleeve: "sports", pick_label: pick,
+      sports: { yes_side: { name: "Atlanta Braves", canonical_name: "Atlanta" } } };
+    const market = { tokens: [{ token_id: "111", outcome: "Los Angeles Dodgers" }, { token_id: "222", outcome: "Atlanta Braves" }] };
+    const src = new LiveSignalSource({ baseUrl: "https://gw.example", path: "/s" }, "t", routedFetch([row], market));
+    const [sig] = await src.latest({ venue: "polymarket" });
+    expect(sig).toMatchObject({ marketRef: "111", side: expectedSide, sleeve: "sports", refPrice: .78 });
+    expect(sig!.prob).toBeCloseTo(probability);
+    expect(marketForecastFromSignal(sig!)!.probYes).toBeCloseTo(.66);
+  });
+
+  it("retains canonical sports sides when the team is already the first token", async () => {
+    const row = { ...gatewayRow, sleeve: "sports", pick_label: "Nuggets", sports: { yes_side: { name: "Nuggets" } } };
+    const market = { tokens: [{ token_id: "111", outcome: "Nuggets" }, { token_id: "222", outcome: "Jazz" }] };
+    const src = new LiveSignalSource({ baseUrl: "https://gw.example", path: "/s" }, "t", routedFetch([row], market));
+    expect(await src.latest({})).toMatchObject([{ marketRef: "111", side: "YES", prob: .86, sleeve: "sports" }]);
+  });
+
+  it.each([
+    { sports: undefined, pick_label: "Dodgers" },
+    { sports: { yes_side: { name: "Unknown team" } }, pick_label: "Dodgers" },
+    { sports: { yes_side: { name: "Braves", canonical_name: "Dodgers" } }, pick_label: "Dodgers" },
+    { sports: { yes_side: { name: "Braves" } }, pick_label: "Braves" },
+  ])("drops sports signals with missing, ambiguous or contradictory named outcomes: %j", async (metadata) => {
+    const row = { ...gatewayRow, side: "NO", sleeve: "sports", ...metadata };
+    const market = { tokens: [{ token_id: "111", outcome: "Dodgers" }, { token_id: "222", outcome: "Braves" }] };
+    const src = new LiveSignalSource({ baseUrl: "https://gw.example", path: "/s" }, "t", routedFetch([row], market));
+    expect(await src.latest({})).toEqual([]);
+  });
+
+  it("does not invert an already side-adjusted q_value_cents fallback", async () => {
+    const row = { ...gatewayRow, side: "NO", latest_q: null, q_value_cents: 66 };
+    const src = new LiveSignalSource({ baseUrl: "https://gw.example", path: "/s" }, "t", routedFetch([row]));
+    expect(await src.latest({})).toMatchObject([{ side: "NO", prob: .66 }]);
   });
 
   it("drops inactive rows and unknown venues", async () => {
@@ -265,6 +304,22 @@ describe("LiveSignalSource (gateway contract, verified 2026-08-13)", () => {
     const fetchImpl = (async () => new Response(JSON.stringify({ nope: true }), { status: 200 })) as typeof fetch;
     const src = new LiveSignalSource({ baseUrl: "https://x.example", path: "/s" }, "t", fetchImpl);
     await expect(src.latest({})).rejects.toThrow();
+  });
+
+  it("orients held sports forecasts after a restart without an active published signal", async () => {
+    const fetchImpl = vi.fn(async (input: string | URL | Request) => {
+      const url = new URL(String(input));
+      if (url.origin === "https://gamma.example") return new Response(JSON.stringify([{ id: "game", conditionId: "condition" }]));
+      if (url.origin === "https://clob.example") return new Response(JSON.stringify({ tokens: [
+        { token_id: "111", outcome: "Los Angeles Dodgers" }, { token_id: "222", outcome: "Atlanta Braves" },
+      ] }));
+      return new Response(JSON.stringify({ results: [{ marketKey: "polymarket:game", quotient_odds: .34,
+        last_updated: gatewayRow.forecast_updated_at, sports: { yes_side: { name: "Atlanta Braves" } } }] }));
+    }) as unknown as typeof fetch;
+    const src = new LiveSignalSource({ baseUrl: "https://gw.example", path: "/s" }, "t", fetchImpl, "https://clob.example", "https://gamma.example");
+    const [forecast] = await src.forecasts({ venue: "polymarket", marketRefs: ["111"] });
+    expect(forecast).toMatchObject({ marketRef: "111", id: "polymarket:game" });
+    expect(forecast!.probYes).toBeCloseTo(.66);
   });
 
   it("retries a 5xx three times, then throws", async () => {
