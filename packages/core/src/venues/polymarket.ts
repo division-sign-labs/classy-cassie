@@ -938,12 +938,10 @@ export class PolymarketAdapter implements VenueAdapter {
     const cached = this.eventRefCache.get(marketRef);
     if (cached) return cached;
     try {
-      const url = new URL("/markets", this.urls.gamma);
-      url.searchParams.set("clob_token_ids", marketRef);
-      const res = await fetch(url, { headers: { accept: "application/json" } });
-      if (!res.ok) return undefined;
-      const body = (await res.json()) as unknown;
-      const first = Array.isArray(body) ? body[0] : undefined;
+      // Gamma returns a closed market only with closed=true, and a resolved position still counts as exposure.
+      const first =
+        (await this.requestGammaMarket(marketRef, { isClosed: false })) ??
+        (await this.requestGammaMarket(marketRef, { isClosed: true }));
       if (!first || typeof first !== "object") return undefined;
       const events = (first as { events?: unknown }).events;
       const event = Array.isArray(events) ? events[0] : undefined;
@@ -958,6 +956,16 @@ export class PolymarketAdapter implements VenueAdapter {
     } catch {
       return undefined;
     }
+  }
+
+  private async requestGammaMarket(marketRef: string, { isClosed }: { isClosed: boolean }): Promise<unknown> {
+    const url = new URL("/markets", this.urls.gamma);
+    url.searchParams.set("clob_token_ids", marketRef);
+    if (isClosed) url.searchParams.set("closed", "true");
+    const res = await fetch(url, { headers: { accept: "application/json" } });
+    if (!res.ok) return undefined;
+    const body = (await res.json()) as unknown;
+    return Array.isArray(body) ? body[0] : undefined;
   }
 
   // -------------------------------------------------------------------------
