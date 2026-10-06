@@ -32,6 +32,22 @@ describe("venue event refs", () => {
     expect(url.searchParams.get("clob_token_ids")).toBe("yes-token-1");
   });
 
+  it("resolves a closed Polymarket market, which Gamma only returns with closed=true", async () => {
+    const fetchImpl = vi.fn(async (input: RequestInfo | URL) => {
+      const isClosedLookup = new URL(String(input)).searchParams.get("closed") === "true";
+      return new Response(JSON.stringify(isClosedLookup ? [{ events: [{ id: "103527" }] }] : []), { status: 200 });
+    });
+    vi.stubGlobal("fetch", fetchImpl);
+    const adapter = new PolymarketAdapter({ urls });
+
+    await expect(adapter.eventRef("resolved-token")).resolves.toBe("polymarket:103527");
+    expect(fetchImpl).toHaveBeenCalledTimes(2);
+    const [openLookupUrl, closedLookupUrl] = fetchImpl.mock.calls.map((call) => new URL(String(call[0])));
+    expect(openLookupUrl!.searchParams.has("closed")).toBe(false);
+    expect(closedLookupUrl!.searchParams.get("closed")).toBe("true");
+    expect(closedLookupUrl!.searchParams.get("clob_token_ids")).toBe("resolved-token");
+  });
+
   it("returns undefined for missing Polymarket event metadata", async () => {
     vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify([{ events: [] }]), { status: 200 })));
     const adapter = new PolymarketAdapter({ urls });
