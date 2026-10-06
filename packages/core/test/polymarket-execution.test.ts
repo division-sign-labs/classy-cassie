@@ -118,8 +118,9 @@ describe("Polymarket submission bounds and certainty", () => {
     const createMarketOrder = vi.fn(async () => signed);
     const createLimitOrder = vi.fn(async () => signed);
     const postOrder = vi.fn(async () => ({ ok: true, orderId: "order", status: "matched" }));
-    await adapterWith({ createMarketOrder, createLimitOrder, postOrder }, rawBook(outcome === "NO" ? "no" : "yes"))
+    const ack = await adapterWith({ createMarketOrder, createLimitOrder, postOrder }, rawBook(outcome === "NO" ? "no" : "yes"))
       .placeOrder(account, intent({ side, outcome, tif, postOnly: false, ...(tif === "GTD" ? { expiration: 2_000_000_000 } : {}) }));
+    expect(ack).toMatchObject({ tokenId: outcome === "NO" ? "no" : "yes", conditionId: "condition" });
     const createOrder = tif === "GTC" || tif === "GTD" ? createLimitOrder : createMarketOrder;
     expect(QUOTIENT_POLYMARKET_BUILDER_CODE).toMatch(/^0x[0-9a-fA-F]{64}$/);
     expect(createOrder).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ builderCode: QUOTIENT_POLYMARKET_BUILDER_CODE }));

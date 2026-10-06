@@ -1858,6 +1858,8 @@ export class MarketMakeController {
       status: "submitted",
       quantity: position.size,
       ...(payoutUsd !== undefined && Number.isFinite(payoutUsd) && payoutUsd >= 0 ? { payoutUsd } : {}),
+      ...(Number.isFinite(position.avgPrice) && position.avgPrice >= 0 && position.avgPrice <= 1
+        ? { entryAvgPrice: position.avgPrice } : {}),
     });
     try {
       const receipt = await this.venue.redeem(this.account, position);
@@ -1946,6 +1948,12 @@ export class MarketMakeController {
     if (this.stateStore.listOrders({ activeOnly: true, marketKey }).length > 0) {
       throw new Error(`cannot confirm redemption for ${marketKey} while orders remain unresolved`);
     }
+    const before = this.reducerState.markets[marketKey];
+    const size = before?.redemption?.quantity;
+    const payoutUsd = before?.redemption?.payoutUsd;
+    const entryAvgPrice = before?.redemption?.entryAvgPrice ?? before?.inventory?.avgCost;
+    const payout = size !== undefined && size > 0 && payoutUsd !== undefined ? payoutUsd / size : undefined;
+    const market = this.alertMarket(marketKey, outcome, { tokenId });
     this.stateStore.reconcileInventoryQuantity({ marketKey, tokenId, quantity: 0, costBasisUsd: 0, now });
     await this.processEvent({ type: "redemption", ts: now, marketKey, status: "confirmed" });
     this.inventoryMismatches.delete(`market:${marketKey}`);
@@ -1954,7 +1962,10 @@ export class MarketMakeController {
       marketKey,
       asset: tokenId,
       outcome,
-    }, { market: this.alertMarket(marketKey, outcome), reason: "market resolved; redemption confirmed" });
+      ...(size !== undefined ? { size } : {}),
+      ...(entryAvgPrice !== undefined ? { entryAvgPrice } : {}),
+      ...(payout !== undefined ? { payout } : {}),
+    }, { market, reason: "market resolved; redemption confirmed" });
     this.log.info("market-make redemption confirmed by zero venue position", { marketKey, tokenId, outcome });
   }
 
@@ -3451,7 +3462,7 @@ export class MarketMakeController {
       const fee = fill.fee ?? 0;
       const base = {
         at: new Date(fill.ts).toISOString(),
-        market: this.alertMarket(marketKey, outcome),
+        market: this.alertMarket(marketKey, outcome, { tokenId, conditionId: fill.conditionId }),
         trade: {
           side: fill.side,
           size: fillQuantity,
@@ -4748,11 +4759,16 @@ export class MarketMakeController {
    * spread from the Gamma catalog (mapCatalog), so `question` is present at
    * runtime although the snapshot type does not declare it.
    */
-  private alertMarket(marketKey: string, outcome?: string): NonNullable<AlertEvent["market"]> {
+  private alertMarket(marketKey: string, outcome?: string,
+    identity: Pick<Position, "tokenId" | "conditionId"> = {}): NonNullable<AlertEvent["market"]> {
     const catalog = this.catalogCache.get(marketKey)?.value ?? this.reducerState.markets[marketKey]?.catalog;
     const question = (catalog as { question?: unknown } | undefined)?.question;
+    const tokenId = identity.tokenId ?? (outcome === "YES" ? catalog?.yesTokenId : outcome === "NO" ? catalog?.noTokenId : undefined);
+    const conditionId = identity.conditionId ?? catalog?.conditionId;
     return {
       ref: catalog?.marketRef ?? marketKey,
+      ...(tokenId ? { tokenId } : {}),
+      ...(conditionId ? { conditionId } : {}),
       ...(typeof question === "string" && question.trim() ? { title: question.trim() } : {}),
       ...(outcome === "YES" || outcome === "NO" ? { outcome } : {}),
     };

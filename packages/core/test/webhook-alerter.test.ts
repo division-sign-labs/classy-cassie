@@ -15,7 +15,7 @@ const event = (over: Partial<AlertEvent> = {}): AlertEvent => ({
   at: "2026-09-24T14:03:00.000Z",
   venue: "polymarket",
   strategy: "signals",
-  market: { ref: "m", title: "Will it?", outcome: "YES" },
+  market: { ref: "m", title: "Will it?", outcome: "YES", tokenId: "m", conditionId: "0xcondition" },
   trade: { side: "SELL", size: 120, price: 0.71, notionalUsd: 85.2, feeUsd: 0.43, orderId: "0xabc", maker: true, filled: true },
   pnl: { usd: 12.4, pct: 8.3, basis: "realized" },
   reason: "take-profit",
@@ -62,7 +62,7 @@ describe("WebhookAlerter", () => {
       bot_id: "wti-1",
       venue: "polymarket",
       headline: "Exit +$12.40 (+8.3%)",
-      market: { title: "Will it?" },
+      market: { title: "Will it?", token_id: "m", condition_id: "0xcondition" },
       trade: { side: "SELL", notional_usd: 85.2, fee_usd: 0.43, order_id: "0xabc", maker: true },
       pnl: { usd: 12.4, pct: 8.3, basis: "realized" },
       data: { signalId: "sig_1" },
@@ -77,6 +77,31 @@ describe("WebhookAlerter", () => {
     await sink.send(event());
     await sink.flush();
     expect((calls[0]!.init.headers as Record<string, string>)["x-cassie-signature"]).toBeUndefined();
+  });
+
+  it.each((["entry", "exit", "fill", "flip", "resolution"] as const).flatMap(kind =>
+    (["YES", "NO"] as const).map(outcome => ({ kind, outcome }))))(
+    "carries exact outcome identifiers on $kind $outcome payloads", ({ kind, outcome }) => {
+      const yes = "17538918577045757318444194668211148943610591693537184656815548450079156080092";
+      const no = "64703197063795243847360183645307109446147801518759459137324323079702380490951";
+      const source = event({ kind, market: { ref: yes, title: "Will it?", outcome, tokenId: outcome === "YES" ? yes : no,
+        conditionId: "0xcondition", url: "https://polymarket.com/event/example" } });
+      const { body, id } = buildWebhookPayload(source, "json");
+      expect(JSON.parse(body).market).toEqual({ ref: yes, title: "Will it?", outcome, token_id: outcome === "YES" ? yes : no,
+        condition_id: "0xcondition", url: "https://polymarket.com/event/example" });
+      expect(id).toBe(webhookEventId(source, source.at!));
+      expect(source.market).toHaveProperty("tokenId");
+    },
+  );
+
+  it("omits unavailable market identities without substituting the reference", () => {
+    const { body } = buildWebhookPayload(event({ venue: "kalshi", market: { ref: "KXTICKER", outcome: "NO" } }), "json");
+    expect(JSON.parse(body).market).toEqual({ ref: "KXTICKER", outcome: "NO" });
+  });
+
+  it("preserves a zero resolution payout and the average entry price", () => {
+    const { body } = buildWebhookPayload(event({ kind: "resolution", data: { size: 12, payout: 0, entryAvgPrice: 0.42 } }), "json");
+    expect(JSON.parse(body).data).toEqual({ size: 12, payout: 0, entryAvgPrice: 0.42 });
   });
 
   it("posts readable text for Slack and Discord", async () => {

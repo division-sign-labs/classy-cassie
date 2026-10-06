@@ -811,21 +811,34 @@ describe("adaptive prediction execution", () => {
     expect(h.alerter.send).not.toHaveBeenCalled();
     h.fill("order-1", 20, "CONFIRMED", "notified-fill"); await h.executor.supervise();
     expect(h.alerter.send).toHaveBeenCalledTimes(1);
-    expect(h.alerter.send).toHaveBeenCalledWith(expect.objectContaining({ kind: "entry", data: expect.objectContaining({ orderId: "order-1", maker: true }) }));
+    expect(h.alerter.send).toHaveBeenCalledWith(expect.objectContaining({ kind: "entry",
+      market: { ref: "yes", tokenId: "yes", conditionId: "condition", outcome: "YES" },
+      data: expect.objectContaining({ orderId: "order-1", maker: true }) }));
     await h.executor.supervise(); await h.restart().recover();
     expect(h.alerter.send).toHaveBeenCalledTimes(1);
     const metrics = (await h.executor.snapshot()).parents[0]!.metrics!;
     expect(metrics.makerShare).toBe(1); expect(metrics.fillRatio).toBe(.2); expect(metrics.priceImprovementUsd).toBeCloseTo(.2);
   });
 
-  it("reports realized P&L on an exit fill that closes the whole position", async () => {
-    const h = harness(); h.setHeld(100); await h.ready();
+  it.each(["YES", "NO"] as const)("reports identity and realized P&L after the whole %s position closes", async outcome => {
+    const tokenId = outcome === "YES" ? "yes" : "no";
+    const h = harness(); h.setHeld(100, tokenId); await h.ready();
     await h.executor.admit({ kind: "exit", marketRef: "yes", reason: "take-profit" }, h.positions());
     expect(h.submissions[0]).toMatchObject({ side: "SELL", limitPrice: .59 });
     h.fill("order-1", 100); await h.executor.supervise();
     expect(h.positions()).toHaveLength(0);
-    expect(h.alerter.send).toHaveBeenCalledWith(expect.objectContaining({ kind: "exit", pnl: { usd: 8, pct: 15.69, basis: "realized" } }));
+    expect(h.alerter.send).toHaveBeenCalledWith(expect.objectContaining({ kind: "exit",
+      market: { ref: "yes", tokenId, conditionId: "condition", outcome }, pnl: { usd: 8, pct: 15.69, basis: "realized" } }));
     expect(h.log.info).toHaveBeenCalledWith("prediction fill confirmed", expect.objectContaining({ side: "SELL", entryAvgPrice: .51, pnlUsd: 8, pnlPct: 15.69 }));
+  });
+
+  it("retains the NO entry identity when a confirmed fill is first observed after restart", async () => {
+    const h = harness(); await h.ready("NO"); await h.executor.admit(enter({ side: "NO" }), []);
+    expect(h.submissions[0]).toMatchObject({ tokenId: "no", outcome: "NO" });
+    h.fill("order-1", 20);
+    await h.restart().recover();
+    expect(h.alerter.send).toHaveBeenCalledWith(expect.objectContaining({ kind: "entry",
+      market: { ref: "yes", tokenId: "no", conditionId: "condition", outcome: "NO" } }));
   });
 
   it("does not block execution on a failed fill notification", async () => {

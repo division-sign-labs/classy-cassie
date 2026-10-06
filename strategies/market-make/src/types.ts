@@ -251,6 +251,8 @@ export interface MarketRuntimeState {
     quantity?: number;
     /** Venue-reported or position-derived settlement proceeds; zero is valid. */
     payoutUsd?: number;
+    /** Average entry price per held-outcome share, captured before redemption. */
+    entryAvgPrice?: number;
     /** Public venue transaction/reference id only; never a signed payload. */
     reference?: string;
     error?: string;
@@ -363,6 +365,7 @@ export type NormalizedMarketMakeEvent =
       status: "submitted" | "failed" | "confirmed";
       quantity?: number;
       payoutUsd?: number;
+      entryAvgPrice?: number;
       /** Public venue transaction/reference id only; never a signed payload. */
       reference?: string;
       error?: string;

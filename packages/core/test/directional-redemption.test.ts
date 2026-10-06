@@ -39,10 +39,25 @@ describe("directional resolution settlement", () => {
     const s = setup();
     expect((await s.engine().tick(1)).errors).toBe(0);
     expect(s.redeem).toHaveBeenCalledOnce();
-    expect(s.send).toHaveBeenCalledWith(expect.objectContaining({ kind: "resolution", data: expect.objectContaining({ transactionId: "relay-123" }),
+    expect(s.send).toHaveBeenCalledWith(expect.objectContaining({ kind: "resolution",
+      market: { ref: "yes-token", tokenId: "no-token", conditionId: "condition", outcome: "NO" },
+      data: expect.objectContaining({ transactionId: "relay-123", size: 0.75, entryAvgPrice: 0.8, payout: 0 }),
       pnl: { usd: -0.6, pct: -100, basis: "realized" } }));
     await s.engine().tick(2);
     expect(s.redeem).toHaveBeenCalledOnce();
+    expect(s.send.mock.calls.filter(([event]) => event.kind === "resolution")).toHaveLength(1);
+  });
+
+  it.each([1, undefined])("retains the reported resolution payout %s without inferring a missing value", async payout => {
+    const s = setup(); s.positions[0] = { ...loss, tokenId: "yes-token", side: "YES", currentPrice: payout };
+    await s.engine().tick();
+    const alert = s.send.mock.calls.find(([event]) => event.kind === "resolution")![0];
+    expect(alert.market).toMatchObject({ tokenId: "yes-token", conditionId: "condition", outcome: "YES" });
+    expect(alert.data).toMatchObject({ size: 0.75, entryAvgPrice: 0.8 });
+    if (payout === undefined) {
+      expect(alert.data).not.toHaveProperty("payout");
+      expect(alert.pnl).toBeUndefined();
+    } else expect(alert.data.payout).toBe(payout);
   });
   it("never resubmits an ambiguous request after restart", async () => {
     const s = setup();
@@ -61,6 +76,43 @@ describe("directional resolution settlement", () => {
     await s.engine().tick(2);
     expect(s.redeem).toHaveBeenCalledOnce();
     expect(JSON.parse((await s.state.get("engine:redemption:condition"))!)).toMatchObject({ status: "confirmed" });
+    expect(s.send.mock.calls.filter(([event]) => event.kind === "resolution")).toHaveLength(1);
+  });
+
+  it("emits the saved resolution after restart when the venue position is already gone", async () => {
+    const s = setup();
+    s.redeem.mockImplementationOnce(async (_a, _p, hooks) => {
+      await hooks?.beforeSubmit(); await hooks?.submitted({ transactionId: "relay-123" }); throw new Error("wait timed out");
+    });
+    await s.engine().tick();
+    s.positions.length = 0;
+    vi.mocked(s.adapter.redemptionStatus!).mockResolvedValue("confirmed");
+    await s.engine().tick();
+    expect(s.redeem).toHaveBeenCalledOnce();
+    expect(s.send).toHaveBeenCalledWith(expect.objectContaining({ kind: "resolution",
+      market: { ref: "yes-token", tokenId: "no-token", conditionId: "condition", outcome: "NO" },
+      data: { size: 0.75, conditionId: "condition", entryAvgPrice: 0.8, payout: 0, transactionId: "relay-123" } }));
+    await s.engine().tick();
+    expect(s.send.mock.calls.filter(([event]) => event.kind === "resolution")).toHaveLength(1);
+    expect(JSON.parse((await s.state.get("engine:pending-redemptions"))!)).toEqual([]);
+  });
+
+  it("retains concurrent pending resolutions independently across restart", async () => {
+    const s = setup();
+    s.positions.push({ ...loss, marketRef: "other-yes", tokenId: "other-yes", conditionId: "other-condition", side: "YES", currentPrice: 1 });
+    s.redeem.mockImplementation(async (_a, pos, hooks) => {
+      await hooks?.beforeSubmit(); await hooks?.submitted({ transactionId: pos.conditionId }); throw new Error("wait timed out");
+    });
+    await s.engine().tick();
+    expect(s.redeem).toHaveBeenCalledTimes(2);
+    s.positions.length = 0;
+    vi.mocked(s.adapter.redemptionStatus!).mockResolvedValue("confirmed");
+    await s.engine().tick();
+    const resolutions = s.send.mock.calls.map(([event]) => event).filter(event => event.kind === "resolution");
+    expect(resolutions).toHaveLength(2);
+    expect(resolutions.map(event => event.market.tokenId).sort()).toEqual(["no-token", "other-yes"]);
+    expect(resolutions.map(event => event.data.payout).sort()).toEqual([0, 1]);
+    expect(s.redeem).toHaveBeenCalledTimes(2);
   });
   it("only releases a failed submission after the venue confirms failure", async () => {
     const s = setup();

@@ -430,6 +430,7 @@ function applyEvent(state: MarketMakeState, event: NormalizedMarketMakeEvent, co
       const previousAttempts = previous?.attempts ?? 0;
       const quantity = event.quantity ?? previous?.quantity;
       const payoutUsd = event.payoutUsd ?? previous?.payoutUsd;
+      const entryAvgPrice = event.entryAvgPrice ?? previous?.entryAvgPrice;
       const reference = event.reference ?? previous?.reference;
       market.redemption = {
         status: event.status,
@@ -439,6 +440,7 @@ function applyEvent(state: MarketMakeState, event: NormalizedMarketMakeEvent, co
         lastAttemptAt: event.ts,
         ...(quantity === undefined ? {} : { quantity }),
         ...(payoutUsd === undefined ? {} : { payoutUsd }),
+        ...(entryAvgPrice === undefined ? {} : { entryAvgPrice }),
         ...(reference === undefined ? {} : { reference }),
         ...(event.error === undefined ? {} : { error: event.error }),
       };

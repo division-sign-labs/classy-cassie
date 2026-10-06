@@ -6,6 +6,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
   MemoryStateStore,
+  type AlertEvent,
   type Fill,
   type Order,
   type OrderAck,
@@ -301,7 +302,8 @@ function fakeVenue(stateStore: MarketMakeStateStore): VenueControl {
   return control;
 }
 
-function quotient(now: () => number) {
+function quotient(now: () => number, outcome: "YES" | "NO" = "YES") {
+  const qYes = outcome === "YES" ? 0.71 : 0.29;
   return {
     spentUsd: 0,
     async activeSignals() {
@@ -313,10 +315,10 @@ function quotient(now: () => number) {
         conditionId: CONDITION,
         publishedAt: at,
         forecastAt: at,
-        entryQYes: 0.71,
+        entryQYes: qYes,
         entryMarketYes: 0.495,
-        qYes: 0.71,
-        publishedSide: "YES" as const,
+        qYes,
+        publishedSide: outcome,
         isActive: true,
         forecastStatus: { state: "sideways" as const, drawdownRiskElevated: false },
       }];
@@ -325,7 +327,7 @@ function quotient(now: () => number) {
       const at = new Date(now()).toISOString();
       return keys.map((marketKey) => ({
         marketKey,
-        qYes: 0.71,
+        qYes,
         forecastAt: at,
         forecastStatus: { state: "sideways" as const, drawdownRiskElevated: false },
       }));
@@ -359,13 +361,13 @@ function catalog(now: () => number) {
   };
 }
 
-function position(size: number, avgPrice: number, redeemable = false): Position {
+function position(size: number, avgPrice: number, redeemable = false, outcome: "YES" | "NO" = "YES"): Position {
   return {
     marketRef: YES,
-    tokenId: YES,
+    tokenId: outcome === "YES" ? YES : NO,
     conditionId: CONDITION,
-    outcome: "YES",
-    side: "YES",
+    outcome,
+    side: outcome,
     size,
     avgPrice,
     ...(redeemable ? { redeemable: true } : {}),
@@ -378,9 +380,9 @@ function authoritativeBuyFill(order: OrderIntent, orderId: string, size: number,
     orderId,
     makerOrderId: orderId,
     marketRef: YES,
-    tokenId: YES,
+    tokenId: order.tokenId,
     conditionId: CONDITION,
-    outcome: "YES",
+    outcome: order.outcome,
     side: "BUY",
     size,
     matchedAmountDelta: size,
@@ -395,9 +397,9 @@ function delayedSellFill(order: OrderIntent, orderId: string, size: number, ts: 
     orderId,
     makerOrderId: orderId,
     marketRef: YES,
-    tokenId: YES,
+    tokenId: order.tokenId,
     conditionId: CONDITION,
-    outcome: "YES",
+    outcome: order.outcome,
     side: "SELL",
     size,
     matchedAmountDelta: size,
@@ -473,7 +475,7 @@ describe("MarketMakeController adversarial lifecycle safety", () => {
     const intent = await startAndPlace(controller, control);
     const venueOrderId = control.orders[0]!.id;
     control.orders = [];
-    control.positions = [position(intent.size, intent.limitPrice)];
+    control.positions = [position(intent.size, intent.limitPrice, false, intent.outcome)];
     control.fills = [authoritativeBuyFill(intent, venueOrderId, intent.size, clock, "trade-entry")];
     clock += 1_000;
     control.bookTs = clock;
@@ -776,11 +778,16 @@ describe("MarketMakeController adversarial lifecycle safety", () => {
     expect(stateStore.listInventoryCycles(true)).toHaveLength(0);
   });
 
-  it("never blindly resubmits a redemption whose external call returned an ambiguous error", async () => {
+  it.each((["YES", "NO"] as const).flatMap(outcome => [0, 1, undefined].map(payout => ({ outcome, payout }))))(
+    "recovers $outcome redemption data with payout $payout after an ambiguous submission and restart", async ({ outcome, payout }) => {
     const control = fakeVenue(stateStore);
-    let controller = build(control);
+    const send = vi.fn(async (_event: AlertEvent) => {});
+    const overrides = { alerter: { send }, quotient: quotient(() => clock, outcome) };
+    let controller = build(control, overrides);
     const { intent } = await fillOpenEntry(controller, control);
-    control.positions = [position(intent.size, intent.limitPrice, true)];
+    const market = { ref: YES, tokenId: outcome === "YES" ? YES : NO, conditionId: CONDITION, outcome };
+    for (const kind of ["entry", "fill"]) expect(send).toHaveBeenCalledWith(expect.objectContaining({ kind, market }));
+    control.positions = [{ ...position(intent.size, intent.limitPrice, true, outcome), currentPrice: payout }];
     control.redeemFailuresRemaining = 1;
 
     clock += 1_000;
@@ -807,13 +814,40 @@ describe("MarketMakeController adversarial lifecycle safety", () => {
     await controller.shutdown();
     clock += 60_001;
     control.bookTs = clock;
-    controller = build(control);
+    controller = build(control, overrides);
     await controller.start();
 
     expect(control.redeemCalls).toBe(1);
     expect(controller.stateSnapshot().markets[MARKET_KEY]?.inventory).toBeUndefined();
     expect(controller.stateSnapshot().markets[MARKET_KEY]?.redemption?.status).toBe("confirmed");
+    expect(controller.stateSnapshot().markets[MARKET_KEY]?.redemption?.entryAvgPrice).toBe(intent.limitPrice);
     expect(stateStore.listInventoryCycles(true)).toHaveLength(0);
+    const alert = send.mock.calls.map(([event]) => event).find(event => event.kind === "resolution")!;
+    expect(alert.market).toEqual(market);
+    expect(alert.data).toMatchObject({ size: intent.size, entryAvgPrice: intent.limitPrice });
+    if (payout === undefined) expect(alert.data).not.toHaveProperty("payout");
+    else expect(alert.data?.payout).toBe(payout);
+    await controller.tick();
+    expect(send.mock.calls.filter(([event]) => event.kind === "resolution")).toHaveLength(1);
+    expect(control.redeemCalls).toBe(1);
+  });
+
+  it.each(["YES", "NO"] as const)("includes the actual %s token on fills and the final exit", async outcome => {
+    const control = fakeVenue(stateStore);
+    const send = vi.fn(async (_event: AlertEvent) => {});
+    const controller = build(control, { alerter: { send }, quotient: quotient(() => clock, outcome) });
+    await fillOpenEntry(controller, control);
+    await controller.halt({ liquidate: true });
+    const sell = control.placeCalls.findLast(order => order.side === "SELL")!;
+    const venueSell = control.orders.find(order => order.side === "SELL")!;
+    expect(sell).toBeDefined();
+    control.orders = [];
+    control.positions = [];
+    control.fills.push(delayedSellFill(sell, venueSell.id, sell.size, clock, "trade-exit"));
+    await applyReconcile(controller);
+    const market = { ref: YES, tokenId: outcome === "YES" ? YES : NO, conditionId: CONDITION, outcome };
+    expect(send).toHaveBeenCalledWith(expect.objectContaining({ kind: "exit", market }));
+    expect(send).toHaveBeenCalledWith(expect.objectContaining({ kind: "fill", market, trade: expect.objectContaining({ side: "SELL" }) }));
   });
 
   it("requires both websocket subscription methods when realtime supervision is enabled", () => {

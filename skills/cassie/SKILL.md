@@ -573,13 +573,37 @@ The JSON body:
   "strategy": "signals",
   "headline": "Exit +$12.40 (+8.3%)",
   "text": "the readable layout, without the debug block",
-  "market": { "ref": "…", "title": "Will Bitcoin close above $100k on Sep 30?", "outcome": "YES" },
+  "market": { "ref": "yes-token-id", "token_id": "yes-token-id", "condition_id": "0x…",
+              "title": "Will Bitcoin close above $100k on Sep 30?", "outcome": "YES" },
   "trade": { "side": "SELL", "size": 120, "price": 0.71, "notional_usd": 85.2, "fee_usd": 0.43,
              "order_id": "0x…", "maker": true, "position_side": "YES", "filled": true },
   "pnl": { "usd": 12.4, "pct": 8.3, "basis": "realized" },
   "reason": "take-profit: 71¢ bid reached",
   "message": "the engine's one-line message",
   "data": { "orderId": "0x…", "signalId": "sig_8f21" }
+}
+```
+
+Polymarket `entry`, `exit`, `fill`, and `resolution` events include `market.token_id`
+and `market.condition_id` as strings. `token_id` identifies the traded or held outcome;
+for a NO position, it is the NO token while `market.ref` remains the YES token. These
+fields come from execution records and cached metadata, without another webhook-time
+venue lookup. Other venues and older records omit identifiers they do not provide.
+This applies to the signals engine, legacy/manual orders, and the single-sided
+market-maker. The two-sided market-maker does not emit market alerts. `flip` remains
+reserved; a confirmed Q-flip exit uses `exit`.
+
+Resolution events carry `data.size`, `data.entryAvgPrice`, and `data.payout` when known.
+Both prices are dollars per held-outcome share; total settlement proceeds are
+`size * payout`. A reported losing payout is `0`; an unavailable payout is omitted.
+The runtime saves these values before redemption and retains them through delayed
+confirmation and restarts. For example, a redeemed NO position can carry:
+
+```json
+{
+  "kind": "resolution",
+  "market": { "ref": "yes-token-id", "token_id": "no-token-id", "condition_id": "0x…", "outcome": "NO" },
+  "data": { "size": 100, "entryAvgPrice": 0.42, "payout": 1 }
 }
 ```
 

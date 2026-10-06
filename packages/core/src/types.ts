@@ -158,6 +158,8 @@ export interface OrderAck {
    * caller never named. Settlement reconciliation uses this exact token.
    */
   tokenId?: string;
+  /** Prediction-market condition resolved by the adapter before placement. */
+  conditionId?: string;
   /** Wallet that holds the resulting position (Polymarket Deposit Wallet). */
   funder?: string;
   /** Local, non-secret digest of the SDK-created signed order. */
@@ -761,6 +763,10 @@ export type AlertPnlBasis = "realized" | "executable";
 
 export interface AlertMarket {
   ref: string;
+  /** Venue-native outcome token traded or held; may differ from the YES-token ref. */
+  tokenId?: string;
+  /** Prediction-market condition shared by the YES and NO outcomes. */
+  conditionId?: string;
   /** Human title: the market question, ticker, or `COIN-PERP`. */
   title?: string;
   outcome?: "YES" | "NO";

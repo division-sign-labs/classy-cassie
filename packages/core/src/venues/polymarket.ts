@@ -1090,6 +1090,7 @@ export class PolymarketAdapter implements VenueAdapter {
       avgFillPrice,
       // Exact traded token and position-holding wallet for reconciliation.
       tokenId,
+      conditionId,
       funder: this.creds?.funder,
       preparedHash,
     };

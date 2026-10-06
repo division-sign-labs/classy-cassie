@@ -493,7 +493,7 @@ export const NormalizedMarketMakeEventSchema = z.discriminatedUnion("type", [
   strict({
     type: z.literal("redemption"), ts: timestamp, marketKey: z.string().min(1),
     status: z.enum(["submitted", "failed", "confirmed"]),
-    quantity: positive.optional(), payoutUsd: nonnegative.optional(),
+    quantity: positive.optional(), payoutUsd: nonnegative.optional(), entryAvgPrice: probability.optional(),
     reference: z.string().trim().min(1).max(256).regex(/^[\x20-\x7E]+$/, "reference must contain printable ASCII only").optional(),
     error: z.string().min(1).optional(),
   }),

@@ -72,6 +72,15 @@ export function webhookEventId(event: AlertEvent, at: string): string {
   return `${event.botId}:${event.kind}:${key}:${at}`;
 }
 
+function snakeMarket(m: NonNullable<AlertEvent["market"]>): Record<string, unknown> {
+  const { tokenId, conditionId, ...market } = m;
+  return {
+    ...market,
+    ...(tokenId !== undefined ? { token_id: tokenId } : {}),
+    ...(conditionId !== undefined ? { condition_id: conditionId } : {}),
+  };
+}
+
 function snakeTrade(t: NonNullable<AlertEvent["trade"]>): Record<string, unknown> {
   return {
     side: t.side,
@@ -108,7 +117,7 @@ export function buildWebhookPayload(
     ...(event.strategy ? { strategy: event.strategy } : {}),
     headline: alertHeadline(event, { emoji: false }),
     text: formatAlertText(event, { includeData: false }),
-    ...(event.market ? { market: event.market } : {}),
+    ...(event.market ? { market: snakeMarket(event.market) } : {}),
     ...(event.trade ? { trade: snakeTrade(event.trade) } : {}),
     ...(event.pnl ? { pnl: event.pnl } : {}),
     ...(event.reason ? { reason: event.reason } : {}),

@@ -109,6 +109,15 @@ export interface TickResult {
 }
 
 const LOCK_TTL_MS = 120_000;
+const PENDING_REDEMPTIONS_KEY = "engine:pending-redemptions";
+
+interface RedemptionRecord {
+  status: "pending" | "confirmed";
+  at: number;
+  receipt?: RedemptionReceipt;
+  /** Retained after the venue removes the redeemed position. */
+  position?: Position;
+}
 
 /**
  * The venue refused an order the engine deliberately submitted below the
@@ -141,6 +150,8 @@ export interface OrderDecisionRecord {
   ts: number;
   botId: string;
   marketRef: string;
+  tokenId?: string;
+  conditionId?: string;
   outcome?: "YES" | "NO";
   side: OrderSide;
   size: number;
@@ -288,13 +299,12 @@ export class Engine {
         // Settlement belongs to account maintenance, independent of signal or
         // strategy failures. Slow relayer confirmations run outside trading.
         if (this.d.adapter.redeem && !this.redemptionsStopping) {
-          const resolved = [...new Map(ctx.positions.filter(p => p.redeemable && p.size > 0)
-            .map(p => [(p.conditionId ?? p.marketRef).toLowerCase(), p])).entries()];
+          const resolved = await this.redemptionCandidates(ctx.positions);
           actionsCount += resolved.length;
           const tasks = resolved.map(([key, position]) => {
             const running = this.redemptions.get(key);
             if (running) return running;
-            const task = this.executeAction({ kind: "redeem", marketRef: position.marketRef, reason: "market resolved" }, ctx)
+            const task = this.redeemPosition(position, ctx)
               .then(() => 0, async error => { await this.recordError(seq, "action-redeem", error, { marketRef: position.marketRef }); return 1; })
               .finally(() => this.redemptions.delete(key));
             this.redemptions.set(key, task);
@@ -500,53 +510,7 @@ export class Engine {
       }
       case "redeem": {
         const pos = ctx.positions.find((p) => p.marketRef === action.marketRef && p.redeemable && p.size > 0);
-        if (!pos || !adapter.redeem) return { placed: false };
-        // One SDK redemption burns both outcomes. Retain its receipt across ticks,
-        // indexer lag and process restarts; ambiguous submissions are never replayed.
-        const key = `engine:redemption:${(pos.conditionId ?? pos.marketRef).toLowerCase()}`;
-        const previous = await getJson<{ status: "pending" | "confirmed"; at: number; receipt?: RedemptionReceipt }>(this.d.state, key);
-        if (previous?.status === "confirmed") return { placed: false };
-        if (previous?.status === "pending") {
-          const status = previous.receipt && adapter.redemptionStatus
-            ? await adapter.redemptionStatus(account, previous.receipt) : "pending";
-          if (status === "confirmed") {
-            await setJson(this.d.state, key, { ...previous, status });
-            await this.disarmTriggers(pos.marketRef);
-          } else if (status === "failed") {
-            // Only an authoritative terminal failure releases the submission fence.
-            await this.d.state.delete(key);
-          } else {
-            this.d.log.warn(`redemption pending for ${shortRef(pos.marketRef)}; awaiting settlement before retry`, previous.receipt);
-          }
-          return { placed: false };
-        }
-        const working = ctx.openOrders.filter(order => order.marketRef === pos.marketRef);
-        const managed = ctx.execution?.parents.some(parent => parent.marketRef === pos.marketRef &&
-          ["active", "canceling"].includes(parent.status));
-        if (working.length || managed) {
-          if (this.predictions) await this.predictions.cancelMarket(pos.marketRef, "market resolved; cancel before redemption");
-          else for (const order of working) await adapter.cancelOrder(account, order.id);
-          return { placed: false };
-        }
-        const at = this.now();
-        const receipt = await adapter.redeem(account, pos, {
-          beforeSubmit: () => setJson(this.d.state, key, { status: "pending", at }),
-          submitted: receipt => setJson(this.d.state, key, { status: "pending", at, receipt }),
-        });
-        await setJson(this.d.state, key, { status: "confirmed", at, receipt });
-        await this.disarmTriggers(pos.marketRef);
-        // A resolved token pays its final price per share: 1 for the winner, 0 for the loser.
-        const payout = pos.currentPrice;
-        await this.alert({
-          kind: "resolution",
-          botId: this.d.botId,
-          message: `redeemed resolved position ${pos.side} ${shortRef(action.marketRef)}`,
-          data: { size: pos.size, conditionId: pos.conditionId, entryAvgPrice: pos.avgPrice, ...(payout !== undefined ? { payout } : {}), ...receipt },
-          ...this.baseAlert(),
-          market: this.alertMarket(action.marketRef, pos.outcome ?? (pos.side === "YES" || pos.side === "NO" ? pos.side : undefined), pos.label),
-          ...(payout !== undefined ? optionalPnl(closingPnl(pos.avgPrice, pos.side, pos.size, payout, 0, "realized")) : {}),
-          reason: "market resolved; position redeemed",
-        });
+        if (pos) await this.redeemPosition(pos, ctx);
         return { placed: false };
       }
       case "cancel": {
@@ -562,6 +526,76 @@ export class Engine {
           "explicit market-making orders require the market-make controller and passive risk executor",
         );
     }
+  }
+
+  /** Index pending receipts before submission so confirmation can resume without a live position. */
+  private async redemptionCandidates(positions: readonly Position[]): Promise<Array<[string, Position]>> {
+    const candidates = new Map(positions.filter(p => p.redeemable && p.size > 0)
+      .map(p => [(p.conditionId ?? p.marketRef).toLowerCase(), p]));
+    for (const id of await getJson<string[]>(this.d.state, PENDING_REDEMPTIONS_KEY) ?? []) {
+      const saved = await getJson<RedemptionRecord>(this.d.state, `engine:redemption:${id}`);
+      if (saved?.status === "pending" && saved.position) candidates.set(id, saved.position);
+    }
+    await setJson(this.d.state, PENDING_REDEMPTIONS_KEY, [...candidates.keys()]);
+    return [...candidates];
+  }
+
+  private async redeemPosition(pos: Position, ctx: StrategyContext): Promise<void> {
+    const { adapter, account, state } = this.d;
+    if (!adapter.redeem) return;
+    // One SDK redemption burns both outcomes. Retain its receipt across ticks,
+    // indexer lag and process restarts; ambiguous submissions are never replayed.
+    const key = `engine:redemption:${(pos.conditionId ?? pos.marketRef).toLowerCase()}`;
+    const previous = await getJson<RedemptionRecord>(state, key);
+    if (previous?.status === "confirmed") return;
+    if (previous?.status === "pending") {
+      // Upgrade a pre-snapshot pending record while the position is still available.
+      const record = { ...previous, position: previous.position ?? { ...pos } };
+      if (!previous.position) await setJson(state, key, record);
+      const status = record.receipt && adapter.redemptionStatus
+        ? await adapter.redemptionStatus(account, record.receipt) : "pending";
+      if (status === "confirmed") {
+        await this.confirmRedemption(key, record);
+      } else if (status === "failed") {
+        // Only an authoritative terminal failure releases the submission fence.
+        await state.delete(key);
+      } else {
+        this.d.log.warn(`redemption pending for ${shortRef(pos.marketRef)}; awaiting settlement before retry`, record.receipt);
+      }
+      return;
+    }
+    const working = ctx.openOrders.filter(order => order.marketRef === pos.marketRef);
+    const managed = ctx.execution?.parents.some(parent => parent.marketRef === pos.marketRef &&
+      ["active", "canceling"].includes(parent.status));
+    if (working.length || managed) {
+      if (this.predictions) await this.predictions.cancelMarket(pos.marketRef, "market resolved; cancel before redemption");
+      else for (const order of working) await adapter.cancelOrder(account, order.id);
+      return;
+    }
+    const record = { status: "pending" as const, at: this.now(), position: { ...pos } };
+    const receipt = await adapter.redeem(account, pos, {
+      beforeSubmit: () => setJson(state, key, record),
+      submitted: receipt => setJson(state, key, { ...record, receipt }),
+    });
+    await this.confirmRedemption(key, { ...record, receipt });
+  }
+
+  private async confirmRedemption(key: string, record: RedemptionRecord & { position: Position }): Promise<void> {
+    await setJson(this.d.state, key, { ...record, status: "confirmed" });
+    const pos = record.position;
+    await this.disarmTriggers(pos.marketRef);
+    // Dollars per held-outcome share. Zero is a reported loss, not missing data.
+    const payout = pos.currentPrice;
+    await this.alert({
+      kind: "resolution",
+      botId: this.d.botId,
+      message: `redeemed resolved position ${pos.side} ${shortRef(pos.marketRef)}`,
+      data: { size: pos.size, conditionId: pos.conditionId, entryAvgPrice: pos.avgPrice, ...(payout !== undefined ? { payout } : {}), ...record.receipt },
+      ...this.baseAlert(),
+      market: this.alertMarket(pos.marketRef, pos.outcome ?? (pos.side === "YES" || pos.side === "NO" ? pos.side : undefined), pos.label, pos),
+      ...(payout !== undefined ? optionalPnl(closingPnl(pos.avgPrice, pos.side, pos.size, payout, 0, "realized")) : {}),
+      reason: "market resolved; position redeemed",
+    });
   }
 
   private async quoteFor(marketRef: string, outcome?: "YES" | "NO") {
@@ -713,6 +747,8 @@ export class Engine {
       ts: placedAt,
       botId,
       marketRef: p.marketRef,
+      ...(ack.tokenId ? { tokenId: ack.tokenId } : {}),
+      ...(ack.conditionId ? { conditionId: ack.conditionId } : {}),
       outcome: p.outcome,
       side: p.side,
       size: intent.size,
@@ -747,7 +783,7 @@ export class Engine {
         ...(p.provenance ? { provenance: alertProvenance(p.provenance) } : {}),
       },
       ...this.baseAlert(placedAt),
-      market: this.alertMarket(p.marketRef, p.outcome),
+      market: this.alertMarket(p.marketRef, p.outcome, undefined, ack),
       trade: {
         side: p.side,
         size: intent.size,
@@ -829,7 +865,7 @@ export class Engine {
     const positionSide: PositionSide = held?.side ?? heldSide;
     await setJson(this.d.state, `orders:placed:${ack.orderId}`, {
       ts: this.now(),
-      intent,
+      intent: { ...intent, ...(ack.tokenId ? { tokenId: ack.tokenId } : {}), ...(ack.conditionId ? { conditionId: ack.conditionId } : {}) },
       ...(held ? { entryAvgPrice: held.avgPrice, positionSide } : {}),
     });
 
@@ -847,7 +883,7 @@ export class Engine {
         source: "manual",
       },
       ...this.baseAlert(),
-      market: this.alertMarket(p.marketRef, p.outcome),
+      market: this.alertMarket(p.marketRef, p.outcome, undefined, ack),
       trade: {
         side: p.side,
         size: intent.size,
@@ -1031,7 +1067,10 @@ export class Engine {
         message: `fill: ${f.side} ${f.size} ${shortRef(f.marketRef)} @ ${f.price}`,
         data: { orderId: f.orderId, fee: f.fee },
         ...this.baseAlert(f.ts),
-        market: this.alertMarket(f.marketRef, f.outcome ?? decision?.outcome),
+        market: this.alertMarket(f.marketRef, f.outcome ?? decision?.outcome ?? placed?.intent?.outcome, undefined, {
+          tokenId: f.tokenId ?? decision?.tokenId ?? placed?.intent?.tokenId,
+          conditionId: f.conditionId ?? decision?.conditionId ?? placed?.intent?.conditionId,
+        }),
         trade: {
           side: f.side,
           size: f.size,
@@ -1200,9 +1239,11 @@ export class Engine {
     for (const p of positions) if (p.label) this.marketTitles.set(p.marketRef, p.label);
   }
 
-  private alertMarket(ref: string, outcome?: "YES" | "NO", title?: string): NonNullable<AlertEvent["market"]> {
+  private alertMarket(ref: string, outcome?: "YES" | "NO", title?: string,
+    identity: Pick<Position, "tokenId" | "conditionId"> = {}): NonNullable<AlertEvent["market"]> {
     const known = title ?? this.marketTitles.get(ref);
-    return { ref, ...(known ? { title: known } : {}), ...(outcome ? { outcome } : {}) };
+    return { ref, ...(known ? { title: known } : {}), ...(outcome ? { outcome } : {}),
+      ...(identity.tokenId ? { tokenId: identity.tokenId } : {}), ...(identity.conditionId ? { conditionId: identity.conditionId } : {}) };
   }
 
   /** Where and when, shared by every alert this engine sends. */
