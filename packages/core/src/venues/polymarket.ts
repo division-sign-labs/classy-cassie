@@ -31,6 +31,7 @@ import {
 } from "@polymarket/client";
 import { createHash } from "node:crypto";
 import { RequestBudget } from "./request-budget.js";
+import { installPolymarketUserAgent } from "./polymarket-user-agent.js";
 
 /**
  * Which token is the YES side of a binary market. Polymarket labels most markets
@@ -250,6 +251,7 @@ export class PolymarketAdapter implements VenueAdapter {
   private readonly collateralMemo: AccountReadMemo<number> = { at: 0 };
 
   constructor(private readonly opts: AdapterOpts) {
+    installPolymarketUserAgent();
     if (opts.creds && opts.creds.venue === "polymarket") this.creds = opts.creds;
     this.builderCode = polymarketBuilderCode();
   }
