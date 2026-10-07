@@ -348,8 +348,10 @@ $2,500 of held-outcome bid depth within 2¢ by default; `--min-exit-depth-2c-usd
 disables that entry-only gate.
 
 A position is sold once the held-side executable bid reaches 90¢; the forecast plays no
-part in that exit. Otherwise the default maximum hold is seven days. Tune those with
-`--take-profit-price` (`off` disables it) and `--max-hold-days`.
+part in that exit. Otherwise it holds to resolution, with no default time limit. Tune
+those with `--take-profit-price` (`off` disables it) and `--max-hold-days` (default
+`unlimited`). Existing bots keep any saved deadline; use `--max-hold-days unlimited`
+to remove it.
 The 24-hour volume floor remains an entry filter but never blocks an exit; exit slippage
 and executable depth still apply.
 

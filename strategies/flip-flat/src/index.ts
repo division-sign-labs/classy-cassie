@@ -1,8 +1,8 @@
 // strategies/flip-flat/src/index.ts
-// Reference strategy (§8): buy, sell at the take-profit price floor, and
-// enforce a maximum holding period. Behind `scenarioExitEnabled`, held
-// prediction positions run the confirmed seven-day signal-exit state machine
-// around those two exits. The `hold` preset (fixed-notional lots, no
+// Reference strategy (§8): buy, then sell at the take-profit price floor
+// or hold to resolution. A maximum holding period is optional. Behind
+// `scenarioExitEnabled`, held prediction positions run the confirmed
+// signal-exit state machine. The `hold` preset (fixed-notional lots, no
 // take-profit, no time stop, flip exit at any remaining edge, resolution
 // window) is the same strategy with those knobs set; see the README.
 // Pure decisions — the engine sizes, risk-checks, and executes.
@@ -81,10 +81,10 @@ const FlipFlatConfigObjectSchema = z.object({
    * maximum holding period remains independent. Null disables it.
    */
   takeProfitPrice: z.number().positive().max(1).nullable().default(0.9),
-  /** Unconditional prediction-position deadline; null disables the deadline. */
-  maxHoldDays: z.number().positive().nullable().default(7),
+  /** Optional prediction-position deadline; null (the default) disables the time stop. */
+  maxHoldDays: z.number().positive().nullable().default(null),
 
-  // ---- Seven-day signal-exit state machine (opt-in) -----------------------
+  // ---- Signal-exit state machine (opt-in) ---------------------------------
   /**
    * Run the confirmed signal-exit state machine for held prediction
    * positions. When on, it wraps the take-profit above in forecast-driven

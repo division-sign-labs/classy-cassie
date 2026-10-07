@@ -24,7 +24,7 @@ export const RECOMMENDED_STRATEGY = {
   maxEntrySpreadPp: 30,
   minEntryNotional: 1,
   takeProfitPrice: 0.9,
-  maxHoldDays: 7,
+  maxHoldDays: null,
   universe: "from-signals",
   tickIntervalMin: 1,
   signalPollIntervalMin: 5,
@@ -33,7 +33,7 @@ export const RECOMMENDED_STRATEGY = {
 export const RECOMMENDED_SUMMARY =
   "no position-count cap, widest eligible edges first, quarter-Kelly targets with same-side top-ups, " +
   "capped at 2.5% per market and 5% per event, 25% smaller within 3 days of resolution, " +
-  "$2.5k exit depth within 2¢, 10–30pp entry edge, sell at a 90¢ bid or 7-day max hold";
+  "$2.5k exit depth within 2¢, 10–30pp entry edge, sell at a 90¢ bid or hold to resolution, no time limit";
 
 const LEGACY_DAILY_BUDGET_STRATEGY = {
   topN: null,
@@ -46,7 +46,7 @@ const LEGACY_DAILY_BUDGET_STRATEGY = {
   maxEntrySpreadPp: 30,
   minEntryNotional: 1,
   takeProfitPrice: 0.9,
-  maxHoldDays: 7,
+  maxHoldDays: null,
   universe: "from-signals",
   tickIntervalMin: 1,
   signalPollIntervalMin: 5,
@@ -196,7 +196,7 @@ export async function elicitStrategyConfig(
   const maxHoldDays = optionalPositiveNumber(
     "maximum hold",
     await ask("Maximum hold (days or unlimited)", {
-      default: current.maxHoldDays === null ? "unlimited" : d("maxHoldDays", "7"),
+      default: current.maxHoldDays === null ? "unlimited" : d("maxHoldDays", "unlimited"),
     }),
   );
   const positionCheckSeconds = positiveNumber(
@@ -265,7 +265,7 @@ export interface StrategyOptions {
   pendingEntryReservationSeconds?: string;
 }
 
-/** Defaults of the opt-in seven-day signal-exit state machine, mirrored from the strategy schema. */
+/** Defaults of the opt-in signal-exit state machine, mirrored from the strategy schema. */
 export const SCENARIO_EXIT_DEFAULTS = {
   scenarioExitEnabled: false,
   adverseCrossEdgePp: 0,
@@ -676,7 +676,7 @@ function printStrategy(
       : `sell once the held-side bid reaches $${Number(current.takeProfitPrice).toFixed(2)}`;
   console.log(`  take profit:          ${takeProfit}`);
   if (scenario.scenarioExitEnabled === true) {
-    console.log("  exit model:           seven-day signal state machine (scenarioExitEnabled)");
+    console.log("  exit model:           signal state machine (scenarioExitEnabled)");
     console.log(
       scenario.adverseCrossConfirmations === null
         ? "  adverse cross:        off"
@@ -702,7 +702,7 @@ function printStrategy(
     console.log(`  exit fee assumed:     ${scenario.exitFeeBps}bps on executable proceeds`);
     console.log(`  exit retry window:    ${scenario.exitRetrySec}s before an invisible exit is re-evaluated`);
   } else {
-    console.log("  exit model:           take-profit and maximum hold (scenarioExitEnabled off)");
+    console.log("  exit model:           take-profit and optional time stop (scenarioExitEnabled off)");
     console.log(`  maximum hold:         ${maxHold}`);
   }
   console.log(`  entry handoff hold:   ${scenario.pendingEntryReservationSec}s reservation while a fill is not yet visible`);

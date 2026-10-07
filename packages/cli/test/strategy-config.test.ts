@@ -5,10 +5,12 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { parseBotConfig } from "@quotient-forecasting/cassie-core";
-import { saveBotConfig } from "../src/paths.js";
+import { loadBotConfig, saveBotConfig } from "../src/paths.js";
+import * as context from "../src/context.js";
 import {
   RECOMMENDED_STRATEGY,
   elicitRecommendedStrategyConfig,
+  elicitStrategyConfig,
   recommendedStrategySummary,
   runStrategy,
 } from "../src/commands/strategy.js";
@@ -35,11 +37,12 @@ describe("signals recommended allocation", () => {
       eventCapPct: 5,
       nearResolutionDays: 3,
       nearResolutionSizeCutPct: 25,
+      maxHoldDays: null,
     });
     expect(recommendedStrategySummary("kalshi")).toContain("2.5% per market and 5% per event");
     expect(recommendedStrategySummary("kalshi")).toContain("25% smaller within 3 days of resolution");
     expect(RECOMMENDED_STRATEGY.takeProfitPrice).toBe(0.9);
-    expect(recommendedStrategySummary("kalshi")).toContain("sell at a 90¢ bid or 7-day max hold");
+    expect(recommendedStrategySummary("kalshi")).toContain("sell at a 90¢ bid or hold to resolution, no time limit");
   });
 
   it("displays the recommended AUM caps for an empty prediction strategy config", async () => {
@@ -65,6 +68,39 @@ describe("signals recommended allocation", () => {
     expect(output).toMatch(/per-event cap:\s+5% of portfolio equity/);
     expect(output).toMatch(/near resolution:\s+25% smaller when the market resolves within 3 days/);
     expect(output).toMatch(/take profit:\s+sell once the held-side bid reaches \$0\.90/);
+    expect(output).toMatch(/maximum hold:\s+unlimited/);
+  });
+
+  it("defaults custom bot setup to unlimited and preserves an explicit deadline", async () => {
+    vi.spyOn(context, "ask").mockImplementation(async (_message, options) => String(options?.default ?? ""));
+
+    expect(await elicitStrategyConfig({}, "polymarket")).toMatchObject({ maxHoldDays: null });
+    expect(await elicitStrategyConfig({ maxHoldDays: 7 }, "polymarket")).toMatchObject({ maxHoldDays: 7 });
+  });
+
+  it("preserves a saved deadline until it is disabled or the recommended preset is selected", async () => {
+    const root = mkdtempSync(join(tmpdir(), "cassie-hold-default-"));
+    roots.push(root);
+    process.env.CASSIE_HOME = root;
+    const id = "hold-default";
+    saveBotConfig(parseBotConfig({
+      id,
+      venue: "polymarket",
+      strategy: { id: "signals", config: { maxHoldDays: 7 } },
+    }));
+    vi.spyOn(console, "log").mockImplementation(() => {});
+
+    await runStrategy(id, { top: "unlimited" });
+    expect(loadBotConfig(id).strategy.config.maxHoldDays).toBe(7);
+    await runStrategy(id, { maxHoldDays: "unlimited" });
+    expect(loadBotConfig(id).strategy.config.maxHoldDays).toBeNull();
+    await runStrategy(id, { maxHoldDays: "7" });
+    await runStrategy(id, { preset: "recommended" });
+    expect(loadBotConfig(id).strategy.config).toMatchObject({
+      allocationMode: "portfolio-kelly",
+      takeProfitPrice: 0.9,
+      maxHoldDays: null,
+    });
   });
 
   it("accepts the near-resolution flags and reports the window as off when disabled", async () => {

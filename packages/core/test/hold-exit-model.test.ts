@@ -1,5 +1,5 @@
 // packages/core/test/hold-exit-model.test.ts
-// Price-floor take-profit exits plus a persistent maximum holding period.
+// Price-floor take-profit exits plus an optional persistent maximum holding period.
 
 import { describe, expect, it } from "vitest";
 import {
@@ -105,10 +105,10 @@ async function exits(strategy: FlipFlatStrategy, ctx: StrategyContext) {
 }
 
 describe("flip-flat hold and exit model", () => {
-  it("defaults to a 90¢ take-profit and a seven-day maximum hold", () => {
+  it("defaults to a 90¢ take-profit with no maximum hold", () => {
     const config = FlipFlatConfigSchema.parse({});
     expect(config.takeProfitPrice).toBe(0.9);
-    expect(config.maxHoldDays).toBe(7);
+    expect(config.maxHoldDays).toBeNull();
     expect(() => FlipFlatConfigSchema.parse({ takeProfitPrice: 1.5 })).toThrow();
     expect(() => FlipFlatConfigSchema.parse({ takeProfitPrice: 0 })).toThrow();
     expect(FlipFlatConfigSchema.parse({ takeProfitPrice: null }).takeProfitPrice).toBeNull();
@@ -133,7 +133,7 @@ describe("flip-flat hold and exit model", () => {
     expect(await exits(new FlipFlatStrategy(), context({ clock, mid: 0.6, signals: [signal(0.6)] }))).toHaveLength(0);
   });
 
-  it("holds a losing position before the deadline", async () => {
+  it("holds a losing position", async () => {
     const clock = { now: START };
     expect(
       await exits(new FlipFlatStrategy(), context({ clock, mid: 0.5, positions: [position(0.6)] })),
@@ -166,10 +166,10 @@ describe("flip-flat hold and exit model", () => {
     ).toHaveLength(1);
   });
 
-  it("exits at seven days even when no forecast exists", async () => {
+  it("honors an explicit seven-day maximum hold even when no forecast exists", async () => {
     const clock = { now: START };
     const strategy = new FlipFlatStrategy();
-    const ctx = context({ clock, signals: [] });
+    const ctx = context({ clock, signals: [], config: { maxHoldDays: 7 } });
 
     expect(await exits(strategy, ctx)).toHaveLength(0);
     clock.now += 7 * DAY_MS;
@@ -179,18 +179,23 @@ describe("flip-flat hold and exit model", () => {
     expect(got[0]!.reason).toBe("max hold reached: 7.00d held (limit 7d)");
   });
 
-  it("allows the maximum holding deadline to be disabled", async () => {
+  it.each([
+    ["default", {}],
+    ["explicitly disabled", { maxHoldDays: null }],
+  ] as const)("holds beyond seven days with the %s time stop", async (_label, config) => {
     const clock = { now: START };
     const strategy = new FlipFlatStrategy();
     const ctx = context({
       clock,
       signals: [],
-      config: { takeProfitPrice: null, maxHoldDays: null },
+      config,
     });
 
     expect(await exits(strategy, ctx)).toHaveLength(0);
-    clock.now += 30 * DAY_MS;
+    clock.now += 7 * DAY_MS;
     expect(await exits(strategy, ctx)).toHaveLength(0);
+    clock.now += 23 * DAY_MS;
+    expect(await exits(new FlipFlatStrategy(), ctx)).toHaveLength(0);
   });
 
   it("does not emit a deadline exit while any order is open for the market", async () => {
@@ -199,6 +204,7 @@ describe("flip-flat hold and exit model", () => {
     const ctx = context({
       clock,
       signals: [],
+      config: { maxHoldDays: 7 },
       openOrders: [
         {
           id: "existing-order",
@@ -225,7 +231,7 @@ describe("flip-flat hold and exit model", () => {
       clock,
       signals: [],
       memory: sharedMemory,
-      config: { allocationMode: "portfolio-kelly", takeProfitPrice: null },
+      config: { allocationMode: "portfolio-kelly", takeProfitPrice: null, maxHoldDays: 7 },
     });
 
     expect(await exits(strategy, ctx)).toHaveLength(0);
@@ -243,7 +249,7 @@ describe("flip-flat hold and exit model", () => {
   it("prunes an absent position before seeding a later holding", async () => {
     const clock = { now: START };
     const strategy = new FlipFlatStrategy();
-    const ctx = context({ clock, positions: [], config: { takeProfitPrice: null } });
+    const ctx = context({ clock, positions: [], config: { takeProfitPrice: null, maxHoldDays: 7 } });
     await strategy.onActionResult(
       ctx,
       { kind: "enter", marketRef: MARKET, side: "YES", notional: 5 },

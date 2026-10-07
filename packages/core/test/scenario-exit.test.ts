@@ -213,7 +213,7 @@ describe("scenario exit configuration", () => {
     expect(cfg.qCollapsePp).toBe(30);
     expect(cfg.flipConfirmations).toBe(2);
     expect(cfg.flipExitMaxRemainingEdgePp).toBeNull();
-    expect(cfg.maxHoldDays).toBe(7);
+    expect(cfg.maxHoldDays).toBeNull();
   });
 
   it("does not run the state machine when disabled", async () => {
@@ -227,7 +227,7 @@ describe("scenario exit configuration", () => {
 });
 
 describe("pure exit precedence", () => {
-  const cfg = FlipFlatConfigSchema.parse({ scenarioExitEnabled: true });
+  const cfg = FlipFlatConfigSchema.parse({ scenarioExitEnabled: true, maxHoldDays: 7 });
   const base = {
     resolved: false,
     entryQHeld: 0.8,
@@ -304,7 +304,7 @@ describe("pure exit precedence", () => {
   });
 });
 
-describe("seven-day signal exit state machine", () => {
+describe("signal exit state machine", () => {
   it("1. exits immediately at a loss on a large Q collapse (80→20, market 25)", async () => {
     const e = env();
     const strategy = new FlipFlatStrategy();
@@ -521,7 +521,7 @@ describe("seven-day signal exit state machine", () => {
     });
 
     it("time stop at a loss with Q still favorable", async () => {
-      const e = env();
+      const e = env({ config: { maxHoldDays: 7 } });
       const strategy = new FlipFlatStrategy();
       await enter(strategy, e, { side: "YES", entryQ: 0.8, avgPrice: 0.6 });
       setYesMid(e, 0.5);
@@ -639,8 +639,8 @@ describe("seven-day signal exit state machine", () => {
     expect(rec.entryFilledAt).toBe(START);
   });
 
-  it("10. exits at seven days from the actual entry fill regardless of P&L", async () => {
-    const e = env();
+  it("10. honors an explicit seven-day limit from the actual entry fill regardless of P&L", async () => {
+    const e = env({ config: { maxHoldDays: 7 } });
     const strategy = new FlipFlatStrategy();
     // Order rested at placement; the venue fill lands two hours later.
     await enter(strategy, e, { side: "YES", entryQ: 0.8, avgPrice: 0.6, ackStatus: "open", orderId: "entry-rested" });
@@ -679,8 +679,20 @@ describe("seven-day signal exit state machine", () => {
     expect(await exits(offStrategy, off)).toHaveLength(0);
   });
 
-  it("11. emits exactly one exit and one canonical reason when every branch qualifies, and never a duplicate", async () => {
+  it("holds beyond seven days by default across a restart", async () => {
     const e = env();
+    const strategy = new FlipFlatStrategy();
+    await enter(strategy, e, { side: "YES", entryQ: 0.8, avgPrice: 0.6 });
+    setYesMid(e, 0.5);
+    e.forecasts = [forecast("f", HOUR_MS, 0.8)];
+    e.clock.now += 7 * DAY_MS;
+    expect(await exits(strategy, e)).toHaveLength(0);
+    e.clock.now += 23 * DAY_MS;
+    expect(await exits(new FlipFlatStrategy(), e)).toHaveLength(0);
+  });
+
+  it("11. emits exactly one exit and one canonical reason when every branch qualifies, and never a duplicate", async () => {
+    const e = env({ config: { maxHoldDays: 7 } });
     const strategy = new FlipFlatStrategy();
     await enter(strategy, e, { side: "YES", entryQ: 0.8, avgPrice: 0.7 });
     // Two flipped, adverse forecasts, a 60pp collapse, a deep loss, and an expired hold.
@@ -747,7 +759,7 @@ describe("seven-day signal exit state machine", () => {
   });
 
   it("only the time stop can fire without any forecast", async () => {
-    const e = env();
+    const e = env({ config: { maxHoldDays: 7 } });
     const strategy = new FlipFlatStrategy();
     await enter(strategy, e, { side: "YES", entryQ: 0.8, avgPrice: 0.6 });
     setYesMid(e, 0.25);

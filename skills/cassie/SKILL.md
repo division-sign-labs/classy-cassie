@@ -145,8 +145,8 @@ Every step happens in the terminal; you only leave it to copy-paste dashboard va
    deterministic Q-directed passive-inventory strategy, not a symmetric dealer; see §14.
    The `agent` strategy is the monitoring agent — plain-language mandate, Quotient
    research, model-selected entries, quarter-Kelly sizing; see §13. `signals` follows
-   Quotient signals. Prediction positions exit at a 90¢ held-side bid, the default
-   seven-day maximum hold, or resolution. The recommended allocation has no position-count
+   Quotient signals. Prediction positions exit at a 90¢ held-side bid or hold to
+   resolution, with no default time limit. The recommended allocation has no position-count
    cap, prioritizes the widest eligible edges for new entries, and accepts forecast entry
    edges from 10pp through 30pp, inclusive. The 30pp maximum is configurable or removable;
    it is the forecast-to-market edge, not quoted bid/ask spread. On prediction venues, the recommended allocator targets
@@ -159,12 +159,14 @@ Every step happens in the terminal; you only leave it to copy-paste dashboard va
    bid depth within 2¢ by default, an entry-only check that can be disabled with
    `--min-exit-depth-2c-usd 0`. A position is sold once the executable held-side bid
    reaches 90¢ (`--take-profit-price`; `off` disables it); the forecast plays no part in
-   that exit. Otherwise a prediction position exits at the seven-day maximum hold (or
-   resolution). There is no forecast-convergence exit: replayed against published signals
-   it sold winners before the take-profit could. `--scenario-exit on` wraps that in the
-   confirmed seven-day signal-exit
+   that exit. Otherwise a prediction position holds to resolution (`maxHoldDays: null`).
+   An explicit `--max-hold-days <days>` still sets a deadline; `unlimited` removes it.
+   Existing bots keep any saved deadline. There is no forecast-convergence exit:
+   replayed against published signals it sold winners before the take-profit could.
+   `--scenario-exit on` wraps that in the
+   confirmed signal-exit
    state machine (Q collapse, confirmed adverse cross, confirmed Q flip, the 90¢
-   take-profit, time stop from the entry fill), evaluated in that
+   take-profit, optional time stop from the entry fill), evaluated in that
    precedence with one canonical reason per exit; it is off
    unless an operator turns it on. The take-profit applies to every position the
    same way whatever the market's resolution date. The 24h-volume floor and the minimum-notional floor
@@ -285,11 +287,11 @@ cassie run <botId> [--debug]
 cassie strategy <botId>                      # view/tune position cap, allocation, guardrails
 cassie strategy <botId> --kelly-fraction .25 --market-cap-pct 2.5 --event-cap-pct 5
 cassie strategy <botId> --near-resolution-days 3 --near-resolution-size-cut-pct 25
-cassie strategy <botId> --min-exit-depth-2c-usd 2500 --max-hold-days 7
+cassie strategy <botId> --min-exit-depth-2c-usd 2500 --max-hold-days unlimited
 cassie strategy <botId> --daily-budget 100 --position-budget-pct 25   # legacy allocator
 cassie strategy <botId> --max-entry-edge unlimited   # remove the forecast-edge ceiling
 cassie strategy <botId> --position-check-seconds 60 --signal-check-minutes 5
-cassie strategy <botId> --scenario-exit on      # confirmed seven-day signal-exit state machine
+cassie strategy <botId> --scenario-exit on      # confirmed signal-exit state machine
 cassie deploy <botId> [--region <slug>] [--size <slug>] [--no-dashboard] [--dashboard-port <n>] [-y]   # a droplet in YOUR DigitalOcean account
 cassie destroy <botId> [-y] [--force]        # cancel resting orders, delete the droplet
 cassie status <botId>                        # droplet + service + engine, one screen
@@ -803,8 +805,8 @@ reuses min(fixed-fractional, quarter-Kelly) with `p` = model probability and `b`
 the share price. When a fresh live Quotient signal covers the market, the CLI takes `p`
 from it automatically (mirrored if the signal's side differs from the thesis side);
 otherwise it asks the operator. Flip-flat owns exits: the 90¢ take-profit at the
-executable held-side bid, the default seven-day maximum hold, or resolution; with
-`--scenario-exit on`, the confirmed signal-exit state machine.
+executable held-side bid or resolution, with no default time limit. A saved maximum
+hold still applies; `--scenario-exit on` enables the confirmed signal-exit state machine.
 
 ## 10. Rules for the agent operating cassie
 
