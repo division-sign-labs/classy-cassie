@@ -41,8 +41,8 @@ describe("signals recommended allocation", () => {
     });
     expect(recommendedStrategySummary("kalshi")).toContain("2.5% per market and 5% per event");
     expect(recommendedStrategySummary("kalshi")).toContain("25% smaller within 3 days of resolution");
-    expect(RECOMMENDED_STRATEGY.takeProfitPrice).toBe(0.9);
-    expect(recommendedStrategySummary("kalshi")).toContain("sell at a 90¢ bid or hold to resolution, no time limit");
+    expect(RECOMMENDED_STRATEGY.takeProfitPrice).toBeNull();
+    expect(recommendedStrategySummary("kalshi")).toContain("hold to resolution with no take-profit or time limit");
   });
 
   it("displays the recommended AUM caps for an empty prediction strategy config", async () => {
@@ -67,15 +67,16 @@ describe("signals recommended allocation", () => {
     expect(output).toMatch(/per-market cap:\s+2\.5% of portfolio equity/);
     expect(output).toMatch(/per-event cap:\s+5% of portfolio equity/);
     expect(output).toMatch(/near resolution:\s+25% smaller when the market resolves within 3 days/);
-    expect(output).toMatch(/take profit:\s+sell once the held-side bid reaches \$0\.90/);
+    expect(output).toMatch(/take profit:\s+off/);
     expect(output).toMatch(/maximum hold:\s+unlimited/);
   });
 
-  it("defaults custom bot setup to unlimited and preserves an explicit deadline", async () => {
+  it("defaults custom bot setup to hold to resolution and preserves explicit exits", async () => {
     vi.spyOn(context, "ask").mockImplementation(async (_message, options) => String(options?.default ?? ""));
 
-    expect(await elicitStrategyConfig({}, "polymarket")).toMatchObject({ maxHoldDays: null });
-    expect(await elicitStrategyConfig({ maxHoldDays: 7 }, "polymarket")).toMatchObject({ maxHoldDays: 7 });
+    expect(await elicitStrategyConfig({}, "polymarket")).toMatchObject({ takeProfitPrice: null, maxHoldDays: null });
+    expect(await elicitStrategyConfig({ takeProfitPrice: 0.9, maxHoldDays: 7 }, "polymarket"))
+      .toMatchObject({ takeProfitPrice: 0.9, maxHoldDays: 7 });
   });
 
   it("preserves a saved deadline until it is disabled or the recommended preset is selected", async () => {
@@ -86,19 +87,19 @@ describe("signals recommended allocation", () => {
     saveBotConfig(parseBotConfig({
       id,
       venue: "polymarket",
-      strategy: { id: "signals", config: { maxHoldDays: 7 } },
+      strategy: { id: "signals", config: { takeProfitPrice: 0.9, maxHoldDays: 7 } },
     }));
     vi.spyOn(console, "log").mockImplementation(() => {});
 
     await runStrategy(id, { top: "unlimited" });
-    expect(loadBotConfig(id).strategy.config.maxHoldDays).toBe(7);
-    await runStrategy(id, { maxHoldDays: "unlimited" });
-    expect(loadBotConfig(id).strategy.config.maxHoldDays).toBeNull();
-    await runStrategy(id, { maxHoldDays: "7" });
+    expect(loadBotConfig(id).strategy.config).toMatchObject({ takeProfitPrice: 0.9, maxHoldDays: 7 });
+    await runStrategy(id, { takeProfitPrice: "off", maxHoldDays: "unlimited" });
+    expect(loadBotConfig(id).strategy.config).toMatchObject({ takeProfitPrice: null, maxHoldDays: null });
+    await runStrategy(id, { takeProfitPrice: "0.9", maxHoldDays: "7" });
     await runStrategy(id, { preset: "recommended" });
     expect(loadBotConfig(id).strategy.config).toMatchObject({
       allocationMode: "portfolio-kelly",
-      takeProfitPrice: 0.9,
+      takeProfitPrice: null,
       maxHoldDays: null,
     });
   });

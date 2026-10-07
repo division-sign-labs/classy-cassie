@@ -150,7 +150,7 @@ shows current state only and says so; redeploy to start recording.
 | `packages/core`        | venue adapters, wallet/keystore, strategy engine, risk module, signal client, alerts, thesis sizing |
 | `packages/cli`         | the `cassie` binary: wizard, wallet, fund, run, deploy, status, logs, dashboard, portfolio, trade, orders, ticket |
 | `packages/runtime-node` | the bot process: engine loop, SQLite state, unix-socket control API. Same code for `cassie run` and a droplet |
-| `strategies/flip-flat` | the `signals` strategy: follow Quotient signals; prediction positions exit at a 90¢ bid or hold to resolution, with no default time limit; its `hold` preset (`--preset hold`) buys one fixed lot per market at 15pp+ edge and holds to resolution unless Q flips |
+| `strategies/flip-flat` | the `signals` strategy: follow Quotient signals and hold prediction positions to resolution, with no default take-profit or time limit; its `hold` preset (`--preset hold`) buys one fixed lot per market at 15pp+ edge and holds to resolution unless Q flips |
 | `skills/cassie`        | agent-facing operator manual ([SKILL.md](skills/cassie/SKILL.md)) + thesis policy (`thesis/mappings.json`) |
 | `fixtures/`            | signal + order-book fixtures for the offline e2e                     |
 
@@ -234,11 +234,11 @@ of the best bid, so the strategy checks its ability to unwind before buying. Set
 `--min-exit-depth-2c-usd 0` to remove that entry-only eligibility gate. Actual orders are
 still sized against live entry-side depth and a slippage band.
 
-A position is sold once the held-side executable bid reaches 90¢. Otherwise it remains
-open until resolution, with no default time limit (`maxHoldDays: null`). An explicit
-`--max-hold-days <days>` still sets a deadline; `unlimited` removes it. Existing bots
-keep any saved deadline. Low 24-hour volume never blocks an exit; executable depth and
-slippage still bound it.
+Prediction positions hold to resolution by default (`takeProfitPrice: null`,
+`maxHoldDays: null`). Operators can set an optional take-profit or deadline with
+`--take-profit-price <price>` or `--max-hold-days <days>`. Existing bots keep saved
+settings; `--take-profit-price off --max-hold-days unlimited` disables both exits.
+Low 24-hour volume never blocks an exit; executable depth and slippage still bound it.
 
 ```sh
 cassie strategy <botId> --allocation-mode portfolio-kelly \

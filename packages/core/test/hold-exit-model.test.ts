@@ -105,18 +105,18 @@ async function exits(strategy: FlipFlatStrategy, ctx: StrategyContext) {
 }
 
 describe("flip-flat hold and exit model", () => {
-  it("defaults to a 90¢ take-profit with no maximum hold", () => {
+  it("defaults to hold to resolution with no take-profit or maximum hold", () => {
     const config = FlipFlatConfigSchema.parse({});
-    expect(config.takeProfitPrice).toBe(0.9);
+    expect(config.takeProfitPrice).toBeNull();
     expect(config.maxHoldDays).toBeNull();
     expect(() => FlipFlatConfigSchema.parse({ takeProfitPrice: 1.5 })).toThrow();
     expect(() => FlipFlatConfigSchema.parse({ takeProfitPrice: 0 })).toThrow();
     expect(FlipFlatConfigSchema.parse({ takeProfitPrice: null }).takeProfitPrice).toBeNull();
   });
 
-  it("takes profit once the held side's executable bid reaches 90¢", async () => {
+  it("honors an explicitly configured 90¢ take-profit", async () => {
     const clock = { now: START };
-    const got = await exits(new FlipFlatStrategy(), context({ clock, mid: 0.91 }));
+    const got = await exits(new FlipFlatStrategy(), context({ clock, mid: 0.91, config: { takeProfitPrice: 0.9 } }));
 
     expect(got).toHaveLength(1);
     expect(got[0]!.reason).toBe("take profit: held YES bid 0.910 >= 0.900");
@@ -125,7 +125,7 @@ describe("flip-flat hold and exit model", () => {
 
   it("holds below the take-profit price", async () => {
     const clock = { now: START };
-    expect(await exits(new FlipFlatStrategy(), context({ clock, mid: 0.89 }))).toHaveLength(0);
+    expect(await exits(new FlipFlatStrategy(), context({ clock, mid: 0.89, config: { takeProfitPrice: 0.9 } }))).toHaveLength(0);
   });
 
   it("ignores the forecast: a priced-in position below the floor stays open", async () => {
@@ -142,14 +142,14 @@ describe("flip-flat hold and exit model", () => {
 
   it("does not take profit when the held side has no executable bid", async () => {
     const clock = { now: START };
-    expect(await exits(new FlipFlatStrategy(), context({ clock, mid: 0.95, yesBid: null }))).toHaveLength(0);
+    expect(await exits(new FlipFlatStrategy(), context({ clock, mid: 0.95, yesBid: null, config: { takeProfitPrice: 0.9 } }))).toHaveLength(0);
   });
 
   it("uses the mirrored YES ask as the executable bid for a held NO position", async () => {
     const clock = { now: START };
     const got = await exits(
       new FlipFlatStrategy(),
-      context({ clock, mid: 0.09, yesBid: 0.08, yesAsk: 0.1, positions: [{ ...position(0.5), side: "NO" }] }),
+      context({ clock, mid: 0.09, yesBid: 0.08, yesAsk: 0.1, positions: [{ ...position(0.5), side: "NO" }], config: { takeProfitPrice: 0.9 } }),
     );
 
     expect(got).toHaveLength(1);
@@ -164,6 +164,19 @@ describe("flip-flat hold and exit model", () => {
     expect(
       await exits(new FlipFlatStrategy(), context({ clock, mid: 0.96, config: { takeProfitPrice: 0.95 } })),
     ).toHaveLength(1);
+  });
+
+  it.each(["YES", "NO"] as const)("holds %s above 90¢ by default, including after seven days and a restart", async (side) => {
+    const clock = { now: START };
+    const ctx = context({
+      clock,
+      yesBid: side === "YES" ? 0.99 : 0.005,
+      yesAsk: side === "YES" ? 0.995 : 0.01,
+      positions: [{ ...position(), side }],
+    });
+    expect(await exits(new FlipFlatStrategy(), ctx)).toHaveLength(0);
+    clock.now += 30 * DAY_MS;
+    expect(await exits(new FlipFlatStrategy(), ctx)).toHaveLength(0);
   });
 
   it("honors an explicit seven-day maximum hold even when no forecast exists", async () => {

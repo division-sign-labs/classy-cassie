@@ -1,7 +1,7 @@
 // packages/core/test/scenario-exit.test.ts
-// Seven-day signal-exit state machine for the signals (flip-flat) strategy:
-// Q-collapse, confirmed adverse cross, confirmed Q flip, the 90¢
-// take-profit, and the time stop, with per-forecast confirmation
+// Signal-exit state machine for the signals (flip-flat) strategy:
+// Q-collapse, confirmed adverse cross, confirmed Q flip, optional
+// take-profit and time stop, with per-forecast confirmation
 // counting, immutable entry Q, and idempotent exit submission.
 
 import { describe, expect, it } from "vitest";
@@ -208,7 +208,7 @@ describe("scenario exit configuration", () => {
   it("is off by default so existing bots keep the legacy exit overlay", () => {
     const cfg = FlipFlatConfigSchema.parse({});
     expect(cfg.scenarioExitEnabled).toBe(false);
-    expect(cfg.takeProfitPrice).toBe(0.9);
+    expect(cfg.takeProfitPrice).toBeNull();
     expect(cfg.adverseCrossConfirmations).toBe(2);
     expect(cfg.qCollapsePp).toBe(30);
     expect(cfg.flipConfirmations).toBe(2);
@@ -227,7 +227,7 @@ describe("scenario exit configuration", () => {
 });
 
 describe("pure exit precedence", () => {
-  const cfg = FlipFlatConfigSchema.parse({ scenarioExitEnabled: true, maxHoldDays: 7 });
+  const cfg = FlipFlatConfigSchema.parse({ scenarioExitEnabled: true, takeProfitPrice: 0.9, maxHoldDays: 7 });
   const base = {
     resolved: false,
     entryQHeld: 0.8,
@@ -420,7 +420,7 @@ describe("signal exit state machine", () => {
 
   describe("6. take profit sells once the held-side executable bid reaches the price floor", () => {
     async function setup(input: { entryQ: number; currentQ: number; mid: number; avgPrice: number; config?: Record<string, unknown> }) {
-      const e = env({ config: input.config ?? {} });
+      const e = env({ config: { takeProfitPrice: 0.9, ...input.config } });
       const strategy = new FlipFlatStrategy();
       await enter(strategy, e, { side: "YES", entryQ: input.entryQ, avgPrice: input.avgPrice });
       setYesMid(e, input.mid);
@@ -442,7 +442,7 @@ describe("signal exit state machine", () => {
     });
 
     it("needs no forecast", async () => {
-      const e = env();
+      const e = env({ config: { takeProfitPrice: 0.9 } });
       const strategy = new FlipFlatStrategy();
       await enter(strategy, e, { side: "YES", entryQ: 0.7, avgPrice: 0.6 });
       setYesMid(e, 0.91);
@@ -469,7 +469,7 @@ describe("signal exit state machine", () => {
   describe("6b. the resolution date never changes the take-profit", () => {
     /** Same position at a 0.90 bid every time; only the market's end date moves. */
     async function setup(resolvesAt: number | undefined) {
-      const e = env();
+      const e = env({ config: { takeProfitPrice: 0.9 } });
       const strategy = new FlipFlatStrategy();
       await enter(strategy, e, { side: "YES", entryQ: 0.7, avgPrice: 0.6 });
       setYesMid(e, 0.91);
@@ -597,7 +597,7 @@ describe("signal exit state machine", () => {
     });
 
     it("takes NO profit on the mirrored executable bid", async () => {
-      const e = env();
+      const e = env({ config: { takeProfitPrice: 0.9 } });
       const strategy = new FlipFlatStrategy();
       await enter(strategy, e, { side: "NO", entryQ: 0.7, avgPrice: 0.6 });
       // YES mid 0.09 → NO mid 0.91; NO bid mirrors the YES ask 0.10 → 0.90.
@@ -688,6 +688,17 @@ describe("signal exit state machine", () => {
     e.clock.now += 7 * DAY_MS;
     expect(await exits(strategy, e)).toHaveLength(0);
     e.clock.now += 23 * DAY_MS;
+    expect(await exits(new FlipFlatStrategy(), e)).toHaveLength(0);
+  });
+
+  it.each(["YES", "NO"] as const)("holds %s above 90¢ by default while the forecast stays favorable", async (side) => {
+    const e = env();
+    const strategy = new FlipFlatStrategy();
+    await enter(strategy, e, { side, entryQ: 0.8, avgPrice: 0.6 });
+    setYesMid(e, side === "YES" ? 0.97 : 0.03);
+    e.forecasts = [forecast("f", HOUR_MS, side === "YES" ? 0.99 : 0.01)];
+    expect(await exits(strategy, e)).toHaveLength(0);
+    e.clock.now += 30 * DAY_MS;
     expect(await exits(new FlipFlatStrategy(), e)).toHaveLength(0);
   });
 

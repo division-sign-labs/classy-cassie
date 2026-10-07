@@ -1,7 +1,7 @@
 // packages/core/test/take-profit-exit.test.ts
 // Take-profit exit: sell once the held outcome's executable bid reaches the
-// price floor (90¢ by default). The forecast plays no part; a position below
-// the floor stays open until the independent maximum holding period.
+// explicitly configured price floor. The forecast plays no part; take-profit
+// and maximum holding period are both off by default.
 
 import { describe, expect, it } from "vitest";
 import {
@@ -55,7 +55,7 @@ function ctxWith(
 ) {
   return {
     venueId: "polymarket" as const,
-    config,
+    config: { takeProfitPrice: 0.9, ...config },
     signals: {
       latest: async () => signals,
       ...(forecasts ? { forecasts: async () => forecasts } : {}),

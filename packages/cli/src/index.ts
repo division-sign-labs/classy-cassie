@@ -214,7 +214,7 @@ alerts
 program
   .command("strategy <botId>")
   .description("view or change strategy settings")
-  .option("--preset <recommended|hold>", "replace the settings with a named preset: recommended (quarter-Kelly, 90¢ take-profit, no time limit) or hold (fixed lot per market, 15pp+ edge, sell only on a confirmed Q flip, otherwise hold to resolution)")
+  .option("--preset <recommended|hold>", "replace the settings with a named preset: recommended (quarter-Kelly, hold to resolution, no take-profit or time limit) or hold (fixed lot per market, 15pp+ edge, sell only on a confirmed Q flip, otherwise hold to resolution)")
   .option("--execution <adaptive|legacy>", "Polymarket signals: maker-first managed limits or legacy crossing limits")
   .option("--entry-deadline-seconds <seconds>", "Polymarket signals: maker phase of an adaptive entry (default 120)")
   .option("--entry-crossing-seconds <seconds>", "Polymarket signals: after the deadline, take the offer inside the price bound for this long (default 60; 0 keeps entries maker-only)")
@@ -233,7 +233,7 @@ program
   .option("--max-entry-edge <pp|unlimited>", "maximum forecast entry edge; unlimited removes the guardrail")
   .option("--max-window-days <days|off>", "skip signals whose market resolves more than this many days out; off disables")
   .option("--min-entry-notional <usd>", "entry-only floor after sizing and capacity caps")
-  .option("--take-profit-price <price|off>", "sell a prediction position once the held-side bid reaches this price (0–1); off disables")
+  .option("--take-profit-price <price|off>", "optional prediction exit at this held-side bid (0–1; default off)")
   .option("--max-hold-days <days|unlimited>", "optional maximum holding period (default unlimited)")
   .option("--position-check-seconds <seconds>", "reconcile and evaluate held positions on this cadence")
   .option("--signal-check-minutes <minutes>", "refresh the Quotient signal snapshot on this cadence")

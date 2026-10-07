@@ -1,6 +1,6 @@
 // strategies/flip-flat/src/index.ts
-// Reference strategy (§8): buy, then sell at the take-profit price floor
-// or hold to resolution. A maximum holding period is optional. Behind
+// Reference strategy (§8): buy and hold to resolution. A take-profit price
+// and maximum holding period are optional. Behind
 // `scenarioExitEnabled`, held prediction positions run the confirmed
 // signal-exit state machine. The `hold` preset (fixed-notional lots, no
 // take-profit, no time stop, flip exit at any remaining edge, resolution
@@ -78,9 +78,9 @@ const FlipFlatConfigObjectSchema = z.object({
   /**
    * Take-profit for prediction markets: sell once the held outcome's
    * executable best bid reaches this price (0..1). Needs no forecast; the
-   * maximum holding period remains independent. Null disables it.
+   * maximum holding period remains independent. Null (the default) disables it.
    */
-  takeProfitPrice: z.number().positive().max(1).nullable().default(0.9),
+  takeProfitPrice: z.number().positive().max(1).nullable().default(null),
   /** Optional prediction-position deadline; null (the default) disables the time stop. */
   maxHoldDays: z.number().positive().nullable().default(null),
 

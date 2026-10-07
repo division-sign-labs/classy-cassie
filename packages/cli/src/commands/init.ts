@@ -527,7 +527,7 @@ export async function runInit(): Promise<void> {
       value: "signals",
       title: existing?.strategy.id === "signals" || existing?.strategy.id === "flip-flat" ? "signals (current)" : "signals",
       description: isPredictionVenue(venue)
-        ? "follow Quotient signals, sell at a 90¢ bid or hold to resolution"
+        ? "follow Quotient signals, hold to resolution"
         : "follow Quotient signals",
     },
     ...(isPredictionVenue(venue)

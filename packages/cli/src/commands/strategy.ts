@@ -23,7 +23,7 @@ export const RECOMMENDED_STRATEGY = {
   entrySpreadPp: 10,
   maxEntrySpreadPp: 30,
   minEntryNotional: 1,
-  takeProfitPrice: 0.9,
+  takeProfitPrice: null,
   maxHoldDays: null,
   universe: "from-signals",
   tickIntervalMin: 1,
@@ -33,7 +33,7 @@ export const RECOMMENDED_STRATEGY = {
 export const RECOMMENDED_SUMMARY =
   "no position-count cap, widest eligible edges first, quarter-Kelly targets with same-side top-ups, " +
   "capped at 2.5% per market and 5% per event, 25% smaller within 3 days of resolution, " +
-  "$2.5k exit depth within 2¢, 10–30pp entry edge, sell at a 90¢ bid or hold to resolution, no time limit";
+  "$2.5k exit depth within 2¢, 10–30pp entry edge, hold to resolution with no take-profit or time limit";
 
 const LEGACY_DAILY_BUDGET_STRATEGY = {
   topN: null,
@@ -45,7 +45,7 @@ const LEGACY_DAILY_BUDGET_STRATEGY = {
   entrySpreadPp: 10,
   maxEntrySpreadPp: 30,
   minEntryNotional: 1,
-  takeProfitPrice: 0.9,
+  takeProfitPrice: null,
   maxHoldDays: null,
   universe: "from-signals",
   tickIntervalMin: 1,
@@ -190,7 +190,7 @@ export async function elicitStrategyConfig(
   const takeProfitPrice = optionalPrice(
     "take-profit price",
     await ask("Take-profit held-side bid (0–1, or off)", {
-      default: current.takeProfitPrice === null ? "off" : d("takeProfitPrice", "0.9"),
+      default: current.takeProfitPrice === null ? "off" : d("takeProfitPrice", "off"),
     }),
   );
   const maxHoldDays = optionalPositiveNumber(
@@ -702,7 +702,7 @@ function printStrategy(
     console.log(`  exit fee assumed:     ${scenario.exitFeeBps}bps on executable proceeds`);
     console.log(`  exit retry window:    ${scenario.exitRetrySec}s before an invisible exit is re-evaluated`);
   } else {
-    console.log("  exit model:           take-profit and optional time stop (scenarioExitEnabled off)");
+    console.log("  exit model:           hold to resolution with optional exits (scenarioExitEnabled off)");
     console.log(`  maximum hold:         ${maxHold}`);
   }
   console.log(`  entry handoff hold:   ${scenario.pendingEntryReservationSec}s reservation while a fill is not yet visible`);

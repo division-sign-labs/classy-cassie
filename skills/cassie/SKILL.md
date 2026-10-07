@@ -145,8 +145,8 @@ Every step happens in the terminal; you only leave it to copy-paste dashboard va
    deterministic Q-directed passive-inventory strategy, not a symmetric dealer; see §14.
    The `agent` strategy is the monitoring agent — plain-language mandate, Quotient
    research, model-selected entries, quarter-Kelly sizing; see §13. `signals` follows
-   Quotient signals. Prediction positions exit at a 90¢ held-side bid or hold to
-   resolution, with no default time limit. The recommended allocation has no position-count
+   Quotient signals. Prediction positions hold to resolution, with no default
+   take-profit or time limit. The recommended allocation has no position-count
    cap, prioritizes the widest eligible edges for new entries, and accepts forecast entry
    edges from 10pp through 30pp, inclusive. The 30pp maximum is configurable or removable;
    it is the forecast-to-market edge, not quoted bid/ask spread. On prediction venues, the recommended allocator targets
@@ -157,19 +157,16 @@ Every step happens in the terminal; you only leave it to copy-paste dashboard va
    its target or cap is not topped up and is not automatically trimmed. There is no daily
    throttle in this mode. Entry and top-up eligibility also requires $2,500 of held-outcome
    bid depth within 2¢ by default, an entry-only check that can be disabled with
-   `--min-exit-depth-2c-usd 0`. A position is sold once the executable held-side bid
-   reaches 90¢ (`--take-profit-price`; `off` disables it); the forecast plays no part in
-   that exit. Otherwise a prediction position holds to resolution (`maxHoldDays: null`).
-   An explicit `--max-hold-days <days>` still sets a deadline; `unlimited` removes it.
-   Existing bots keep any saved deadline. There is no forecast-convergence exit:
-   replayed against published signals it sold winners before the take-profit could.
-   `--scenario-exit on` wraps that in the
-   confirmed signal-exit
-   state machine (Q collapse, confirmed adverse cross, confirmed Q flip, the 90¢
+   `--min-exit-depth-2c-usd 0`. Take-profit and time limits are off by default
+   (`takeProfitPrice: null`, `maxHoldDays: null`). Operators can enable them with
+   `--take-profit-price <price>` or `--max-hold-days <days>`. Existing bots keep saved
+   settings; `--take-profit-price off --max-hold-days unlimited` disables both exits.
+   `--scenario-exit on` enables the confirmed signal-exit
+   state machine (Q collapse, confirmed adverse cross, confirmed Q flip, optional
    take-profit, optional time stop from the entry fill), evaluated in that
    precedence with one canonical reason per exit; it is off
-   unless an operator turns it on. The take-profit applies to every position the
-   same way whatever the market's resolution date. The 24h-volume floor and the minimum-notional floor
+   unless an operator turns it on. A configured take-profit applies to every position
+   the same way whatever the market's resolution date. The 24h-volume floor and the minimum-notional floor
    apply to entries, never exits; exit slippage and executable depth still apply. An
    accepted entry stays reserved against market and event caps until the venue position or
    a resting order shows it, so a fill lag cannot admit a duplicate entry. The legacy
@@ -804,9 +801,9 @@ Confidence maps to an entry-spread threshold (low 12pp / medium 10pp / high 7pp)
 reuses min(fixed-fractional, quarter-Kelly) with `p` = model probability and `b` implied by
 the share price. When a fresh live Quotient signal covers the market, the CLI takes `p`
 from it automatically (mirrored if the signal's side differs from the thesis side);
-otherwise it asks the operator. Flip-flat owns exits: the 90¢ take-profit at the
-executable held-side bid or resolution, with no default time limit. A saved maximum
-hold still applies; `--scenario-exit on` enables the confirmed signal-exit state machine.
+otherwise it asks the operator. Flip-flat holds prediction positions to resolution by
+default. Saved take-profit and maximum-hold settings still apply;
+`--scenario-exit on` enables the confirmed signal-exit state machine.
 
 ## 10. Rules for the agent operating cassie
 
