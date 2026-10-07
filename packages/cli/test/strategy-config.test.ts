@@ -26,23 +26,24 @@ afterEach(() => {
 });
 
 describe("signals recommended allocation", () => {
-  it("uses the 2.5% market and 5% parent-event caps on prediction venues", async () => {
+  it("uses quarter Kelly with a 5% event cap on prediction venues", async () => {
     const recommended = await elicitRecommendedStrategyConfig({}, "polymarket");
 
-    expect(RECOMMENDED_STRATEGY.marketCapPct).toBe(2.5);
+    expect(RECOMMENDED_STRATEGY.marketCapPct).toBeNull();
     expect(RECOMMENDED_STRATEGY.eventCapPct).toBe(5);
     expect(recommended).toMatchObject({
       allocationMode: "portfolio-kelly",
-      marketCapPct: 2.5,
+      kellyFraction: 0.25,
+      marketCapPct: null,
       eventCapPct: 5,
-      nearResolutionDays: 3,
-      nearResolutionSizeCutPct: 25,
+      nearResolutionDays: null,
+      minExitDepth2cUsd: 0,
+      entrySpreadPp: 0,
+      maxEntrySpreadPp: null,
       maxHoldDays: null,
     });
-    expect(recommendedStrategySummary("kalshi")).toContain("2.5% per market and 5% per event");
-    expect(recommendedStrategySummary("kalshi")).toContain("25% smaller within 3 days of resolution");
+    expect(recommendedStrategySummary("kalshi")).toBe("quarter-Kelly sizing, 5% per event");
     expect(RECOMMENDED_STRATEGY.takeProfitPrice).toBeNull();
-    expect(recommendedStrategySummary("kalshi")).toContain("hold to resolution with no take-profit or time limit");
   });
 
   it("displays the recommended AUM caps for an empty prediction strategy config", async () => {
@@ -64,9 +65,12 @@ describe("signals recommended allocation", () => {
     await runStrategy("cap-display", { top: "unlimited" });
 
     const output = lines.join("\n");
-    expect(output).toMatch(/per-market cap:\s+2\.5% of portfolio equity/);
+    expect(output).toMatch(/per-market cap:\s+off/);
     expect(output).toMatch(/per-event cap:\s+5% of portfolio equity/);
-    expect(output).toMatch(/near resolution:\s+25% smaller when the market resolves within 3 days/);
+    expect(output).toMatch(/near resolution:\s+off/);
+    expect(output).toMatch(/entry liquidity:\s+off/);
+    expect(output).toMatch(/minimum entry edge:\s+0pp/);
+    expect(output).toMatch(/maximum entry edge:\s+unlimited/);
     expect(output).toMatch(/take profit:\s+off/);
     expect(output).toMatch(/maximum hold:\s+unlimited/);
   });
@@ -74,9 +78,26 @@ describe("signals recommended allocation", () => {
   it("defaults custom bot setup to hold to resolution and preserves explicit exits", async () => {
     vi.spyOn(context, "ask").mockImplementation(async (_message, options) => String(options?.default ?? ""));
 
-    expect(await elicitStrategyConfig({}, "polymarket")).toMatchObject({ takeProfitPrice: null, maxHoldDays: null });
+    expect(await elicitStrategyConfig({}, "polymarket")).toMatchObject({
+      takeProfitPrice: null, maxHoldDays: null, marketCapPct: null, eventCapPct: 5,
+      minExitDepth2cUsd: 0, entrySpreadPp: 0, maxEntrySpreadPp: null,
+    });
     expect(await elicitStrategyConfig({ takeProfitPrice: 0.9, maxHoldDays: 7 }, "polymarket"))
       .toMatchObject({ takeProfitPrice: 0.9, maxHoldDays: 7 });
+  });
+
+  it("can remove a saved market cap while keeping the event cap", async () => {
+    const root = mkdtempSync(join(tmpdir(), "cassie-market-cap-"));
+    roots.push(root);
+    process.env.CASSIE_HOME = root;
+    saveBotConfig(parseBotConfig({ id: "market-cap", venue: "polymarket",
+      strategy: { id: "signals", config: { marketCapPct: 2.5, eventCapPct: 5 } },
+    }));
+    vi.spyOn(console, "log").mockImplementation(() => {});
+
+    await runStrategy("market-cap", { marketCapPct: "off" });
+    expect(loadBotConfig("market-cap").strategy.config).toMatchObject({ marketCapPct: null, eventCapPct: 5 });
+    await expect(runStrategy("market-cap", { marketCapPct: "101" })).rejects.toThrow(/at most 100%/);
   });
 
   it("preserves a saved deadline until it is disabled or the recommended preset is selected", async () => {

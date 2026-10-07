@@ -8,7 +8,7 @@ import { join } from "node:path";
 import pc from "picocolors";
 import { MarketMakeConfigSchema } from "@quotient-forecasting/strategy-market-make";
 import { QuotientSwingConfigSchema } from "@quotient-forecasting/strategy-quotient-swing";
-import { QUOTIENT_POLYMARKET_FEE_DISCLOSURE, type BotConfig } from "@quotient-forecasting/cassie-core";
+import { type BotConfig } from "@quotient-forecasting/cassie-core";
 import { buildRuntimeCreds, confirm } from "../context.js";
 import { describeTelegramSettings, resolveTelegramSettings } from "../telegram-settings.js";
 import { describeWebhookSettings, resolveWebhookSettings } from "../webhook-settings.js";
@@ -900,7 +900,6 @@ export async function runDeploy(botId: string, opts: DeployOpts = {}): Promise<v
     console.log(`Position checks: ${positionCheckSeconds}s`);
     console.log(`Signal refresh: ${signalCheckMinutes}m`);
   }
-  if (deployedCfg.venue === "polymarket" && isPredictionDeployment(deployedCfg)) console.log(QUOTIENT_POLYMARKET_FEE_DISCLOSURE);
 
   console.log("");
   if (serveDashboard) {

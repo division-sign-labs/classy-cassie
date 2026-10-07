@@ -164,8 +164,8 @@ describe("Engine adaptive prediction wiring", () => {
     expect(ctx.equity).toBe(1000);
     await h.engine.tick(1);
     const parent = (await h.engine.predictionStatus())!.parents.find(p => p.side === "BUY")!;
-    expect(parent.provenance).toMatchObject({ equityUsd: 1000, targetUsd: 25 });
-    expect(parent.reservedNotionalUsd).toBeCloseTo(25, 1);
+    expect(parent.provenance).toMatchObject({ equityUsd: 1000, targetUsd: expect.closeTo(100), eventCapUsd: 50 });
+    expect(parent.reservedNotionalUsd).toBeCloseTo(50, 1);
   });
 
   it("continues new entries while redemption confirmation is slow, and does not resubmit", async () => {

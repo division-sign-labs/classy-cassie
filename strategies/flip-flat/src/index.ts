@@ -33,24 +33,24 @@ const FlipFlatConfigObjectSchema = z.object({
   allocationMode: z.enum(["portfolio-kelly", "daily-budget", "fixed-notional"]).default("portfolio-kelly"),
   /** Fraction of full Kelly used for binary prediction-market targets. */
   kellyFraction: z.number().positive().max(1).default(0.25),
-  /** Maximum capital-at-risk in one market as a percentage of current equity. */
-  marketCapPct: z.number().positive().max(100).default(2.5),
+  /** Optional capital-at-risk cap in one market as a percentage of current equity. */
+  marketCapPct: z.number().positive().max(100).nullable().default(null),
   /** Maximum capital-at-risk across sibling markets in one event. */
   eventCapPct: z.number().positive().max(100).default(5),
   /** Entries into a market resolving within this many days are sized down; null disables. */
-  nearResolutionDays: z.number().positive().nullable().default(3),
+  nearResolutionDays: z.number().positive().nullable().default(null),
   /** Percentage removed from an entry's size inside the near-resolution window. */
   nearResolutionSizeCutPct: z.number().nonnegative().max(100).default(25),
   /** Held-outcome bid notional required within $0.02 of its best bid; 0 disables. */
-  minExitDepth2cUsd: z.number().nonnegative().default(2_500),
+  minExitDepth2cUsd: z.number().nonnegative().default(0),
   /** Enter when |prob − price| in percentage points is at least this. */
-  entrySpreadPp: z.number().default(10),
+  entrySpreadPp: z.number().default(0),
   /**
    * Entry-only upper guardrail for |prob − price|. Very large apparent
    * edges are more likely to be stale or mismapped; null explicitly removes
    * the ceiling.
    */
-  maxEntrySpreadPp: z.number().positive().nullable().default(30),
+  maxEntrySpreadPp: z.number().positive().nullable().default(null),
   /**
    * Entry-only resolution window: skip a signal whose market resolves more than
    * this many days after now. A signal with no resolution date is skipped while
@@ -134,11 +134,13 @@ const FlipFlatConfigObjectSchema = z.object({
 export const FlipFlatConfigSchema = z.preprocess((raw) => {
   if (typeof raw !== "object" || raw === null || Array.isArray(raw)) return raw;
   const config = raw as Record<string, unknown>;
-  if (config.allocationMode !== undefined) return config;
   // Existing bot configs explicitly carry the old budget fields. Preserve
   // their behavior until an operator opts them into portfolio Kelly.
-  if ("dailyBudgetUsd" in config || "positionBudgetPct" in config) {
-    return { ...config, allocationMode: "daily-budget" };
+  const mode = config.allocationMode === undefined
+    ? ("dailyBudgetUsd" in config || "positionBudgetPct" in config ? "daily-budget" : "portfolio-kelly")
+    : config.allocationMode;
+  if (mode === "daily-budget" || mode === "fixed-notional") {
+    return { entrySpreadPp: 10, maxEntrySpreadPp: 30, nearResolutionDays: 3, ...config, allocationMode: mode };
   }
   return config;
 }, FlipFlatConfigObjectSchema);
@@ -574,13 +576,13 @@ export function portfolioKellyTargetUsd(input: {
   price: number;
   equity: number;
   kellyFraction: number;
-  marketCapPct: number;
+  marketCapPct: number | null;
 }): number {
   const { prob, price, equity, kellyFraction, marketCapPct } = input;
   if (!(price > 0 && price < 1) || !(prob >= 0 && prob <= 1) || !(equity > 0)) return 0;
   const fullKelly = (prob - price) / (1 - price);
   const fractionalTarget = Math.max(0, fullKelly) * kellyFraction * equity;
-  return Math.min(fractionalTarget, (marketCapPct / 100) * equity);
+  return marketCapPct === null ? fractionalTarget : Math.min(fractionalTarget, (marketCapPct / 100) * equity);
 }
 
 /** Executable bid notional no more than two cents below the best bid. */
@@ -1756,8 +1758,8 @@ export class FlipFlatStrategy implements Strategy {
     const yesMid = sig.side === "NO" ? 1 - price : price;
     if (!(price > 0 && price < 1)) return undefined;
 
-    // Sports publication owns entry-edge eligibility. Kelly still sizes from
-    // the current held-side probability and executable market price.
+    // Publication owns default entry eligibility. Optional local filters can
+    // narrow non-sports entries; Kelly uses the current probability and price.
     const liveEdgePp = (sig.prob - price) * 100;
     if (sig.sleeve !== "sports" && liveEdgePp < cfg.entrySpreadPp) return undefined;
     if (sig.sleeve !== "sports" && cfg.maxEntrySpreadPp !== null && liveEdgePp - cfg.maxEntrySpreadPp > 1e-9) {
@@ -1817,11 +1819,11 @@ export class FlipFlatStrategy implements Strategy {
     }
     const currentMarketUsd = state.marketExposureUsd.get(sig.marketRef) ?? 0;
     const currentEventUsd = state.eventExposureUsd.get(eventRef) ?? 0;
-    const marketCapUsd = (cfg.marketCapPct / 100) * ctx.equity;
+    const marketCapUsd = cfg.marketCapPct === null ? undefined : (cfg.marketCapPct / 100) * ctx.equity;
     const eventCapUsd = (cfg.eventCapPct / 100) * ctx.equity;
     const headroom: Array<[string, number]> = [
       ["target", targetUsd - currentMarketUsd],
-      ["market-cap", marketCapUsd - currentMarketUsd],
+      ...(marketCapUsd === undefined ? [] : [["market-cap", marketCapUsd - currentMarketUsd] as [string, number]]),
       ["event-cap", eventCapUsd - currentEventUsd],
       ["cash", state.availableCashUsd],
     ];
@@ -1846,7 +1848,7 @@ export class FlipFlatStrategy implements Strategy {
       targetUsd,
       ...(sig.endsAt !== undefined ? { resolvesAt: sig.endsAt } : {}),
       ...(sizeFactor < 1 ? { nearResolutionSizeFactor: sizeFactor } : {}),
-      marketCapUsd,
+      ...(marketCapUsd === undefined ? {} : { marketCapUsd }),
       eventCapUsd,
       currentMarketUsd,
       currentEventUsd,

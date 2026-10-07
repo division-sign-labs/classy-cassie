@@ -147,17 +147,15 @@ Every step happens in the terminal; you only leave it to copy-paste dashboard va
    research, model-selected entries, quarter-Kelly sizing; see §13. `signals` follows
    Quotient signals. Prediction positions hold to resolution, with no default
    take-profit or time limit. The recommended allocation has no position-count
-   cap, prioritizes the widest eligible edges for new entries, and accepts forecast entry
-   edges from 10pp through 30pp, inclusive. The 30pp maximum is configurable or removable;
-   it is the forecast-to-market edge, not quoted bid/ask spread. On prediction venues, the recommended allocator targets
-   quarter Kelly from current portfolio equity, capped at 2.5% per market and 5% across one
-   parent event. A market that resolves within three days gets a target 25% smaller
-   (`--near-resolution-days`, `--near-resolution-size-cut-pct`). Same-side repeat signals
+   cap and prioritizes the widest eligible edges for new entries. Published Quotient signals
+   determine entry eligibility; no additional entry-edge band applies by default. On prediction
+   venues, the recommended allocator targets quarter Kelly from current portfolio equity,
+   capped at 5% across one parent event. The separate market cap and near-resolution size cut
+   are off by default. Same-side repeat signals
    may top up only the remaining target and cap headroom. New deposits automatically affect subsequent targets. A holding already above
    its target or cap is not topped up and is not automatically trimmed. There is no daily
-   throttle in this mode. Entry and top-up eligibility also requires $2,500 of held-outcome
-   bid depth within 2¢ by default, an entry-only check that can be disabled with
-   `--min-exit-depth-2c-usd 0`. Take-profit and time limits are off by default
+   throttle in this mode. The optional exit-depth floor is off by default;
+   live executable depth and slippage still constrain orders. Take-profit and time limits are off by default
    (`takeProfitPrice: null`, `maxHoldDays: null`). Operators can enable them with
    `--take-profit-price <price>` or `--max-hold-days <days>`. Existing bots keep saved
    settings; `--take-profit-price off --max-hold-days unlimited` disables both exits.
@@ -181,9 +179,9 @@ Every step happens in the terminal; you only leave it to copy-paste dashboard va
    Declining the recommendation asks for an optional position cap, allocation mode and its
    mode-specific parameters, minimum and maximum entry edges, minimum viable entry, tick
    interval, and universe. `cassie strategy <botId>` displays or changes the same settings
-   at any time. Polymarket signals bots pay Quotient 0.5% of notional per fill through
-   Polymarket's builder fee; the same rate applies to maker and taker fills, and
-   `cassie strategy` shows which side the execution mode produces. Adaptive entries rest
+   at any time. Cassie adds no Polymarket builder fee by default. An explicit
+   `CASSIE_POLYMARKET_BUILDER_CODE` enables attribution and its configured fee.
+   Adaptive entries rest
    post-only one tick inside the ask, never above the signal's price bound, for
    `--entry-deadline-seconds` (default 120); then a marketable limit at that bound takes
    whatever is offered inside it for `--entry-crossing-seconds` (default 60), and any
@@ -342,17 +340,15 @@ Notes:
   depth-percentage cap by default. Skips
   raise alerts. There is no quoted-spread gate: a wide market with depth at the touch is
   tradable, because execution cost is bounded by the slippage band, not the quote.
-- The signals strategy separately defaults to a 30pp maximum forecast entry edge. The
-  ceiling is inclusive: 30pp is eligible and anything above it is skipped. Set another
-  ceiling with `--max-entry-edge <pp>` or remove it with `--max-entry-edge unlimited`.
-  This guardrail compares the Q forecast with the market reference price; it does not cap
-  the quoted bid/ask spread.
+- Published Quotient signals determine default entry eligibility. The signals strategy
+  adds no entry-edge band; Kelly sizing still requires a positive edge at the live price.
+  An optional `--max-entry-edge <pp>` limits forecast-to-market edge; `unlimited` removes it.
 - Prediction-market signals default to `portfolio-kelly`: 0.25 of full Kelly, capped at
-  2.5% of current portfolio equity per market and 5% per parent event, with the target
-  25% smaller for a market that resolves within three days. Repeat signals can
+  5% of current portfolio equity per parent event. The separate market cap,
+  near-resolution size cut, and exit-depth floor are off by default. Repeat signals can
   add only enough to reach the current target. The allocator never auto-trims an existing
-  over-cap holding. An entry/top-up additionally needs $2,500 of held-side bid depth within
-  2¢ by default. Any of `--kelly-fraction`, `--market-cap-pct`, `--event-cap-pct`, or
+  over-cap holding. Existing bots keep saved settings; `--preset recommended` applies
+  these defaults. Any of `--kelly-fraction`, `--market-cap-pct`, `--event-cap-pct`, or
   `--min-exit-depth-2c-usd` selects this mode. Either `--daily-budget` or
   `--position-budget-pct` selects the legacy
   `daily-budget` mode. Use `--allocation-mode` when switching explicitly; contradictory

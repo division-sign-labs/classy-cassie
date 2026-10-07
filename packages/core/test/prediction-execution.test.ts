@@ -125,6 +125,40 @@ function harness(strategy: Record<string, unknown> = {}, execution?: Record<stri
 describe("adaptive prediction execution", () => {
   afterEach(() => { vi.useRealTimers(); });
 
+  it.each([.60, .95])("executes published signals at Q=%s without a default 10–30pp band", async prob => {
+    const h = harness();
+    await h.executor.supervise({ signals: [{ id: "published", marketRef: "yes", venue: "polymarket", side: "YES", prob,
+      refPrice: .55, ts: new Date(NOW).toISOString(), ttlSec: 10800 }], refreshedAt: h.now() });
+    await h.executor.admit(enter({ provenance: { qHeld: prob } }), []);
+    expect(h.submissions).toHaveLength(1);
+    h.advance(5000); await h.restart().supervise();
+    expect(h.orders.size).toBe(1);
+  });
+
+  it.each(["daily-budget", "fixed-notional"])("preserves the legacy entry filter in %s mode", async allocationMode => {
+    const h = harness({ allocationMode });
+    await h.executor.supervise({ signals: [{ id: "legacy", marketRef: "yes", venue: "polymarket", side: "YES", prob: .6,
+      refPrice: .55, ts: new Date(NOW).toISOString(), ttlSec: 10800 }], refreshedAt: h.now() });
+    await h.executor.admit(enter({ provenance: { qHeld: .6 } }), []);
+    expect(h.submissions).toHaveLength(0);
+  });
+
+  it("permits more than 2.5% in one market while enforcing the 5% event cap", async () => {
+    const h = harness(); h.setCash(1_000); await h.ready();
+    await h.executor.admit(enter({ notional: 40 }), []);
+    expect(h.submissions).toHaveLength(1);
+    h.setHeld(50); // Another $25.50 of exposure puts the event over its cap.
+    h.advance(5000); await h.executor.supervise();
+    expect(h.orders.size).toBe(0);
+    expect((await h.executor.snapshot()).parents[0]!.status).toBe("canceling");
+  });
+
+  it("does not require $2,500 of exit depth by default", async () => {
+    const h = harness(); h.setBook(.1, .2); await h.ready();
+    await h.executor.admit(enter(), []);
+    expect(h.submissions).toHaveLength(1);
+  });
+
   it.each([.58, .95])("executes published sports at Q=%s without applying the local edge band", async prob => {
     const h = harness({ entrySpreadPp: 15, maxEntrySpreadPp: 30 });
     const signal: Signal = { id: "sports", marketRef: "yes", venue: "polymarket", side: "YES", sleeve: "sports", prob,

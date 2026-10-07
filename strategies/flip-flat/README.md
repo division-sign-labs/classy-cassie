@@ -6,24 +6,19 @@ markets, it enters where a forecast diverges from the market price and holds to
 resolution. Take-profit and time limits are off by default.
 
 The strategy has no position-count cap by default and ranks competing signals widest edge
-first. An optional numeric cap remains available. The default eligible forecast entry edge
-is 10–30 percentage points, inclusive. The maximum is configurable; `unlimited` removes it.
-This edge is the gap between the Q forecast and the market reference price, not the quoted
-bid/ask spread.
+first. Quotient's published signals determine entry eligibility. There is no additional
+entry-edge band by default; Kelly sizing still requires a positive edge at the live price.
+Optional local edge limits compare the Q forecast with the market price, not the bid/ask spread.
 
 The default prediction-market allocator targets quarter Kelly using current portfolio
-equity, subject to a 2.5% cap per market and a 5% cap across markets in the same parent
-event. A market that resolves within three days of the entry gets a target 25% smaller
-(`nearResolutionDays`, `nearResolutionSizeCutPct`); the same cut applies to a legacy
-daily-budget entry. Same-side repeat signals can top up only the gap between existing
-exposure and the new target, so a reduced position is not topped back up to full size.
+equity, subject to a 5% cap across markets in the same parent event. The separate market
+cap and near-resolution size cut are off by default. Same-side repeat signals can top up
+only the gap between existing exposure and the new target.
 Added capital changes future targets automatically. If an existing position is already
 above its target or cap, the allocator blocks further additions but does not auto-trim it.
 
-Before a portfolio-mode entry or top-up, the strategy requires at least $2,500 of
-held-outcome bid notional within 2¢ of the best bid. This is an entry-only ability-to-exit
-check; set `--min-exit-depth-2c-usd 0` to disable it. The engine separately sizes the buy
-against live ask depth and slippage.
+The optional held-outcome exit-depth floor is off by default (`minExitDepth2cUsd: 0`).
+The engine sizes each order against live executable depth and slippage.
 
 The legacy `daily-budget` mode remains available. It caps cumulative entry notional from
 00:00 to 23:59 UTC; rejected entries do not consume it, and an entry capped by liquidity

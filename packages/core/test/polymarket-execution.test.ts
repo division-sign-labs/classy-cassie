@@ -107,13 +107,13 @@ describe("Polymarket submission bounds and certainty", () => {
     await adapterWith({ createLimitOrder, postOrder }, rawBook("yes", 0.0025)).placeOrderWithLifecycle(account,
       intent({ side, limitPrice: 0.503, size: 10.257 }), { onPrepared });
     expect(createLimitOrder).toHaveBeenCalledWith(expect.objectContaining({ price }));
-    expect(createLimitOrder.mock.calls[0]?.[0]).toHaveProperty("builderCode", QUOTIENT_POLYMARKET_BUILDER_CODE);
+    expect(createLimitOrder.mock.calls[0]?.[0]).not.toHaveProperty("builderCode");
     expect(onPrepared).toHaveBeenCalledWith(expect.objectContaining({ limitPrice: price, size: 10.25 }));
   });
 
   it.each((["GTC", "GTD", "FOK", "IOC", "FAK"] as const).flatMap(tif =>
     (["BUY", "SELL"] as const).flatMap(side => (["YES", "NO"] as const).map(outcome => ({ tif, side, outcome }))),
-  ))("submits the compiled builder code on $side $outcome $tif orders without operator configuration", async ({ tif, side, outcome }) => {
+  ))("omits builder fees on $side $outcome $tif orders by default", async ({ tif, side, outcome }) => {
     const signed = { sdkSigned: true };
     const createMarketOrder = vi.fn(async () => signed);
     const createLimitOrder = vi.fn(async () => signed);
@@ -122,8 +122,7 @@ describe("Polymarket submission bounds and certainty", () => {
       .placeOrder(account, intent({ side, outcome, tif, postOnly: false, ...(tif === "GTD" ? { expiration: 2_000_000_000 } : {}) }));
     expect(ack).toMatchObject({ tokenId: outcome === "NO" ? "no" : "yes", conditionId: "condition" });
     const createOrder = tif === "GTC" || tif === "GTD" ? createLimitOrder : createMarketOrder;
-    expect(QUOTIENT_POLYMARKET_BUILDER_CODE).toMatch(/^0x[0-9a-fA-F]{64}$/);
-    expect(createOrder).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ builderCode: QUOTIENT_POLYMARKET_BUILDER_CODE }));
+    expect(createOrder).toHaveBeenCalledExactlyOnceWith(expect.not.objectContaining({ builderCode: expect.anything() }));
     expect(postOrder).toHaveBeenCalledExactlyOnceWith(signed);
   });
 
@@ -134,8 +133,9 @@ describe("Polymarket submission bounds and certainty", () => {
     expect(createLimitOrder).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ builderCode: BUILDER_CODE }));
   });
 
-  it("ships with Quotient's code compiled in, signs without attribution when it is off, and rejects a malformed override", async () => {
-    expect(polymarketBuilderCode({})).toBe(QUOTIENT_POLYMARKET_BUILDER_CODE);
+  it("defaults to no attribution, accepts explicit attribution, and rejects a malformed override", async () => {
+    expect(polymarketBuilderCode({})).toBeUndefined();
+    expect(polymarketBuilderCode({ CASSIE_POLYMARKET_BUILDER_CODE: QUOTIENT_POLYMARKET_BUILDER_CODE })).toBe(QUOTIENT_POLYMARKET_BUILDER_CODE);
     expect(polymarketBuilderCode({ CASSIE_POLYMARKET_BUILDER_CODE: "off" })).toBeUndefined();
     expect(() => polymarketBuilderCode({ CASSIE_POLYMARKET_BUILDER_CODE: "not-a-code" })).toThrow(/32-byte/);
     const createLimitOrder = vi.fn(async () => ({ sdkSigned: true }));
@@ -143,7 +143,13 @@ describe("Polymarket submission bounds and certainty", () => {
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
     await adapterWith({ createLimitOrder, postOrder }, rawBook(), null).placeOrder(account, intent());
     expect(createLimitOrder.mock.calls[0]?.[0]).not.toHaveProperty("builderCode");
-    expect(warn).toHaveBeenCalledWith(expect.stringContaining("attribution is off"));
+    expect(warn).not.toHaveBeenCalled();
+  });
+
+  it("accounts for no builder fee on default maker and taker fills", () => {
+    const adapter = adapterWith({});
+    expect(adapter.builderFeeFor("maker", 100, .5)).toBe(0);
+    expect(adapter.builderFeeFor("taker", 100, .5)).toBe(0);
   });
 
   it("maps execution modes to fee sides and describes both rates", () => {

@@ -4,7 +4,6 @@
 import pc from "picocolors";
 import {
   PredictionExecutionConfigSchema,
-  describePolymarketBuilderFee,
   polymarketFeeMode,
   type PredictionExecutionConfig,
 } from "@quotient-forecasting/cassie-core";
@@ -15,13 +14,13 @@ export const RECOMMENDED_STRATEGY = {
   topN: null,
   allocationMode: "portfolio-kelly",
   kellyFraction: 0.25,
-  marketCapPct: 2.5,
+  marketCapPct: null,
   eventCapPct: 5,
-  minExitDepth2cUsd: 2_500,
-  nearResolutionDays: 3,
+  minExitDepth2cUsd: 0,
+  nearResolutionDays: null,
   nearResolutionSizeCutPct: 25,
-  entrySpreadPp: 10,
-  maxEntrySpreadPp: 30,
+  entrySpreadPp: 0,
+  maxEntrySpreadPp: null,
   minEntryNotional: 1,
   takeProfitPrice: null,
   maxHoldDays: null,
@@ -30,10 +29,7 @@ export const RECOMMENDED_STRATEGY = {
   signalPollIntervalMin: 5,
 } as const;
 
-export const RECOMMENDED_SUMMARY =
-  "no position-count cap, widest eligible edges first, quarter-Kelly targets with same-side top-ups, " +
-  "capped at 2.5% per market and 5% per event, 25% smaller within 3 days of resolution, " +
-  "$2.5k exit depth within 2¢, 10–30pp entry edge, hold to resolution with no take-profit or time limit";
+export const RECOMMENDED_SUMMARY = "quarter-Kelly sizing, 5% per event";
 
 const LEGACY_DAILY_BUDGET_STRATEGY = {
   topN: null,
@@ -147,10 +143,10 @@ export async function elicitStrategyConfig(
             "Kelly fraction",
             await ask("Kelly fraction (0–1; 0.25 = quarter Kelly)", { default: d("kellyFraction", "0.25") }),
           ),
-          marketCapPct: percentage(
+          marketCapPct: optionalPercentage(
             "market cap",
-            await ask("Maximum portfolio equity per market (%)", {
-              default: d("marketCapPct", String(RECOMMENDED_STRATEGY.marketCapPct)),
+            await ask("Maximum portfolio equity per market (% or off)", {
+              default: d("marketCapPct", "off"),
             }),
           ),
           eventCapPct: percentage(
@@ -162,7 +158,7 @@ export async function elicitStrategyConfig(
           minExitDepth2cUsd: nonnegativeNumber(
             "minimum exit depth within 2 cents",
             await ask("Minimum held-side bid depth within 2¢ ($; 0 disables)", {
-              default: d("minExitDepth2cUsd", "2500"),
+              default: d("minExitDepth2cUsd", "0"),
             }),
           ),
         }
@@ -176,11 +172,13 @@ export async function elicitStrategyConfig(
             await ask("Daily budget per position (%)", { default: d("positionBudgetPct", "25") }),
           ),
         };
-  const entrySpreadPp = positiveNumber("entry spread", await ask("Minimum entry edge (pp)", { default: d("entrySpreadPp", "10") }));
+  const entrySpreadPp = nonnegativeNumber("entry spread", await ask("Minimum entry edge (pp; 0 uses signal eligibility)", {
+    default: d("entrySpreadPp", allocationMode === "portfolio-kelly" ? "0" : "10"),
+  }));
   const maxEntrySpreadPp = optionalPositiveNumber(
     "maximum entry edge",
     await ask("Maximum entry edge (pp or unlimited)", {
-      default: current.maxEntrySpreadPp === null ? "unlimited" : d("maxEntrySpreadPp", "30"),
+      default: current.maxEntrySpreadPp === null ? "unlimited" : d("maxEntrySpreadPp", allocationMode === "portfolio-kelly" ? "unlimited" : "30"),
     }),
   );
   const minEntryNotional = nonnegativeNumber(
@@ -368,7 +366,7 @@ export async function runStrategy(botId: string, opts: StrategyOptions = {}): Pr
     if (opts.kellyFraction !== undefined) {
       strategyConfig.kellyFraction = kellyFraction("Kelly fraction", opts.kellyFraction);
     }
-    if (opts.marketCapPct !== undefined) strategyConfig.marketCapPct = percentage("market cap", opts.marketCapPct);
+    if (opts.marketCapPct !== undefined) strategyConfig.marketCapPct = optionalPercentage("market cap", opts.marketCapPct);
     if (opts.eventCapPct !== undefined) strategyConfig.eventCapPct = percentage("event cap", opts.eventCapPct);
     if (opts.nearResolutionDays !== undefined) {
       strategyConfig.nearResolutionDays = optionalPositiveNumber("near-resolution window", opts.nearResolutionDays);
@@ -608,6 +606,12 @@ function percentage(label: string, raw: string): number {
   return value;
 }
 
+function optionalPercentage(label: string, raw: string): number | null {
+  const value = optionalPositiveNumber(label, raw);
+  if (value !== null && value > 100) throw new Error(`${label} must be at most 100%`);
+  return value;
+}
+
 function cutPercentage(label: string, raw: string): number {
   const value = nonnegativeNumber(label, raw);
   if (value > 100) throw new Error(`${label} must be at most 100%`);
@@ -641,9 +645,9 @@ function printStrategy(
   console.log(`  allocation mode:      ${allocationMode}`);
   if (allocationMode === "portfolio-kelly") {
     console.log(`  Kelly fraction:       ${current.kellyFraction}× full Kelly (current portfolio equity)`);
-    console.log(`  per-market cap:       ${current.marketCapPct}% of portfolio equity`);
+    console.log(`  per-market cap:       ${current.marketCapPct === null ? "off" : `${current.marketCapPct}% of portfolio equity`}`);
     console.log(`  per-event cap:        ${current.eventCapPct}% of portfolio equity`);
-    console.log(`  entry liquidity:      $${Number(current.minExitDepth2cUsd).toFixed(2)} held-side bid depth within 2¢`);
+    console.log(`  entry liquidity:      ${Number(current.minExitDepth2cUsd) === 0 ? "off" : `$${Number(current.minExitDepth2cUsd).toFixed(2)} held-side bid depth within 2¢`}`);
     console.log("  repeat signals:       top up toward target; over-cap holdings are not auto-trimmed");
   } else if (allocationMode === "fixed-notional") {
     console.log(`  lot per entry:        $${Number(current.lotNotionalUsd).toFixed(2)} fixed, before liquidity/risk caps`);
@@ -717,7 +721,6 @@ function printStrategy(
     console.log(`  exit passive phase:   ${compactNumber(executionConfig.exitPassiveSec)} sec${inactive}`);
     const feeMode = polymarketFeeMode(executionMode);
     console.log(`  fee mode:             ${feeMode} (${executionMode} execution${feeMode === "maker" ? "; entries that cross after the deadline and urgent exits fill as taker" : ""})`);
-    console.log(`  Quotient fee:         ${describePolymarketBuilderFee(feeMode)}`);
   }
   console.log(`  hard per-order cap:   $${risk.maxOrderNotional.toFixed(2)} (risk module)`);
   console.log(`  signal max age:       ${(maxAgeSec / 3600).toFixed(2)}h`);

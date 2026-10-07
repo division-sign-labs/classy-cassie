@@ -8,7 +8,6 @@ import {
   addressFromPk,
   KeyRoles,
   CommodityConfigSchema,
-  QUOTIENT_POLYMARKET_FEE_DISCLOSURE,
   TelegramAlerter,
   createAdapter,
   generateEoa,
@@ -638,7 +637,6 @@ export async function runInit(): Promise<void> {
   } else if (holdPreset) {
     console.log("Signals strategy, hold preset: each new Quotient signal held to resolution unless Q flips.");
     for (const rule of HOLD_SUMMARY.split(", ")) console.log(rule);
-    if (venue === "polymarket") console.log(QUOTIENT_POLYMARKET_FEE_DISCLOSURE);
     const lotRaw = await ask("Stake per signal ($)", {
       default: String(existingStrategy.lotNotionalUsd ?? HOLD_STRATEGY.lotNotionalUsd),
     });
@@ -649,7 +647,6 @@ export async function runInit(): Promise<void> {
   } else {
     console.log("Signals strategy: published Quotient signals.");
     for (const rule of recommendedStrategySummary(venue).split(", ")) console.log(rule);
-    if (venue === "polymarket") console.log(QUOTIENT_POLYMARKET_FEE_DISCLOSURE);
     strategyConfig = (await confirm("Use recommended allocation rules?", true))
       ? await elicitRecommendedStrategyConfig(existingStrategy, venue)
       : await elicitStrategyConfig(existingStrategy, venue);

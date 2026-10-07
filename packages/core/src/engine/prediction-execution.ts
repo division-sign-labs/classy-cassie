@@ -296,6 +296,11 @@ export class PredictionExecutor {
     const value = (this.d.config.strategy.config as Record<string, unknown> | undefined)?.[key];
     return typeof value === "number" && Number.isFinite(value) ? value : fallback;
   }
+  private get legacySignalAllocation(): boolean {
+    const cfg = this.d.config.strategy.config;
+    const mode = cfg.allocationMode ?? ("dailyBudgetUsd" in cfg || "positionBudgetPct" in cfg ? "daily-budget" : "portfolio-kelly");
+    return mode === "daily-budget" || mode === "fixed-notional";
+  }
   private latestSignal(marketRef: string): Signal | undefined {
     const candidates = (this.signals ?? []).filter(signal => signal.venue === this.d.config.venue && signal.marketRef === marketRef)
       .sort((a, b) => Date.parse(b.ts) - Date.parse(a.ts));
@@ -470,7 +475,7 @@ export class PredictionExecutor {
       const latestSignal = this.latestSignal(action.marketRef);
       const rawQ = provenance?.qHeld ?? (latestSignal?.side === outcome ? latestSignal.prob : undefined);
       const sportsSignal = !this.commodities && action.kind === "enter" && latestSignal?.side === outcome && latestSignal.sleeve === "sports";
-      const minimumEdge = this.strategyNumber("entrySpreadPp", 10) / 100;
+      const minimumEdge = this.strategyNumber("entrySpreadPp", this.commodities || this.legacySignalAllocation ? 10 : 0) / 100;
       if (action.kind === "enter" && !probability(rawQ)) return this.refuse(action, "no usable Q probability");
       const maximumPrice = action.kind === "enter"
         ? floorTick(Math.min(ask, sportsSignal ? ask : (rawQ as number) - minimumEdge, action.limitPrice ?? 1), market.tickSize)
@@ -702,7 +707,8 @@ export class PredictionExecutor {
     if (p.side === "BUY") {
       const latestSignal = this.latestSignal(p.marketRef);
       const signalQ = latestSignal?.side === p.outcome ? latestSignal.prob : this.signals ? undefined : p.qHeld;
-      const maximumEdge = this.d.config.strategy.config.maxEntrySpreadPp === null ? Number.POSITIVE_INFINITY : this.strategyNumber("maxEntrySpreadPp", 30) / 100;
+      const maximumEdge = this.d.config.strategy.config.maxEntrySpreadPp === null ? Number.POSITIVE_INFINITY
+        : this.strategyNumber("maxEntrySpreadPp", this.commodities || this.legacySignalAllocation ? 30 : Number.POSITIVE_INFINITY) / 100;
       if (!probability(signalQ) || (!this.commodities && !p.sportsSignal && (signalQ - (bid + ask) / 2 + EPS < p.minimumEdge || signalQ - (bid + ask) / 2 > maximumEdge + EPS))) {
         await this.stopParent(p, "live entry edge is outside its configured band"); return;
       }
@@ -719,7 +725,7 @@ export class PredictionExecutor {
         p.maximumPrice = Math.min(p.maximumPrice, floorTick(fair - p.minimumEdge, tick));
       }
       const exitDepth = b.bids.filter(level => level.price + EPS >= bid - .02).reduce((sum, level) => sum + level.size * level.price, 0);
-      if (exitDepth + EPS < this.strategyNumber("minExitDepth2cUsd", 2500)) { await this.stopParent(p, "entry exit liquidity fell below its minimum"); return; }
+      if (exitDepth + EPS < this.strategyNumber("minExitDepth2cUsd", this.commodities || this.legacySignalAllocation ? 2500 : 0)) { await this.stopParent(p, "entry exit liquidity fell below its minimum"); return; }
       if (this.commodities && this.remaining(p) * p.maximumPrice > Math.min(exitDepth, (b.asks[0]?.size ?? 0) * ask) * this.strategyNumber("depthParticipationPct", 2) / 100 + EPS) {
         await this.stopParent(p, "commodity depth participation exceeded after book change"); return;
       }
@@ -924,8 +930,10 @@ export class PredictionExecutor {
       if (!candidate) return 0;
       if (candidate === event) eventExposure += amount;
     }
-    headroom = Math.min(headroom, Math.max(0, equity * this.strategyNumber("marketCapPct", 2.5) / 100 - (exposure.get(parent.marketRef) ?? 0)),
-      Math.max(0, equity * this.strategyNumber("eventCapPct", 5) / 100 - eventExposure));
+    const marketCapPct = cfg.marketCapPct === null ? Number.POSITIVE_INFINITY
+      : this.strategyNumber("marketCapPct", this.commodities || this.legacySignalAllocation ? 2.5 : Number.POSITIVE_INFINITY);
+    if (Number.isFinite(marketCapPct)) headroom = Math.min(headroom, Math.max(0, equity * marketCapPct / 100 - (exposure.get(parent.marketRef) ?? 0)));
+    headroom = Math.min(headroom, Math.max(0, equity * this.strategyNumber("eventCapPct", 5) / 100 - eventExposure));
     return headroom;
   }
 

@@ -72,14 +72,10 @@ function accountRequestBudget(): RequestBudget {
 }
 
 /**
- * Quotient's Polymarket builder code. Every order cassie signs carries it, so
- * the exchange collects Quotient's builder fee alongside its own and pays it
- * to the builder profile wallet on Polygon. The code is part of the signed V2
- * order struct; the rates themselves live on the builder profile at
- * polymarket.com → Settings → Builders and must match the constants below.
- *
- * `CASSIE_POLYMARKET_BUILDER_CODE` overrides it; `off` disables attribution
- * (tests, staging).
+ * Quotient's Polymarket builder code, available for explicit operator attribution.
+ * Orders carry no builder code by default. CASSIE_POLYMARKET_BUILDER_CODE opts in;
+ * the exchange collects the configured builder fee when a code is supplied.
+ * Rates live on the builder profile and must match the constants below.
  */
 export const QUOTIENT_POLYMARKET_BUILDER_CODE: `0x${string}` | undefined =
   "0xcac5e27895aaa1962bee7a0d3103a18ea2ac8714ae8b9ae916855bcca9fabc82";
@@ -100,12 +96,9 @@ export function describePolymarketBuilderFee(mode: PolymarketFeeMode): string {
     `${pct(QUOTIENT_POLYMARKET_BUILDER_FEE_BPS[other])} per ${other} fill; collected by Polymarket as a builder fee`;
 }
 
-export const QUOTIENT_POLYMARKET_FEE_DISCLOSURE =
-  `Quotient charges ${QUOTIENT_POLYMARKET_BUILDER_FEE_BPS.maker / 100}% of notional on each Polymarket fill, collected by Polymarket as a builder fee.`;
-
 const BUILDER_CODE_PATTERN = /^0x[0-9a-fA-F]{64}$/;
 
-/** The builder code in force: the environment override, else the compiled constant; `off` means none. */
+/** Optional operator-supplied builder code. Unset or `off` means no builder fee. */
 export function polymarketBuilderCode(env: NodeJS.ProcessEnv = process.env): `0x${string}` | undefined {
   const override = env.CASSIE_POLYMARKET_BUILDER_CODE?.trim();
   if (override) {
@@ -113,7 +106,7 @@ export function polymarketBuilderCode(env: NodeJS.ProcessEnv = process.env): `0x
     if (!BUILDER_CODE_PATTERN.test(override)) throw new Error("CASSIE_POLYMARKET_BUILDER_CODE must be a 32-byte 0x-prefixed hex string, or off");
     return override as `0x${string}`;
   }
-  return QUOTIENT_POLYMARKET_BUILDER_CODE;
+  return undefined;
 }
 
 // Public Polygon RPCs for read-only approval verification. Ordered fallback:
@@ -243,7 +236,6 @@ export class PolymarketAdapter implements VenueAdapter {
   private readonly eventRefCache = new Map<string, string>();
   /** Attached to every signed order; undefined only when attribution is off. */
   readonly builderCode: `0x${string}` | undefined;
-  private builderCodeWarned = false;
   /** Local request budget: family cooldowns after an explicit 429, plus the balance-refresh window. */
   private readonly budget = accountRequestBudget();
   private readonly tokenRefreshAt = new Map<string, number>();
@@ -1018,10 +1010,6 @@ export class PolymarketAdapter implements VenueAdapter {
     // Builder attribution is serialized into the signed order, so the fee is
     // exchange-enforced and needs no second transaction.
     const attribution = this.builderCode ? { builderCode: this.builderCode } : {};
-    if (!this.builderCode && !this.builderCodeWarned) {
-      this.builderCodeWarned = true;
-      console.warn("[polymarket] builder attribution is off; orders carry no Quotient builder code");
-    }
     let signed: PmSignedOrder;
     try {
       if (intent.tif === "FOK" || intent.tif === "IOC" || intent.tif === "FAK") {

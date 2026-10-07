@@ -145,6 +145,36 @@ describe("portfolio Kelly target", () => {
 });
 
 describe("flip-flat portfolio allocation", () => {
+  it("uses quarter Kelly and the event cap without a market cap, resolution cut, or exit-depth floor", async () => {
+    const ctx = context({ signals: [signal("near", 8, { endsAt: NOW + DAY_MS })] });
+    ctx.config = {};
+    ctx.venue.book = async () => { throw new Error("no exit-depth lookup needed"); };
+    const got = await entries(ctx);
+    expect(got).toHaveLength(1);
+    expect(got[0]!.notional).toBeCloseTo(40);
+    expect(got[0]!.provenance).toMatchObject({ targetUsd: expect.closeTo(40), eventCapUsd: 50 });
+    expect(got[0]!.provenance).not.toHaveProperty("marketCapUsd");
+    expect(got[0]!.provenance).not.toHaveProperty("nearResolutionSizeFactor");
+  });
+
+  it("reserves sibling positions and entries against the default 5% event cap", async () => {
+    const ctx = context({
+      signals: [signal("first", 8), signal("second", 6)],
+      positions: [{ marketRef: "held", side: "YES", size: 20, avgPrice: 0.5 }],
+      eventRef: async () => "same-event",
+    });
+    ctx.config = {};
+    const got = await entries(ctx);
+    expect(got).toHaveLength(1);
+    expect(got[0]).toMatchObject({ marketRef: "first", notional: expect.closeTo(40) });
+  });
+
+  it("skips a published signal when the live price leaves no positive Kelly stake", async () => {
+    const ctx = context({ signals: [signal("no-edge", 0)] });
+    ctx.config = {};
+    expect(await entries(ctx)).toEqual([]);
+  });
+
   it.each(["portfolio-kelly", "daily-budget", "fixed-notional"])("uses publication edge eligibility for sports in %s mode", async (allocationMode) => {
     const ctx = context({ config: { allocationMode, entrySpreadPp: 15, maxEntrySpreadPp: 30 }, signals: [
       signal("sport-low", 5, { sleeve: "sports" }), signal("sport-high", 40, { sleeve: "sports" }),
@@ -157,7 +187,7 @@ describe("flip-flat portfolio allocation", () => {
   });
 
   it("still rejects stale sports forecasts and insufficient sports exit liquidity", async () => {
-    const ctx = context({ signals: [signal("old", 5, { sleeve: "sports", ts: new Date(NOW - 86_400_001).toISOString() }),
+    const ctx = context({ config: { minExitDepth2cUsd: 2_500 }, signals: [signal("old", 5, { sleeve: "sports", ts: new Date(NOW - 86_400_001).toISOString() }),
       signal("thin", 5, { sleeve: "sports" })] });
     ctx.venue.book = async marketRef => ({ marketRef, bids: [{ price: .49, size: 100 }], asks: [{ price: .51, size: 100 }], ts: NOW });
     expect(await entries(ctx)).toEqual([]);
@@ -267,14 +297,14 @@ describe("flip-flat portfolio allocation", () => {
     });
 
     it("sizes a portfolio entry at 75% of its target when the market resolves in two days", async () => {
-      const got = await entries(context({ signals: [signal("m-soon", 20, { endsAt: NOW + 2 * DAY_MS })] }));
+      const got = await entries(context({ config: cfg, signals: [signal("m-soon", 20, { endsAt: NOW + 2 * DAY_MS })] }));
       expect(got).toHaveLength(1);
       expect(got[0]).toMatchObject({ marketRef: "m-soon", notional: 37.5 });
       expect(got[0]!.provenance).toMatchObject({ targetUsd: 37.5, nearResolutionSizeFactor: 0.75, resolvesAt: NOW + 2 * DAY_MS });
     });
 
     it("leaves an entry alone when the market resolves later than the window", async () => {
-      const got = await entries(context({ signals: [signal("m-later", 20, { endsAt: NOW + 10 * DAY_MS })] }));
+      const got = await entries(context({ config: cfg, signals: [signal("m-later", 20, { endsAt: NOW + 10 * DAY_MS })] }));
       expect(got[0]).toMatchObject({ notional: 50 });
       expect(got[0]!.provenance).not.toHaveProperty("nearResolutionSizeFactor");
     });
@@ -282,6 +312,7 @@ describe("flip-flat portfolio allocation", () => {
     it("does not top a reduced position back up to the full target", async () => {
       const got = await entries(
         context({
+          config: cfg,
           signals: [signal("m-soon", 20, { endsAt: NOW + 2 * DAY_MS })],
           positions: [{ marketRef: "m-soon", side: "YES", size: 75, avgPrice: 0.5 }],
         }),

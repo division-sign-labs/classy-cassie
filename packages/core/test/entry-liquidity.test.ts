@@ -1,5 +1,5 @@
 // packages/core/test/entry-liquidity.test.ts
-// Entry eligibility requires enough near-touch depth to unwind the held outcome.
+// An optional entry filter requires near-touch depth to unwind the held outcome.
 
 import { describe, expect, it } from "vitest";
 import {
@@ -74,6 +74,7 @@ function context(input: {
       kellyFraction: 0.25,
       marketCapPct: 2.5,
       eventCapPct: 5,
+      minExitDepth2cUsd: 2_500,
       takeProfitPrice: null,
       ...input.config,
     },
@@ -118,8 +119,8 @@ async function entries(ctx: StrategyContext) {
 }
 
 describe("flip-flat entry-side unwind liquidity", () => {
-  it("defaults to $2,500 of held-outcome bid depth within two cents", () => {
-    expect(FlipFlatConfigSchema.parse({}).minExitDepth2cUsd).toBe(2_500);
+  it("disables the entry-only exit-depth floor by default", () => {
+    expect(FlipFlatConfigSchema.parse({}).minExitDepth2cUsd).toBe(0);
   });
 
   it("allows a YES entry when its near-touch bid notional exceeds the floor", async () => {

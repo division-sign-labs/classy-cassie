@@ -214,7 +214,7 @@ alerts
 program
   .command("strategy <botId>")
   .description("view or change strategy settings")
-  .option("--preset <recommended|hold>", "replace the settings with a named preset: recommended (quarter-Kelly, hold to resolution, no take-profit or time limit) or hold (fixed lot per market, 15pp+ edge, sell only on a confirmed Q flip, otherwise hold to resolution)")
+  .option("--preset <recommended|hold>", "replace settings: recommended (quarter-Kelly, 5% per event) or hold (fixed lot, 15pp+ edge, sell on a confirmed Q flip)")
   .option("--execution <adaptive|legacy>", "Polymarket signals: maker-first managed limits or legacy crossing limits")
   .option("--entry-deadline-seconds <seconds>", "Polymarket signals: maker phase of an adaptive entry (default 120)")
   .option("--entry-crossing-seconds <seconds>", "Polymarket signals: after the deadline, take the offer inside the price bound for this long (default 60; 0 keeps entries maker-only)")
@@ -222,7 +222,7 @@ program
   .option("--top <n|unlimited>", "optional signal-position cap; widest eligible edges enter first")
   .option("--allocation-mode <mode>", "portfolio-kelly, daily-budget or fixed-notional")
   .option("--kelly-fraction <fraction>", "fraction of full Kelly, from 0 to 1 (0.25 = quarter Kelly)")
-  .option("--market-cap-pct <pct>", "maximum portfolio equity allocated to one prediction market")
+  .option("--market-cap-pct <pct|off>", "optional maximum portfolio equity allocated to one prediction market; off by default")
   .option("--event-cap-pct <pct>", "maximum portfolio equity allocated across one parent event")
   .option("--near-resolution-days <days|off>", "size entries down when the market resolves within this many days; off disables")
   .option("--near-resolution-size-cut-pct <pct>", "percentage removed from an entry's size inside the near-resolution window")

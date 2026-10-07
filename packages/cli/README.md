@@ -226,8 +226,9 @@ Prompt-driven monitoring remains the separate `agent` strategy, configured with
 
 ## Fees
 
-Quotient takes 0.5% of each Polymarket fill. Polymarket collects it with its own fee;
-nothing leaves the bot's wallet separately.
+Cassie adds no Polymarket builder fee by default. An explicit
+`CASSIE_POLYMARKET_BUILDER_CODE` enables builder attribution and its configured fee.
+Polymarket's own fees still apply.
 
 If Quotient is unreachable, the bot retries three times, then stops entering and keeps
 managing exits on the last forecast it saw.
@@ -338,14 +339,11 @@ saying which limit stopped them.
 
 The strategy has no position-count cap by default. `cassie strategy <bot>` shows the
 allocation and accepts either `--top N` or `--top unlimited`. On prediction markets the
-default allocator recalculates a quarter-Kelly target from current portfolio equity, then
-caps exposure at 2.5% per market and 5% per parent event. A market that resolves within
-three days gets a target 25% smaller; tune that with `--near-resolution-days` and
-`--near-resolution-size-cut-pct`, or `--near-resolution-days off` to disable it. Same-side
-repeat signals may top up toward that target. Positions already above a target or cap are
-not topped up and are not automatically trimmed. New entries and top-ups also require
-$2,500 of held-outcome bid depth within 2¢ by default; `--min-exit-depth-2c-usd 0`
-disables that entry-only gate.
+default allocator recalculates a quarter-Kelly target from current portfolio equity, with
+a 5% cap per parent event. The separate market cap, near-resolution size cut, and exit-depth
+floor are off by default. Same-side repeat signals may top up toward that target.
+Positions already above a target or cap are not topped up and are not automatically trimmed.
+Existing bots keep their saved settings; `--preset recommended` applies these defaults.
 
 Prediction positions hold to resolution by default, with no take-profit or time limit.
 Optional exits are available through `--take-profit-price` (default `off`) and
@@ -360,16 +358,14 @@ available, and either `--daily-budget` or `--position-budget-pct` selects `daily
 An explicitly conflicting `--allocation-mode` is rejected.
 
 ```sh
-cassie strategy <bot> --kelly-fraction 0.25 --market-cap-pct 2.5 --event-cap-pct 5 \
-  --min-exit-depth-2c-usd 2500
-cassie strategy <bot> --near-resolution-days 3 --near-resolution-size-cut-pct 25
+cassie strategy <bot> --preset recommended
+cassie strategy <bot> --kelly-fraction 0.25 --market-cap-pct off --event-cap-pct 5
 cassie strategy <bot> --daily-budget 100 --position-budget-pct 25
 ```
 
-The signals strategy defaults to a maximum forecast entry edge of 30 percentage points,
-inclusive. An edge of 30pp is eligible; a larger edge is skipped. This is the gap between
-the Q forecast and the market reference price, not the quoted bid/ask spread. Change or
-remove the ceiling at any time:
+Quotient's published signals determine entry eligibility. The default strategy adds no
+entry-edge band; Kelly sizing still requires a positive edge at the live price. An optional
+local ceiling compares the Q forecast with the market price, not the bid/ask spread:
 
 ```sh
 cassie strategy <bot> --max-entry-edge 25

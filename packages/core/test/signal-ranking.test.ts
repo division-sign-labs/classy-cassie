@@ -73,12 +73,13 @@ describe("signal ranking by edge", () => {
     const config = FlipFlatConfigSchema.parse({});
     expect(config.allocationMode).toBe("portfolio-kelly");
     expect(config.kellyFraction).toBe(0.25);
-    expect(config.marketCapPct).toBe(2.5);
+    expect(config.marketCapPct).toBeNull();
     expect(config.eventCapPct).toBe(5);
-    expect(config.nearResolutionDays).toBe(3);
+    expect(config.nearResolutionDays).toBeNull();
     expect(config.nearResolutionSizeCutPct).toBe(25);
     expect(config.topN).toBeNull();
-    expect(config.maxEntrySpreadPp).toBe(30);
+    expect(config.entrySpreadPp).toBe(0);
+    expect(config.maxEntrySpreadPp).toBeNull();
     expect(config.tickIntervalMin).toBe(1);
     expect(config.signalPollIntervalMin).toBe(5);
   });
@@ -89,9 +90,9 @@ describe("signal ranking by edge", () => {
     expect(actions.filter((action) => action.kind === "enter")).toHaveLength(4);
   });
 
-  it("includes the default 30pp ceiling and skips larger apparent edges", async () => {
-    const actions = await new FlipFlatStrategy().tick(ctxWith([sig("at-cap", 30), sig("over-cap", 30.1)], {}));
-    expect(actions.filter((action) => action.kind === "enter").map((action) => action.marketRef)).toEqual(["at-cap"]);
+  it("accepts published signals below 10pp and above 30pp by default", async () => {
+    const actions = await new FlipFlatStrategy().tick(ctxWith([sig("low-edge", 5), sig("high-edge", 40)], {}));
+    expect(actions.filter((action) => action.kind === "enter").map((action) => action.marketRef)).toEqual(["high-edge", "low-edge"]);
   });
 
   it("allows the maximum entry-edge ceiling to be removed", async () => {

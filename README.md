@@ -165,9 +165,9 @@ keeps the key it was last deployed with.
 
 ## Fees
 
-Quotient takes 0.5% of each Polymarket fill. Polymarket collects it with its own fee;
-nothing leaves the bot's wallet separately. `cassie status` and `cassie portfolio`
-include it.
+Cassie adds no Polymarket builder fee by default. An explicit
+`CASSIE_POLYMARKET_BUILDER_CODE` enables builder attribution and its configured fee.
+Polymarket's own fees still apply.
 
 If Quotient is unreachable, the bot retries three times, then stops entering and keeps
 managing exits on the last forecast it saw.
@@ -212,27 +212,25 @@ Configure the cadences with
 ### Signal allocation
 
 The signal strategy has no position-count cap by default and evaluates competing new
-signals from widest to narrowest eligible edge. Prediction-market entries default to a
-10–30 percentage-point forecast-edge range: 30pp is eligible, while anything larger is
-skipped as a likely stale or mismapped signal. Change the ceiling with
-`--max-entry-edge <pp>` or remove it with `--max-entry-edge unlimited`. This is distinct
-from quoted bid/ask spread, which is controlled through executable-book slippage and
-depth. Set an explicit position cap with `--top N`; restore the default with
+signals from widest to narrowest eligible edge. Published Quotient signals determine entry
+eligibility; there is no additional entry-edge band by default. Kelly sizing still requires
+a positive edge at the live price. Set an optional ceiling with `--max-entry-edge <pp>`
+or remove it with `--max-entry-edge unlimited`. Set an explicit position cap with
+`--top N`; restore the default with
 `--top unlimited`.
 
 Prediction markets use portfolio-relative sizing by default. Each signal gets a
-quarter-Kelly target based on current portfolio equity, capped at 2.5% of equity in one
-market and 5% across one parent event. An entry into a market that resolves within three
-days is sized 25% smaller. A repeat signal on the same side may top the
+quarter-Kelly target based on current portfolio equity, capped at 5% across one parent
+event. The separate market cap and near-resolution size cut are off by default.
+A repeat signal on the same side may top the
 position up only by the remaining target and cap headroom. Deposits therefore affect the
 next sizing decision automatically; there is no fixed daily allowance in this mode. An
 existing position above a target or cap is grandfathered: it cannot be topped up, but the
 allocator never sells merely to trim it back to the cap.
 
-An entry or top-up also requires at least $2,500 of held-outcome bid notional within 2¢
-of the best bid, so the strategy checks its ability to unwind before buying. Set
-`--min-exit-depth-2c-usd 0` to remove that entry-only eligibility gate. Actual orders are
-still sized against live entry-side depth and a slippage band.
+The optional exit-depth floor is off by default. Actual orders are sized against live
+entry-side depth and a slippage band. Existing bots keep their saved settings;
+`--preset recommended` applies these defaults.
 
 Prediction positions hold to resolution by default (`takeProfitPrice: null`,
 `maxHoldDays: null`). Operators can set an optional take-profit or deadline with
@@ -241,9 +239,8 @@ settings; `--take-profit-price off --max-hold-days unlimited` disables both exit
 Low 24-hour volume never blocks an exit; executable depth and slippage still bound it.
 
 ```sh
-cassie strategy <botId> --allocation-mode portfolio-kelly \
-  --kelly-fraction 0.25 --market-cap-pct 2.5 --event-cap-pct 5
-cassie strategy <botId> --near-resolution-days 3 --near-resolution-size-cut-pct 25
+cassie strategy <botId> --preset recommended
+cassie strategy <botId> --kelly-fraction 0.25 --market-cap-pct off --event-cap-pct 5
 ```
 
 The legacy fixed-budget allocator remains available. Supplying either legacy budget flag
