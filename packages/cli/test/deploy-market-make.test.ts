@@ -71,7 +71,7 @@ describe("market-make deploy safety", () => {
     expect(paths).toEqual(["/resume", "/init"]);
   });
 
-  it("refuses strict replacement before systemd stop when control shutdown fails", () => {
+  it("refuses strict replacement before systemd stop when control shutdown fails", async () => {
     const cfg: BotConfig = {
       ...bot("market-make"),
       deployment: {
@@ -86,7 +86,7 @@ describe("market-make deploy safety", () => {
     };
     const commands: string[] = [];
 
-    expect(() => quiesce(cfg, true, {
+    await expect(quiesce(cfg, true, {
       exec: (_target, command) => {
         commands.push(command);
         return { ok: true, code: 0, stdout: "", stderr: "" };
@@ -94,13 +94,13 @@ describe("market-make deploy safety", () => {
       control: () => {
         throw new Error("shutdown returned HTTP 500");
       },
-    })).toThrow(/shutdown cancellation was not verified/);
+    })).rejects.toThrow(/shutdown cancellation was not verified/);
     // Reachability probe, then the liveness probe that distinguishes a still
     // running service from one an earlier interrupted redeploy already stopped.
     expect(commands).toEqual(["true", "systemctl is-active --quiet cassie@maker-1"]);
   });
 
-  it("continues a strict replacement when the service was already stopped by an earlier redeploy", () => {
+  it("continues a strict replacement when the service was already stopped by an earlier redeploy", async () => {
     const cfg: BotConfig = {
       ...bot("market-make"),
       deployment: {
@@ -115,7 +115,7 @@ describe("market-make deploy safety", () => {
     };
     const commands: string[] = [];
 
-    expect(() => quiesce(cfg, true, {
+    await expect(quiesce(cfg, true, {
       exec: (_target, command) => {
         commands.push(command);
         const ok = !command.startsWith("systemctl is-active");
@@ -124,7 +124,7 @@ describe("market-make deploy safety", () => {
       control: () => {
         throw new Error("connect ECONNREFUSED");
       },
-    })).not.toThrow();
+    })).resolves.toBeUndefined();
     expect(commands).toEqual([
       "true",
       "systemctl is-active --quiet cassie@maker-1",

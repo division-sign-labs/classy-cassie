@@ -32,34 +32,34 @@ describe("swing deployment durability", () => {
     expect(marketMakeStateSource(local, false, null)).toBeNull();
   });
 
-  it("accepts the engine's native-protection proof without demanding empty protective orders", () => {
+  it("accepts the engine's native-protection proof without demanding empty protective orders", async () => {
     const exec = vi.fn(() => SUCCESS);
     const control = vi.fn((_target, _botId, _method, path) => {
       if (path !== "/shutdown") throw new Error("native-stop-aware shutdown must not require an empty order book");
       return protectedShutdown();
     });
-    quiesce(CONFIG, false, { exec, control });
+    await quiesce(CONFIG, false, { exec, control });
     expect(exec.mock.calls.map(call => call[1])).toEqual(["true", "systemctl stop cassie@swing-deploy"]);
     expect(control).toHaveBeenCalledExactlyOnceWith({ host: "203.0.113.8", user: "root" }, "swing-deploy", "POST", "/shutdown");
   });
 
-  it("treats swing as strict even when the caller does not request strict quiescence", () => {
+  it("treats swing as strict even when the caller does not request strict quiescence", async () => {
     const exec = vi.fn(() => SUCCESS);
     const control = vi.fn(() => { throw new Error("Shutdown not confirmed: order acknowledgement unresolved"); });
-    expect(() => quiesce(CONFIG, false, { exec, control })).toThrow("protected shutdown was not verified");
+    await expect(quiesce(CONFIG, false, { exec, control })).rejects.toThrow("protected shutdown was not verified");
     expect(exec.mock.calls.map(call => call[1])).toEqual(["true"]);
   });
 
-  it("does not treat an inactive service as proof that uncertain fills are safe", () => {
+  it("does not treat an inactive service as proof that uncertain fills are safe", async () => {
     const exec = vi.fn((_target, command) => ({ ...SUCCESS, ok: !command.startsWith("systemctl is-active") }));
     const control = vi.fn(() => { throw new Error("connection refused"); });
-    expect(() => quiesce(CONFIG, true, { exec, control })).toThrow("protected shutdown was not verified");
+    await expect(quiesce(CONFIG, true, { exec, control })).rejects.toThrow("protected shutdown was not verified");
     expect(exec.mock.calls.map(call => call[1])).toEqual(["true"]);
   });
 
-  it("refuses to replace an unreachable swing host", () => {
+  it("refuses to replace an unreachable swing host", async () => {
     const exec = vi.fn(() => ({ ...SUCCESS, ok: false })); const control = vi.fn();
-    expect(() => quiesce(CONFIG, false, { exec, control })).toThrow("existing host is unreachable");
+    await expect(quiesce(CONFIG, false, { exec, control })).rejects.toThrow("existing host is unreachable");
     expect(control).not.toHaveBeenCalled();
     expect(exec).toHaveBeenCalledOnce();
   });
@@ -72,15 +72,15 @@ describe("swing deployment durability", () => {
     { ...protectedShutdown(), cancellation: { ...protectedShutdown().cancellation, requested: false } },
     { ...protectedShutdown(), cancellation: { ...protectedShutdown().cancellation, completed: false } },
     { ...protectedShutdown(), cancellation: { ...protectedShutdown().cancellation, protectiveOrdersRetained: false } },
-  ])("rejects incomplete or generic shutdown evidence before stopping systemd", response => {
+  ])("rejects incomplete or generic shutdown evidence before stopping systemd", async response => {
     const exec = vi.fn(() => SUCCESS); const control = vi.fn(() => response);
-    expect(() => quiesce(CONFIG, false, { exec, control })).toThrow("protected shutdown was not verified");
+    await expect(quiesce(CONFIG, false, { exec, control })).rejects.toThrow("protected shutdown was not verified");
     expect(exec.mock.calls.map(call => call[1])).toEqual(["true"]);
   });
 
-  it("refuses to continue if systemd cannot stop the verified runtime", () => {
+  it("refuses to continue if systemd cannot stop the verified runtime", async () => {
     const exec = vi.fn((_target, command) => ({ ...SUCCESS, ok: command === "true", stderr: command === "true" ? "" : "denied" }));
-    expect(() => quiesce(CONFIG, false, { exec, control: vi.fn(() => protectedShutdown()) })).toThrow("could not stop its runtime cleanly");
+    await expect(quiesce(CONFIG, false, { exec, control: vi.fn(() => protectedShutdown()) })).rejects.toThrow("could not stop its runtime cleanly");
   });
 
   it("archives the execution database, its sidecars, and swing recordings for recovery", () => {

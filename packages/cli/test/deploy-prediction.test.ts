@@ -108,31 +108,73 @@ describe("adaptive prediction deployment", () => {
     })).toThrow(/public IPv4/);
   });
 
-  it("refuses to replace an unreachable adaptive deployment before calling control", () => {
+  it("refuses to replace an unreachable adaptive deployment before calling control", async () => {
     const control = vi.fn();
-    expect(() => quiesce(bot({ deployed: true }), true, {
+    await expect(quiesce(bot({ deployed: true }), true, {
       exec: () => executed(false), control,
-    })).toThrow(/unreachable/);
+    })).rejects.toThrow(/unreachable/);
     expect(control).not.toHaveBeenCalled();
   });
 
-  it("does not accept an inactive service as proof that venue orders were canceled", () => {
+  it("refuses when the control API is down but the service is still running", async () => {
     const commands: string[] = [];
-    expect(() => quiesce(bot({ deployed: true }), true, {
-      exec: (_target, command) => {
-        commands.push(command);
-        return executed(command === "true");
-      },
+    const venueOrders = vi.fn(async () => []);
+    await expect(quiesce(bot({ deployed: true }), true, {
+      exec: (_target, command) => { commands.push(command); return executed(); },
       control: () => { throw new Error("connect ECONNREFUSED"); },
-    })).toThrow(/shutdown cancellation was not verified/);
-    expect(commands).not.toContain("systemctl stop cassie@prediction-1");
+      venueOrders,
+    })).rejects.toThrow(/shutdown cancellation was not verified/);
+    expect(commands).toEqual(["true", "systemctl is-active --quiet cassie@prediction-1"]);
+    expect(venueOrders).not.toHaveBeenCalled();
   });
 
-  it("cannot bypass strict shutdown by saving legacy execution or passing best-effort mode", () => {
+  it("continues past a stopped runtime only after the venue reports no resting orders", async () => {
+    const calls: string[] = [];
+    await quiesce(bot({ deployed: true }), true, {
+      exec: (_target, command) => {
+        calls.push(command);
+        return executed(!command.startsWith("systemctl is-active"));
+      },
+      control: () => { throw new Error("connect ECONNREFUSED"); },
+      venueOrders: async (cfg) => { calls.push(`venue ${cfg.id}`); return []; },
+    });
+    // The unit is held stopped before the venue read so an auto-restart cannot race it.
+    expect(calls).toEqual([
+      "true",
+      "systemctl is-active --quiet cassie@prediction-1",
+      "systemctl stop cassie@prediction-1",
+      "venue prediction-1",
+    ]);
+  });
+
+  it("does not accept an inactive service as proof that venue orders were canceled", async () => {
+    const stopped = (_target: unknown, command: string) => executed(!command.startsWith("systemctl is-active"));
+    const control = () => { throw new Error("connect ECONNREFUSED"); };
+    for (const [venueOrders, message] of [
+      [async () => [{ id: "still-resting" }], /left 1 resting order\(s\) on polymarket/],
+      [async () => ({ orders: [] }), /non-array response/],
+      [async () => { throw new Error("fetch failed"); }, /order check failed \(fetch failed\)/],
+    ] as const) {
+      await expect(quiesce(bot({ deployed: true }), true, { exec: stopped, control, venueOrders }))
+        .rejects.toThrow(message);
+    }
+  });
+
+  it("refuses a stopped runtime that systemd cannot hold stopped", async () => {
+    const venueOrders = vi.fn(async () => []);
+    await expect(quiesce(bot({ deployed: true }), true, {
+      exec: (_target, command) => executed(command === "true", "", "unit busy"),
+      control: () => { throw new Error("connect ECONNREFUSED"); },
+      venueOrders,
+    })).rejects.toThrow(/could not be held stopped \(unit busy\)/);
+    expect(venueOrders).not.toHaveBeenCalled();
+  });
+
+  it("cannot bypass strict shutdown by saving legacy execution or passing best-effort mode", async () => {
     const control = vi.fn(() => { throw new Error("old adaptive runtime unreachable"); });
-    expect(() => quiesce(bot({ deployed: true, mode: "legacy" }), false, {
+    await expect(quiesce(bot({ deployed: true, mode: "legacy" }), false, {
       exec: () => executed(), control,
-    })).toThrow(/shutdown cancellation was not verified/);
+    })).rejects.toThrow(/shutdown cancellation was not verified/);
   });
 
   it("pauses and drains the old adaptive ledger before permitting a legacy replacement", async () => {
@@ -215,37 +257,37 @@ describe("adaptive prediction deployment", () => {
     expect(control).not.toHaveBeenCalled();
   });
 
-  it("rejects incomplete shutdown acknowledgments without proceeding to replacement", () => {
+  it("rejects incomplete shutdown acknowledgments without proceeding to replacement", async () => {
     for (const shutdown of [
       { stopped: true, restingOrdersCanceled: false },
       { stopped: false, restingOrdersCanceled: true },
       {},
     ]) {
       const commands: string[] = [];
-      expect(() => quiesce(bot({ deployed: true }), true, {
+      await expect(quiesce(bot({ deployed: true }), true, {
         exec: (_target, command) => { commands.push(command); return executed(); },
         control: () => shutdown,
-      })).toThrow(/shutdown cancellation was not verified/);
+      })).rejects.toThrow(/shutdown cancellation was not verified/);
       expect(commands).not.toContain("systemctl stop cassie@prediction-1");
     }
   });
 
-  it("requires an authoritative empty orders array even after successful shutdown", () => {
+  it("requires an authoritative empty orders array even after successful shutdown", async () => {
     for (const orders of [[{ id: "still-resting" }], { orders: [] }, null]) {
       const commands: string[] = [];
-      expect(() => quiesce(bot({ deployed: true }), true, {
+      await expect(quiesce(bot({ deployed: true }), true, {
         exec: (_target, command) => { commands.push(command); return executed(); },
         control: (_target, _id, _method, path) => path === "/shutdown"
           ? { stopped: true, restingOrdersCanceled: true }
           : orders,
-      })).toThrow(/shutdown cancellation was not verified/);
+      })).rejects.toThrow(/shutdown cancellation was not verified/);
       expect(commands).not.toContain("systemctl stop cassie@prediction-1");
     }
   });
 
-  it("verifies shutdown and venue orders before stopping the service", () => {
+  it("verifies shutdown and venue orders before stopping the service", async () => {
     const calls: string[] = [];
-    quiesce(bot({ deployed: true }), true, {
+    await quiesce(bot({ deployed: true }), true, {
       exec: (_target, command) => { calls.push(command); return executed(); },
       control: (_target, id, method, path) => {
         expect(id).toBe("prediction-1");
@@ -258,13 +300,13 @@ describe("adaptive prediction deployment", () => {
     ]);
   });
 
-  it("fails when systemd cannot stop the verified runtime", () => {
-    expect(() => quiesce(bot({ deployed: true }), true, {
+  it("fails when systemd cannot stop the verified runtime", async () => {
+    await expect(quiesce(bot({ deployed: true }), true, {
       exec: (_target, command) => executed(!command.startsWith("systemctl stop"), "", "stop failed"),
       control: (_target, _id, _method, path) => path === "/shutdown"
         ? { stopped: true, restingOrdersCanceled: true }
         : [],
-    })).toThrow(/could not stop.*cleanly/);
+    })).rejects.toThrow(/could not stop.*cleanly/);
   });
 
   it("initializes paused and verifies recovery before resuming adaptive execution", async () => {

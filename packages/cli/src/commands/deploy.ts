@@ -9,7 +9,7 @@ import pc from "picocolors";
 import { MarketMakeConfigSchema } from "@quotient-forecasting/strategy-market-make";
 import { QuotientSwingConfigSchema } from "@quotient-forecasting/strategy-quotient-swing";
 import { type BotConfig } from "@quotient-forecasting/cassie-core";
-import { buildRuntimeCreds, confirm } from "../context.js";
+import { adapterFor, buildRuntimeCreds, confirm, requireAccount } from "../context.js";
 import { describeTelegramSettings, resolveTelegramSettings } from "../telegram-settings.js";
 import { describeWebhookSettings, resolveWebhookSettings } from "../webhook-settings.js";
 import { atomicWritePrivateFile, dirs, loadBotConfig, saveBotConfig } from "../paths.js";
@@ -306,14 +306,22 @@ async function waitForProvisioning(target: Target, fromWorkspace = false): Promi
 interface QuiesceDeps {
   exec: typeof sshExec;
   control: typeof controlCall;
+  /** The venue's open orders for this bot's account, read from this machine. */
+  venueOrders?: (cfg: BotConfig) => Promise<unknown>;
+}
+
+/** The same authoritative list the runtime's GET /orders returns, without the runtime. */
+async function localVenueOrders(cfg: BotConfig): Promise<unknown> {
+  const adapter = await adapterFor(cfg, { needCreds: true });
+  return adapter.openOrders(requireAccount(cfg));
 }
 
 /** Stop the running bot and cancel its resting orders before replacing it. */
-export function quiesce(
+export async function quiesce(
   cfg: BotConfig,
   strict = false,
   deps: QuiesceDeps = { exec: sshExec, control: controlCall },
-): void {
+): Promise<void> {
   if (!cfg.deployment) return;
   const prediction = isPredictionDeployment(cfg);
   const swing = cfg.strategy.id === "quotient-swing";
@@ -365,11 +373,19 @@ export function quiesce(
         );
       }
       if (prediction) {
-        // Inactivity alone says nothing about an order accepted before a crash.
-        throw new Error(
-          `refusing to replace the prediction runtime: shutdown cancellation was not verified (${(error as Error).message.slice(0, 220)}). ` +
-          "Keep the existing droplet and restore its control API so cancellation and the authoritative order check can complete",
-        );
+        const reason = (error as Error).message.slice(0, 220);
+        if (deps.exec(target, `systemctl is-active --quiet cassie@${cfg.id}`).ok) {
+          throw new Error(
+            `refusing to replace the prediction runtime: shutdown cancellation was not verified (${reason}). ` +
+            "Keep the existing droplet and restore its control API so cancellation and the authoritative order check can complete",
+          );
+        }
+        // An interrupted redeploy can stop the service after a verified shutdown,
+        // and then the control API is gone. Inactivity alone says nothing about
+        // an order accepted before a crash, so ask the venue directly.
+        await verifyStoppedPredictionRuntime(cfg, target, deps, reason);
+        console.log(pc.green("running bot already stopped; the venue shows no resting orders"));
+        return;
       }
       // A previous interrupted redeploy may already have completed the
       // shutdown and left the service inactive. In that case the control API
@@ -390,6 +406,39 @@ export function quiesce(
   if (strict && !stopped.ok) {
     throw new Error(
       `refusing to replace the ${kind} droplet: could not stop its runtime cleanly (${(stopped.stderr || stopped.stdout).trim().slice(0, 160)})`,
+    );
+  }
+}
+
+async function verifyStoppedPredictionRuntime(
+  cfg: BotConfig,
+  target: Target,
+  deps: QuiesceDeps,
+  reason: string,
+): Promise<void> {
+  const refuse = (detail: string) => new Error(`refusing to replace the prediction runtime: ${detail}`);
+  // Hold the unit stopped first so a systemd auto-restart cannot place an order behind the check.
+  const held = deps.exec(target, `systemctl stop cassie@${cfg.id}`);
+  if (!held.ok) {
+    throw refuse(
+      `its control API is down (${reason}) and the stopped service could not be held stopped ` +
+      `(${(held.stderr || held.stdout).trim().slice(0, 160)})`,
+    );
+  }
+  let orders: unknown;
+  try {
+    orders = await (deps.venueOrders ?? localVenueOrders)(cfg);
+  } catch (error) {
+    throw refuse(
+      `the runtime is stopped and the ${cfg.venue} order check failed (${(error as Error).message.slice(0, 220)}). ` +
+      "Redeploy again when the venue answers",
+    );
+  }
+  if (!Array.isArray(orders)) throw refuse(`the ${cfg.venue} order check returned a non-array response`);
+  if (orders.length > 0) {
+    throw refuse(
+      `the stopped runtime left ${orders.length} resting order(s) on ${cfg.venue}. ` +
+      "Cancel them on the venue, or start the existing runtime so it can cancel them, then redeploy",
     );
   }
 }
@@ -641,7 +690,7 @@ export async function runDeploy(botId: string, opts: DeployOpts = {}): Promise<v
     stagedWorkspace = stageWorkspaceRuntime({ host: stagingHost, user: "root" }, botId, workspaceArtifact);
   }
   if (replacementStateSource) await preparePredictionModeChange(replacementStateSource);
-  quiesce(replacementStateSource ?? cfg, replacementStateSource !== null);
+  await quiesce(replacementStateSource ?? cfg, replacementStateSource !== null);
   const preservedState = replacementStateSource ? preserveRuntimeState(replacementStateSource) : null;
 
   let droplet: Droplet;
