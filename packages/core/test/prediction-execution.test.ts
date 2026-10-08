@@ -574,7 +574,7 @@ describe("adaptive prediction execution", () => {
     await h.executor.admit({ kind: "exit", marketRef: "yes" }, h.positions());
     h.setBook(.3, .4); h.advance(1000);
     await h.executor.admit({ kind: "exit", marketRef: "yes", urgent: true }, h.positions()); await h.settleCancel();
-    expect(h.submissions[1]).toMatchObject({ tif: "FAK", postOnly: false, limitPrice: .3 });
+    expect(h.submissions[1]).toMatchObject({ tif: "FAK", postOnly: false, limitPrice: .01 });
   });
 
   it("persists an urgent SELL behind a canceling partial BUY and advances it on the fast lane", async () => {
@@ -836,7 +836,30 @@ describe("adaptive prediction execution", () => {
     });
     await h.executor.admit({ kind: "exit", marketRef: "yes", urgent: true }, h.positions());
     expect(h.submissions).toHaveLength(1);
-    expect(h.submissions[0]).toMatchObject({ side: "SELL", size: 100, tif: "FAK", postOnly: false, limitPrice: .49 });
+    expect(h.submissions[0]).toMatchObject({ side: "SELL", size: 100, tif: "FAK", postOnly: false, limitPrice: .01 });
+  });
+
+  it("market-sells the whole position on an urgent exit even when the top bid is thin", async () => {
+    // Fable on 2026-10-08: 96 held, 78.61 bid at 28c. A sell bounded at the bid was
+    // rejected twice; a market sell walks into the 27c level instead.
+    const h = harness(); h.setHeld(96); await h.ready();
+    h.adapter.executionMarket.mockImplementation(async (ref, outcome) => {
+      const market = h.market(ref, outcome);
+      return { ...market, book: { ...market.book, bids: [{ price: .28, size: 78.61 }, { price: .27, size: 242.64 }], asks: [{ price: .29, size: 390 }] } };
+    });
+    await h.executor.admit({ kind: "exit", marketRef: "yes", urgent: true }, h.positions());
+    expect(h.submissions).toHaveLength(1);
+    expect(h.submissions[0]).toMatchObject({ side: "SELL", size: 96, tif: "FAK", postOnly: false, limitPrice: .01 });
+  });
+
+  it("rests a normal exit passively before it crosses", async () => {
+    const h = harness(); h.setHeld(96); await h.ready();
+    h.adapter.executionMarket.mockImplementation(async (ref, outcome) => {
+      const market = h.market(ref, outcome);
+      return { ...market, book: { ...market.book, bids: [{ price: .5, size: 40 }, { price: .3, size: 1000 }] } };
+    });
+    await h.executor.admit({ kind: "exit", marketRef: "yes" }, h.positions());
+    expect(h.submissions.at(-1)).toMatchObject({ side: "SELL", postOnly: true });
   });
 
   it("persists the exact SDK-normalized terms before POST and reconciles against those terms", async () => {

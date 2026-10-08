@@ -504,11 +504,13 @@ export class PredictionExecutor {
       const entryAvgPrice = action.kind === "exit" && pricedSize > EPS
         ? held.reduce((sum, p) => sum + (p.avgPrice > 0 ? p.size * p.avgPrice : 0), 0) / pricedSize : undefined;
       const desiredSize = action.kind === "enter" ? budget / this.entryUnitCost(maximumPrice, provenance) : heldSize * Math.min(1, Math.max(0, action.fraction ?? 1));
-      const cap = checkCapacity({ side: action.kind === "enter" ? "BUY" : "SELL", desiredSize, refPrice: action.kind === "enter" ? maximumPrice : bid, book: external,
+      // An urgent exit is a market sell of the whole position, so book depth does not cap it.
+      const marketExit = action.kind === "exit" && action.urgent === true;
+      const cap = marketExit ? undefined : checkCapacity({ side: action.kind === "enter" ? "BUY" : "SELL", desiredSize, refPrice: action.kind === "enter" ? maximumPrice : bid, book: external,
         quote: { ...market.quote, bid, ask, mid: (bid + ask) / 2 }, risk: this.d.config.risk,
         minimumNotional: action.kind === "enter" ? action.minNotional : undefined, enforceMinimumNotional: action.kind === "enter" });
-      if (!cap.ok) return this.refuse(action, `capacity: ${cap.skipReasons.join("; ")}`);
-      let size = this.normalize(cap.size);
+      if (cap && !cap.ok) return this.refuse(action, `capacity: ${cap.skipReasons.join("; ")}`);
+      let size = this.normalize(cap ? cap.size : desiredSize);
       if (action.kind === "exit") {
         let balance: number;
         try { balance = await this.rpc("token balance", () => this.d.adapter.tokenBalance!(this.d.account, market.tokenId, { refresh: true })); }
@@ -777,6 +779,9 @@ export class PredictionExecutor {
       const requested = !this.commodities ? ask - tick : ladder < .25 ? Math.min(bid + tick, ask - tick) : ladder < .5 ? floorTick((bid + ask) / 2, tick) : ask - tick;
       price = floorTick(Math.min(requested, ask - tick, p.maximumPrice), tick);
       if (price + EPS < bid || !(price > 0)) { await this.stopParent(p, "entry price bound is no longer competitive"); return; }
+    } else if (crossing && p.urgent) {
+      // Market sell: the lowest valid price takes every resting bid, best first.
+      price = ceilTick(Math.max(p.minimumPrice ?? tick, tick), tick);
     } else if (crossing) {
       price = ceilTick(Math.max(bid * (1 - this.d.config.risk.slippagePct / 100), p.minimumPrice ?? tick), tick);
     } else {
@@ -817,7 +822,7 @@ export class PredictionExecutor {
       const balance = await this.rpc("token balance", () => this.d.adapter.tokenBalance!(this.d.account, p.tokenId, { refresh: true }));
       if (!Number.isFinite(balance) || balance < 0) throw new Error("invalid authenticated token balance");
       size = this.normalize(Math.min(size, balance));
-      if (crossing) {
+      if (crossing && !p.urgent) {
         const depth = b.bids.filter(l => l.price + EPS >= price).reduce((sum, l) => sum + l.size, 0);
         size = this.normalize(Math.min(size, depth * this.d.config.risk.depthCapPct / 100, this.d.config.risk.maxOrderNotional / bid));
       }

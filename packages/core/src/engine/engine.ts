@@ -31,7 +31,7 @@ import type {
 } from "../types.js";
 import type { BotConfig } from "../config.js";
 import { closingPnl } from "../alerts/format.js";
-import { checkCapacity } from "../risk/capacity.js";
+import { checkCapacity, type CapacityResult } from "../risk/capacity.js";
 import { mirrorBookForNo, mirrorQuoteForNo } from "./mirror.js";
 import { StateKeys, getJson, setJson } from "../state.js";
 import { PerpExecutor, isProtectiveOrder } from "./perp-execution.js";
@@ -108,6 +108,8 @@ export interface TickResult {
 
 const LOCK_TTL_MS = 120_000;
 const PENDING_REDEMPTIONS_KEY = "engine:pending-redemptions";
+/** Lowest price valid on both prediction venues; a sell at this floor takes every resting bid. */
+const MARKET_EXIT_PRICE = 0.01;
 
 interface RedemptionRecord {
   status: "pending" | "confirmed";
@@ -486,7 +488,11 @@ export class Engine {
         }
         const isPrediction = pos.side === "YES" || pos.side === "NO";
         const orderSide: OrderSide = pos.side === "SHORT" ? "BUY" : "SELL";
+        // A strategy exit on a prediction market is a decision to be out: sell the
+        // whole position into the book now instead of resting a limit near the bid.
+        const marketExit = isPrediction && action.urgent === true;
         const result = await this.placeChecked({
+          ...(marketExit ? { market: true } : {}),
           marketRef: action.marketRef,
           outcome: isPrediction ? (pos.side as "YES" | "NO") : undefined,
           side: orderSide,
@@ -625,6 +631,8 @@ export class Engine {
     /** Exits: held average price, for P&L. */
     entryAvgPrice?: number;
     positionSide?: PositionSide;
+    /** Prediction exits: the whole size, immediate-or-cancel, at any price. */
+    market?: boolean;
   }): Promise<StrategyActionResult> {
     const { adapter, account, config, botId } = this.d;
     const { book, quote, minOrderSize } = await this.quoteFor(p.marketRef, p.outcome);
@@ -633,16 +641,19 @@ export class Engine {
     const enforceMinimumNotional = p.enforceMinimumNotional ?? true;
 
     const risk = config.risk;
-    const cap = checkCapacity({
-      side: p.side,
-      desiredSize,
-      refPrice,
-      book,
-      quote,
-      risk,
-      minimumNotional: p.minimumNotional,
-      enforceMinimumNotional,
-    });
+    const cap: CapacityResult = p.market
+      ? { ok: true, size: desiredSize, limitPrice: MARKET_EXIT_PRICE, bandDepth: 0, capped: false, skipReasons: [],
+          notes: ["market exit: whole position at any price"] }
+      : checkCapacity({
+        side: p.side,
+        desiredSize,
+        refPrice,
+        book,
+        quote,
+        risk,
+        minimumNotional: p.minimumNotional,
+        enforceMinimumNotional,
+      });
     if (!cap.ok) {
       await this.alert({
         kind: "skipped-order",
@@ -666,7 +677,8 @@ export class Engine {
     // Reservations must match the quantity the venue will sign. Flooring may
     // also put a small top-up below the venue's share minimum.
     const size = adapter.normalizeOrderSize?.(cappedSize) ?? cappedSize;
-    const placedNotional = size * limitPrice;
+    // A market exit's limit is only a floor; the venue fills it at the resting bids.
+    const placedNotional = size * (p.market && quote.bid > 0 ? quote.bid : limitPrice);
     const effectiveMinimumNotional = Math.max(risk.minViableNotional, p.minimumNotional ?? 0);
     if (p.side === "BUY" && enforceMinimumNotional && minOrderSize !== undefined &&
       (!Number.isFinite(minOrderSize) || minOrderSize <= 0 || size + 1e-9 < minOrderSize)) {
@@ -705,7 +717,7 @@ export class Engine {
       side: p.side,
       size,
       limitPrice,
-      tif: p.tif ?? "GTC",
+      tif: p.tif ?? (p.market ? "IOC" : "GTC"),
       clientId: `${botId}-${this.now()}-${Math.floor(Math.random() * 1e6)}`,
       reduceOnly: p.reduceOnly,
       triggers: p.triggers,
