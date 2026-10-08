@@ -314,7 +314,7 @@ export async function runStrategy(botId: string, opts: StrategyOptions = {}): Pr
         ...(opts.execution === undefined ? {} : { mode: opts.execution.trim().toLowerCase() }),
         ...(opts.entryDeadlineSeconds === undefined
           ? {}
-          : { entryDeadlineSec: positiveNumber("entry deadline", opts.entryDeadlineSeconds) }),
+          : { entryDeadlineSec: nonnegativeNumber("entry deadline", opts.entryDeadlineSeconds) }),
         ...(opts.entryCrossingSeconds === undefined
           ? {}
           : { entryCrossingSec: nonnegativeNumber("entry crossing window", opts.entryCrossingSeconds) }),
@@ -713,10 +713,10 @@ function printStrategy(
   console.log(`  slippage:             ${risk.slippagePct}% from best executable price`);
   const executionConfig = PredictionExecutionConfigSchema.parse(execution ?? {});
   const executionMode = venue === "polymarket" ? executionConfig.mode : "legacy";
-  console.log(`  execution:            ${executionMode} (${executionMode === "adaptive" ? "maker-first managed limits" : "crossing limits"})`);
+  console.log(`  execution:            ${executionMode} (${executionMode === "adaptive" ? "managed limits" : "crossing limits"})`);
   if (venue === "polymarket") {
     const inactive = executionMode === "legacy" ? " (inactive in legacy mode)" : "";
-    console.log(`  entry deadline:       ${compactNumber(executionConfig.entryDeadlineSec)} sec maker phase${inactive}`);
+    console.log(`  entry deadline:       ${executionConfig.entryDeadlineSec === 0 ? "off (entries start with the marketable limit)" : `${compactNumber(executionConfig.entryDeadlineSec)} sec maker phase`}${inactive}`);
     console.log(`  entry crossing:       ${executionConfig.entryCrossingSec === 0 ? "off (maker-only entries)" : `${compactNumber(executionConfig.entryCrossingSec)} sec marketable limit inside the price bound after the deadline`}${inactive}`);
     console.log(`  exit passive phase:   ${compactNumber(executionConfig.exitPassiveSec)} sec${inactive}`);
     const feeMode = polymarketFeeMode(executionMode);

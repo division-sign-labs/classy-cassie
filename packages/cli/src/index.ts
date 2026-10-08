@@ -12,6 +12,7 @@ import { runStrategy } from "./commands/strategy.js";
 import { runBot } from "./commands/run.js";
 import { alertsTest, alertsWebhook, showOrders, showPortfolio, venueStatus } from "./commands/ops.js";
 import { runSsh, showLogs, showStatus } from "./commands/monitor.js";
+import { pauseBot, resumeBot } from "./commands/pause.js";
 import { runTrade } from "./commands/trade.js";
 import { runDeploy } from "./commands/deploy.js";
 import { runDashboard, setDashboardPassword } from "./commands/dashboard.js";
@@ -152,6 +153,16 @@ dashboard
   .action(wrap(setDashboardPassword));
 
 program
+  .command("pause <botId>")
+  .description("stop new entries; keep positions")
+  .action(wrap(pauseBot));
+
+program
+  .command("resume <botId>")
+  .description("let a paused prediction bot place orders again")
+  .action(wrap(resumeBot));
+
+program
   .command("ssh <botId>")
   .description("open a shell on the bot's droplet")
   .action(wrap(runSsh));
@@ -215,8 +226,8 @@ program
   .command("strategy <botId>")
   .description("view or change strategy settings")
   .option("--preset <recommended|hold>", "replace settings: recommended (quarter-Kelly, 5% per event) or hold (fixed lot, 15pp+ edge, sell on a confirmed Q flip)")
-  .option("--execution <adaptive|legacy>", "Polymarket signals: maker-first managed limits or legacy crossing limits")
-  .option("--entry-deadline-seconds <seconds>", "Polymarket signals: maker phase of an adaptive entry (default 120)")
+  .option("--execution <adaptive|legacy>", "Polymarket signals: managed limits or legacy crossing limits")
+  .option("--entry-deadline-seconds <seconds>", "Polymarket signals: post-only phase before the marketable limit (default 0: none)")
   .option("--entry-crossing-seconds <seconds>", "Polymarket signals: after the deadline, take the offer inside the price bound for this long (default 60; 0 keeps entries maker-only)")
   .option("--exit-passive-seconds <seconds>", "Polymarket signals: passive exit phase before bounded immediate execution (default 60; 0 skips)")
   .option("--top <n|unlimited>", "optional signal-position cap; widest eligible edges enter first")

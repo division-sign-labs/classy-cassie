@@ -67,7 +67,8 @@ export function webhookEventId(event: AlertEvent, at: string): string {
     : order
     ? `order:${order}`
     : fingerprint
-    ? `fp:${fingerprint}`
+    // Error fingerprints carry raw error text; hash it so the id is always a valid header value.
+    ? `fp:${createHash("sha256").update(fingerprint).digest("hex").slice(0, 16)}`
     : createHash("sha256").update(`${event.kind}|${event.message}|${at}`).digest("hex").slice(0, 16);
   return `${event.botId}:${event.kind}:${key}:${at}`;
 }

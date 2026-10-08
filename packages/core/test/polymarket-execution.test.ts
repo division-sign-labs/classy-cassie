@@ -199,6 +199,27 @@ describe("Polymarket authenticated reconciliation", () => {
     expect(metadata).not.toHaveBeenCalled();
   });
 
+  it("reads matchup holdings whose outcomes are team names, in the canonical first-token-is-YES orientation", async () => {
+    const adapter = adapterWith({
+      listPositions: async function* () { yield { items: [
+        { tokenId: "saints", oppositeTokenId: "vikings", conditionId: "game", outcome: "Saints", oppositeOutcome: "Vikings", size: "111", avgPrice: ".45", curPrice: ".445" },
+        { tokenId: "brewers", oppositeTokenId: "padres", conditionId: "series", outcome: "Milwaukee Brewers", oppositeOutcome: "San Diego Padres", size: "100", avgPrice: ".5", curPrice: ".885" },
+        { tokenId: "draw", conditionId: "three-way", outcome: "Draw", size: "5", avgPrice: ".3", curPrice: ".3" },
+      ] }; },
+    });
+    const info: Record<string, { tokenId: string; outcome: string }[]> = {
+      saints: [{ tokenId: "vikings", outcome: "Vikings" }, { tokenId: "saints", outcome: "Saints" }],
+      brewers: [{ tokenId: "brewers", outcome: "Milwaukee Brewers" }, { tokenId: "padres", outcome: "San Diego Padres" }],
+      draw: [{ tokenId: "home", outcome: "Home" }, { tokenId: "draw", outcome: "Draw" }, { tokenId: "away", outcome: "Away" }],
+    };
+    (adapter as unknown as { marketInfoForToken: (token: string) => Promise<unknown> }).marketInfoForToken =
+      async (token) => ({ conditionId: token === "saints" ? "game" : token === "brewers" ? "series" : "three-way", info: { tickSize: .01, tokens: info[token] } });
+    expect(await adapter.positions(account)).toEqual([
+      expect.objectContaining({ marketRef: "vikings", tokenId: "saints", outcome: "NO", side: "NO", size: 111, avgPrice: .45 }),
+      expect.objectContaining({ marketRef: "brewers", tokenId: "brewers", outcome: "YES", side: "YES", size: 100 }),
+    ]);
+  });
+
   it("recognizes the pinned SDK's 200/null response without swallowing other invalid payloads", async () => {
     const schema = z.object({ id: z.string() });
     for (const payload of [null, [], "unavailable", { id: 1 }]) {

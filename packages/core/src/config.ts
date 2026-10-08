@@ -90,7 +90,12 @@ export type AlertsConfig = z.output<typeof AlertsConfigSchema>;
 /** Directional execution settings; effective only for Polymarket signals bots. */
 export const PredictionExecutionConfigSchema = z.object({
   mode: z.enum(["adaptive", "legacy"]).default("adaptive"),
-  entryDeadlineSec: z.number().positive().max(3600).default(120),
+  /**
+   * Post-only phase before the marketable limit. The default 0 skips it: on deep books the
+   * post-only order joins the back of the bid queue and rarely fills, so the entry starts
+   * with the marketable limit.
+   */
+  entryDeadlineSec: z.number().nonnegative().max(3600).default(0),
   /**
    * After `entryDeadlineSec`, take the offer inside the entry's price bound with a
    * marketable limit for this long; any remainder rests at the bound until the window
@@ -98,6 +103,8 @@ export const PredictionExecutionConfigSchema = z.object({
    */
   entryCrossingSec: z.number().nonnegative().max(3600).default(60),
   exitPassiveSec: z.number().nonnegative().max(3600).default(60),
+}).refine((execution) => execution.entryDeadlineSec > 0 || execution.entryCrossingSec > 0, {
+  message: "an entry needs a maker phase or a crossing window; entryDeadlineSec and entryCrossingSec cannot both be 0",
 });
 export type PredictionExecutionConfig = z.output<typeof PredictionExecutionConfigSchema>;
 

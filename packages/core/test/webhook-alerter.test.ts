@@ -71,6 +71,19 @@ describe("WebhookAlerter", () => {
     expect(payload.id).toBe(headers["x-cassie-event-id"]);
   });
 
+  it("delivers an error alert whose fingerprint carries line breaks and non-ASCII text", async () => {
+    const delivered: Headers[] = [];
+    // Real fetch validates header values the way this does.
+    const fetchImpl = vi.fn(async (_url: string | URL | Request, init?: RequestInit) => {
+      delivered.push(new Headers(init?.headers));
+      return new Response(null, { status: 200 });
+    }) as unknown as typeof fetch;
+    const sink = make(fetchImpl);
+    await sink.send(event({ kind: "error", trade: undefined, data: { fingerprint: "venue:invalid response\n  at line 2 → ✗" } }));
+    expect(await sink.flush()).toMatchObject({ sent: 1, failed: 0 });
+    expect(delivered[0]!.get("x-cassie-event-id")).toMatch(/^wti-1:error:fp:[0-9a-f]{16}:/);
+  });
+
   it("sends no signature without a secret", async () => {
     const { calls, fetchImpl } = recorder();
     const sink = make(fetchImpl);
@@ -187,7 +200,9 @@ describe("webhookEventId", () => {
     const at = "2026-09-24T14:03:00.000Z";
     expect(webhookEventId(event(), at)).toBe(`wti-1:exit:order:0xabc:${at}`);
     expect(webhookEventId(event({ data: { settlementId: "st1", orderId: "0xabc" } }), at)).toBe(`wti-1:exit:settlement:st1:${at}`);
-    expect(webhookEventId(event({ trade: undefined, data: { fingerprint: "fp1" } }), at)).toBe(`wti-1:exit:fp:fp1:${at}`);
+    expect(webhookEventId(event({ trade: undefined, data: { fingerprint: "fp1" } }), at)).toMatch(new RegExp(`^wti-1:exit:fp:[0-9a-f]{16}:${at}$`));
+    expect(webhookEventId(event({ trade: undefined, data: { fingerprint: "fp1" } }), at)).toBe(webhookEventId(event({ trade: undefined, data: { fingerprint: "fp1" } }), at));
+    expect(webhookEventId(event({ trade: undefined, data: { fingerprint: "fp1" } }), at)).not.toBe(webhookEventId(event({ trade: undefined, data: { fingerprint: "fp2" } }), at));
     const plain = event({ trade: undefined, data: {} });
     expect(webhookEventId(plain, at)).toBe(webhookEventId(plain, at));
   });

@@ -181,12 +181,13 @@ Every step happens in the terminal; you only leave it to copy-paste dashboard va
    interval, and universe. `cassie strategy <botId>` displays or changes the same settings
    at any time. Cassie adds no Polymarket builder fee by default. An explicit
    `CASSIE_POLYMARKET_BUILDER_CODE` enables attribution and its configured fee.
-   Adaptive entries rest
-   post-only one tick inside the ask, never above the signal's price bound, for
-   `--entry-deadline-seconds` (default 120); then a marketable limit at that bound takes
-   whatever is offered inside it for `--entry-crossing-seconds` (default 60), and any
-   remainder rests at the bound until the window closes. Set the crossing window to 0 for
-   maker-only entries. A throttled or slow venue defers supervision and keeps resting
+   Adaptive entries
+   start with a marketable limit at the signal's price bound: it takes whatever is offered
+   inside the bound for `--entry-crossing-seconds` (default 60), and any remainder rests at
+   the bound until the window closes. `--entry-deadline-seconds` (default 0) adds a
+   post-only phase first, one tick inside the ask and never above the bound; on deep books
+   that order joins the back of the bid queue and rarely fills. Set the crossing window to 0
+   for maker-only entries (this needs a post-only phase). A throttled or slow venue defers supervision and keeps resting
    orders; only a minute without any successful read cancels them, per market, without
    halting the bot. Nothing that happens to one order stops the others: an order whose
    POST got no answer is matched against the venue's open orders and settlements and
@@ -290,6 +291,8 @@ cassie strategy <botId> --scenario-exit on      # confirmed signal-exit state ma
 cassie deploy <botId> [--region <slug>] [--size <slug>] [--no-dashboard] [--dashboard-port <n>] [-y]   # a droplet in YOUR DigitalOcean account
 cassie destroy <botId> [-y] [--force]        # cancel resting orders, delete the droplet
 cassie status <botId>                        # droplet + service + engine, one screen
+cassie pause <botId>                         # no new entries; positions stay open
+cassie resume <botId>                        # prediction bots; swing, market-make and commodities use their own resume
 cassie dashboard [botId...] [--port 4747] [--no-open] [--refresh 30]   # local browser dashboard, every bot
 cassie dashboard password <botId>            # set or rotate the hosted dashboard password
 cassie ssh <botId>                           # a shell on the droplet

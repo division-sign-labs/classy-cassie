@@ -238,6 +238,69 @@ describe("LiveSignalSource (gateway contract, verified 2026-10-06)", () => {
     expect((await src.latest({})).map((s) => s.id)).toEqual(["gw-1"]);
   });
 
+  describe("sports_game rows (API 20.0.0)", () => {
+    const listing = {
+      venue: "polymarket", nativeMarketId: "4024660", condition_id: "0xgame", end_date: "2026-10-11T17:00:00.000Z",
+      signal_side: "NO", signal_available: true, entry_eligible: true, entry_price_basis: "publication",
+      outcomes: [{ index: 0, label: "Raiders", token_id: "111" }, { index: 1, label: "Patriots", token_id: "222" }],
+      yes_outcome: { index: 0, label: "Raiders", token_id: "111" },
+      signal_outcome: { index: 1, label: "Patriots", token_id: "222" }, current_cost_cents: 62.5,
+    };
+    const game = {
+      kind: "sports_game", id: "g-1", rule_version: "one-signal/1", sleeve: "sports",
+      forecast_updated_at: new Date().toISOString(), published_at: new Date().toISOString(),
+      is_active: true, in_play: false, pick_label: "Patriots",
+      pick: { code: "ne", label: "Patriots", probability: .76, entry_probability: .71 },
+      markets: [{ ...listing, venue: "hl_outcomes", nativeMarketId: "#1", condition_id: null, signal_outcome: null }, listing],
+    };
+    const market = { tokens: [{ token_id: "111", outcome: "Raiders" }, { token_id: "222", outcome: "Patriots" }] };
+    const read = (rows: unknown[], venue?: "polymarket" | "kalshi", tokens = market) =>
+      new LiveSignalSource({ baseUrl: "https://gw.example", path: "/s" }, "t", routedFetch(rows, tokens)).latest(venue ? { venue } : {});
+
+    it("maps the venue listing's picked token into the adapter's orientation", async () => {
+      const [sig, ...rest] = await read([game], "polymarket");
+      expect(rest).toEqual([]);
+      expect(sig).toMatchObject({ id: "g-1", venue: "polymarket", marketRef: "111", side: "NO", sleeve: "sports", prob: .76, refPrice: .625,
+        endsAt: Date.parse("2026-10-11T17:00:00.000Z"), ttlSec: 10_800 });
+      expect(sig!.spreadPp).toBeCloseTo(13.5);
+      expect(marketForecastFromSignal(sig!)!.probYes).toBeCloseTo(.24);
+    });
+
+    it("trusts the token, not the feed's YES label, when the CLOB lists the pick first", async () => {
+      const flipped = { tokens: [{ token_id: "222", outcome: "Patriots" }, { token_id: "111", outcome: "Raiders" }] };
+      expect(await read([game], "polymarket", flipped)).toMatchObject([{ marketRef: "222", side: "YES", prob: .76 }]);
+    });
+
+    it("emits one signal per venue and prefers the published contract", async () => {
+      const kalshi = { ...listing, venue: "kalshi", nativeMarketId: "KXNFL-NE", condition_id: null, signal_outcome: null, signal_side: "YES",
+        entry_price_basis: "forecast_snapshot", current_cost_cents: 64 };
+      const otherPoly = { ...listing, condition_id: "0xother", entry_price_basis: "forecast_snapshot", current_cost_cents: 60 };
+      const sigs = await read([{ ...game, markets: [otherPoly, kalshi, listing] }]);
+      expect(sigs).toHaveLength(2);
+      expect(sigs).toEqual(expect.arrayContaining([
+        expect.objectContaining({ venue: "polymarket", refPrice: .625 }),
+        expect.objectContaining({ venue: "kalshi", marketRef: "KXNFL-NE", side: "YES", refPrice: .64 }),
+      ]));
+    });
+
+    it.each([
+      ["an inactive game", { is_active: false }],
+      ["a game in play", { in_play: true }],
+      ["no pick probability", { pick: { probability: null } }],
+      ["an ineligible listing", { markets: [{ ...listing, entry_eligible: false }] }],
+      ["an unavailable listing", { markets: [{ ...listing, signal_available: false }] }],
+      ["an unpriced listing", { markets: [{ ...listing, current_cost_cents: null }] }],
+      ["a token outside the market", { markets: [{ ...listing, signal_outcome: { token_id: "999" } }] }],
+      ["a Polymarket US listing", { markets: [{ ...listing, venue: "polymarket_us" }] }],
+    ])("drops %s", async (_label, change) => {
+      expect(await read([{ ...game, ...change }])).toEqual([]);
+    });
+
+    it("keeps reading non-sports rows in the earlier shape alongside game rows", async () => {
+      expect((await read([gatewayRow, game], "polymarket", clobMarket)).map((s) => s.id)).toEqual(["gw-1", "g-1"]);
+    });
+  });
+
   it("caches condition→token resolution across calls", async () => {
     const fetchImpl = routedFetch();
     const src = new LiveSignalSource({ baseUrl: "https://gw.example", path: "/s" }, "t", fetchImpl);

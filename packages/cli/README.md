@@ -110,18 +110,19 @@ Use `--from-workspace` for subsequent source updates. A deploy without that flag
 selects the published npm runtime. Local runs require a separate bot configuration
 without a droplet assignment, so the same bot cannot start on both machines.
 
-Polymarket signals bots use adaptive post-only limits by default. Entries have a
-120-second deadline; unfilled remainders are canceled while partial fills are kept.
+Polymarket signals bots use adaptive limits by default. Entries start with a limit at the
+signal's price bound that works for 60 seconds; unfilled remainders are canceled while
+partial fills are kept. `--entry-deadline-seconds` adds a post-only phase before it.
 Normal exits spend up to 60 seconds posting passively, then use one bounded fill-and-kill
 attempt. Urgent exits use bounded immediate execution.
 
 Status shows confirmed-fill maker share, fees and gross price improvement against
-arrival quotes. Post-only orders guarantee maker execution if filled; urgent fill-and-kill
-exits can pay [Polymarket taker fees](https://docs.polymarket.com/trading/fees).
+arrival quotes. Post-only orders guarantee maker execution if filled; entry limits and
+urgent fill-and-kill exits can pay [Polymarket taker fees](https://docs.polymarket.com/trading/fees).
 
 ```sh
 cassie strategy bot-1 --execution adaptive
-cassie strategy bot-1 --entry-deadline-seconds 120 --exit-passive-seconds 60
+cassie strategy bot-1 --entry-deadline-seconds 0 --exit-passive-seconds 60
 cassie strategy bot-1 --execution legacy
 ```
 

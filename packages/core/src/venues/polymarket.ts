@@ -776,8 +776,12 @@ export class PolymarketAdapter implements VenueAdapter {
         if (!conditionId || !marketRef) {
           const resolved = await this.marketInfoForToken(tokenId);
           conditionId = resolved.conditionId;
-          explicit = resolved.info.tokens.find((token) => String(token.tokenId) === tokenId)?.outcome.trim().toUpperCase();
-          marketRef = this.yesTokenOf(resolved.info);
+          // A matchup labels its tokens with names; the canonical pairing decides the side.
+          // A market that is not a binary pair is not a position this adapter can trade.
+          let sides: { yes: string; no: string };
+          try { sides = outcomeTokensOf(resolved.info.tokens); } catch { continue; }
+          explicit = tokenId === sides.yes ? "YES" : tokenId === sides.no ? "NO" : undefined;
+          marketRef = sides.yes;
         }
         if (explicit !== "YES" && explicit !== "NO") continue;
         const outcome = explicit;

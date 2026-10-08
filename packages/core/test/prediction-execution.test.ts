@@ -20,7 +20,9 @@ function harness(strategy: Record<string, unknown> = {}, execution?: Record<stri
   const submissions: OrderIntent[] = [];
   const trace: string[] = [];
   const state = new MemoryStateStore();
-  const config = BotConfigSchema.parse({ id: "limits", venue: "polymarket", strategy: { id: "signals", config: { allocationMode: "portfolio-kelly", ...strategy } }, ...(execution ? { execution } : {}) });
+  const config = BotConfigSchema.parse({ id: "limits", venue: "polymarket", strategy: { id: "signals", config: { allocationMode: "portfolio-kelly", ...strategy } },
+    // Most cases exercise the post-only phase, which is off by default.
+    execution: { entryDeadlineSec: 120, ...execution } });
   const log = { debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() };
   const alerter = { send: vi.fn(async () => {}) };
   const signal = (side: "YES" | "NO" = "YES"): Signal => ({ id: "signal-1", marketRef: "yes", venue: "polymarket", side, prob: .76, refPrice: .55, ts: new Date(NOW).toISOString(), ttlSec: 10800 });
@@ -1065,6 +1067,47 @@ describe("adaptive prediction execution", () => {
     expect((await late.executor.snapshot()).parents[0]).toMatchObject({ status: "canceled", filledSize: 40, cancelReason: "entry crossing window elapsed during restart" });
   });
 
+  it("sends the marketable limit at admission when the maker phase is off", async () => {
+    const h = harness({}, { entryDeadlineSec: 0, entryCrossingSec: 60 }); await h.ready(); await h.executor.admit(enter(), []);
+    expect(h.submissions).toHaveLength(1);
+    expect(h.submissions[0]).toMatchObject({ side: "BUY", size: 100, limitPrice: .6, postOnly: false, tif: "GTC" });
+    expect((await h.executor.snapshot()).parents[0]!.crossingDeadlineAt).toBe(NOW + 60_000);
+    h.advance(5000); await h.executor.supervise(); h.advance(5000); await h.executor.supervise();
+    expect((await h.executor.snapshot()).parents[0]).toMatchObject({ status: "completed", filledSize: 100, reservedNotionalUsd: 0 });
+    expect(h.submissions).toHaveLength(1);
+  });
+
+  it("refuses an execution config with neither a maker phase nor a crossing window", () => {
+    expect(() => PredictionExecutionConfigSchema.parse({ entryDeadlineSec: 0, entryCrossingSec: 0 })).toThrow(/cannot both be 0/);
+    expect(PredictionExecutionConfigSchema.parse({ entryDeadlineSec: 0 })).toMatchObject({ entryDeadlineSec: 0, entryCrossingSec: 60 });
+  });
+
+  it("crosses for a full window after a canceled maker order without a venue record settles", async () => {
+    // Polymarket returns no record for a canceled order, so the maker child waits out the late-fill window.
+    const h = harness(); await h.ready(); await h.executor.admit(enter(), []);
+    h.advance(120000); await h.executor.supervise();
+    expect(h.orders.size).toBe(0); h.hideStatus();
+    let opened: number | undefined;
+    for (let step = 0; step < 50 && h.submissions.length < 2; step++) {
+      h.advance(10_000); await h.executor.supervise();
+      if (h.submissions.length === 2) opened = h.now();
+    }
+    // The original window closed at +180 s; the crossing still goes out, with a full window of its own.
+    expect(opened! - NOW).toBeGreaterThan(400_000);
+    expect(h.submissions[1]).toMatchObject({ side: "BUY", size: 100, limitPrice: .6, postOnly: false, tif: "GTC" });
+    expect((await h.executor.snapshot()).parents[0]!.crossingDeadlineAt).toBe(opened! + 60_000);
+    h.advance(5000); await h.executor.supervise(); h.advance(5000); await h.executor.supervise();
+    expect((await h.executor.snapshot()).parents[0]).toMatchObject({ status: "completed", filledSize: 100, reservedNotionalUsd: 0 });
+  });
+
+  it("ends an entry whose maker order never leaves the book once the late-fill wait has also passed", async () => {
+    const h = harness(); await h.ready(); await h.executor.admit(enter(), []);
+    h.refuseCancel();
+    for (let elapsed = 0; elapsed < 600_000; elapsed += 30_000) { h.advance(30_000); await h.executor.supervise(); }
+    expect(h.submissions).toHaveLength(1);
+    expect((await h.executor.snapshot()).parents[0]).toMatchObject({ status: "canceling", cancelReason: "entry crossing window expired" });
+  });
+
   it("lets the heartbeat lane cancel the expired maker order while the parent stays active for the crossing", async () => {
     const h = harness(); await h.ready(); await h.executor.admit(enter(), []);
     h.advance(120000); expect(await h.executor.heartbeat()).toBe(false);
@@ -1151,9 +1194,9 @@ describe("adaptive prediction execution", () => {
     expect(invalidate).toHaveBeenCalledWith("yes");
   });
 
-  it("defaults the crossing window to sixty seconds and allows disabling it", () => {
-    expect(PredictionExecutionConfigSchema.parse({})).toMatchObject({ entryDeadlineSec: 120, entryCrossingSec: 60, exitPassiveSec: 60 });
-    expect(PredictionExecutionConfigSchema.parse({ entryCrossingSec: 0 }).entryCrossingSec).toBe(0);
+  it("defaults to no post-only phase and a sixty-second crossing window, and allows disabling the crossing", () => {
+    expect(PredictionExecutionConfigSchema.parse({})).toMatchObject({ entryDeadlineSec: 0, entryCrossingSec: 60, exitPassiveSec: 60 });
+    expect(PredictionExecutionConfigSchema.parse({ entryDeadlineSec: 120, entryCrossingSec: 0 }).entryCrossingSec).toBe(0);
     expect(() => PredictionExecutionConfigSchema.parse({ entryCrossingSec: -1 })).toThrow();
   });
 

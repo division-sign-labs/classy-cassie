@@ -3,11 +3,15 @@
 // HARD RULE enforced by this type surface: nothing here accepts account state.
 // The live client sends only the API key header and market-scope query params.
 //
-// Live contract (verified against the running gateway on 2026-10-06):
+// Live contract (verified against the running gateway on 2026-10-08, API 20.0.0):
 //   GET {gateway}/api/v1/signals  with header  x-quotient-api-key: <token>
 //   → { signals: [{ id, side, latest_q, current_cost_cents, entry_spread_pp,
 //        forecast_updated_at, published_at, is_active, thesis,
 //        market: { venue, condition_id, volume_24h, … }, … }] }
+//   Sports rows instead carry kind: "sports_game", a venue-neutral
+//   pick: { probability }, and markets: [{ venue, condition_id, nativeMarketId,
+//   signal_side, signal_outcome: { token_id }, entry_eligible,
+//   current_cost_cents, … }] with one entry per listing of the game.
 // The operator obtains a key at quotient.social; the quotient-api skill / CLI
 // is a separate product surface — cassie only consumes this one read endpoint.
 
@@ -98,6 +102,31 @@ const GatewaySignalSchema = z.object({
     .nullish(),
 });
 
+const SportsListingSchema = z.object({
+  venue: z.string(),
+  nativeMarketId: z.string().nullish(),
+  condition_id: z.string().nullish(),
+  end_date: z.string().nullish(),
+  signal_side: z.enum(["YES", "NO"]).nullish(),
+  signal_available: z.boolean().nullish(),
+  entry_eligible: z.boolean().nullish(),
+  entry_price_basis: z.string().nullish(),
+  signal_outcome: z.object({ token_id: z.string().nullish() }).nullish(),
+  current_cost_cents: z.number().nullish(),
+});
+
+/** API 20.0.0 (2026-10-07): a sports pick is game-level, with one listing per venue contract. */
+const SportsGameSchema = z.object({
+  kind: z.literal("sports_game"),
+  id: z.string(),
+  forecast_updated_at: z.string().nullish(),
+  published_at: z.string().nullish(),
+  is_active: z.boolean().nullish(),
+  in_play: z.boolean().nullish(),
+  pick: z.object({ probability: z.number().min(0).max(1).nullish() }),
+  markets: z.array(z.unknown()),
+});
+
 const GatewayResponseSchema = z.object({ signals: z.array(z.unknown()) });
 
 interface OutcomeToken { tokenId: string; outcome: string }
@@ -171,19 +200,19 @@ export class LiveSignalSource implements SignalSource {
    */
   async latest(query: SignalQuery): Promise<Signal[]> {
     const rows = await withQuotientRetries(() => fetchGatewayRows(this.#cfg, this.#token, this.#fetchImpl), this.#retry);
+    const resolveTokens = (conditionId: string) => resolveMarketTokens(conditionId, this.#tokenCache, this.#fetchImpl, this.#clobBase);
     const out: Signal[] = [];
     for (const raw of rows) {
-      const parsed = GatewaySignalSchema.safeParse(raw);
-      if (!parsed.success) continue;
-      const sig = await mapGatewayRow(
-        parsed.data,
-        (conditionId) => resolveMarketTokens(conditionId, this.#tokenCache, this.#fetchImpl, this.#clobBase),
-        this.#cfg.maxAgeSec,
-      );
-      if (!sig) continue;
-      if (query.venue && sig.venue !== query.venue) continue;
-      if (query.marketRef && sig.marketRef !== query.marketRef) continue;
-      out.push(sig);
+      const game = SportsGameSchema.safeParse(raw);
+      const parsed = game.success ? undefined : GatewaySignalSchema.safeParse(raw);
+      const sigs = game.success ? await mapSportsGameRow(game.data, resolveTokens, this.#cfg.maxAgeSec)
+        : parsed?.success ? [await mapGatewayRow(parsed.data, resolveTokens, this.#cfg.maxAgeSec)] : [];
+      for (const sig of sigs) {
+        if (!sig) continue;
+        if (query.venue && sig.venue !== query.venue) continue;
+        if (query.marketRef && sig.marketRef !== query.marketRef) continue;
+        out.push(sig);
+      }
     }
     return out;
   }
@@ -323,6 +352,59 @@ async function mapGatewayRow(
     ...(endsAt !== undefined ? { endsAt } : {}),
     ttlSec,
   };
+}
+
+/**
+ * One signal per venue for a game-level sports pick. Only listings the feed marks
+ * entry-eligible qualify. The published contract wins; otherwise the feed's stable
+ * listing order decides, so the same game keeps mapping to the same market.
+ */
+async function mapSportsGameRow(
+  g: z.output<typeof SportsGameSchema>,
+  resolveTokens: (conditionId: string) => Promise<MarketTokens | null>,
+  ttlSec: number,
+): Promise<Signal[]> {
+  const prob = g.pick.probability;
+  if (g.is_active === false || g.in_play === true || prob == null) return [];
+  const listings = g.markets
+    .flatMap((raw) => { const parsed = SportsListingSchema.safeParse(raw); return parsed.success ? [parsed.data] : []; })
+    .filter((listing) => listing.signal_side && listing.signal_available !== false && listing.entry_eligible === true)
+    .sort((a, b) => Number(b.entry_price_basis === "publication") - Number(a.entry_price_basis === "publication"));
+  const out = new Map<VenueId, Signal>();
+  for (const listing of listings) {
+    // Exact venue names: polymarket_us and other listings carry their own contracts.
+    const venue = listing.venue === "polymarket" ? "polymarket" : listing.venue === "kalshi" ? "kalshi" : null;
+    if (!venue || out.has(venue) || listing.current_cost_cents == null) continue;
+    let marketRef: string | undefined;
+    let side: "YES" | "NO" | undefined;
+    if (venue === "polymarket") {
+      const tokens = listing.condition_id ? await resolveTokens(listing.condition_id) : null;
+      const token = listing.signal_outcome?.token_id;
+      if (!tokens || !token) continue;
+      // The picked token decides the side in the adapter's own orientation.
+      side = token === tokens.yes.tokenId ? "YES" : token === tokens.no.tokenId ? "NO" : undefined;
+      marketRef = tokens.yes.tokenId;
+    } else {
+      side = listing.signal_side ?? undefined;
+      marketRef = listing.nativeMarketId ?? undefined;
+    }
+    if (!side || !marketRef) continue;
+    const endsAt = epochMs(listing.end_date);
+    out.set(venue, {
+      id: g.id,
+      ts: g.forecast_updated_at ?? g.published_at ?? new Date(0).toISOString(),
+      venue,
+      marketRef,
+      side,
+      sleeve: "sports",
+      prob,
+      refPrice: listing.current_cost_cents / 100,
+      spreadPp: Math.abs(prob * 100 - listing.current_cost_cents),
+      ...(endsAt !== undefined ? { endsAt } : {}),
+      ttlSec,
+    });
+  }
+  return [...out.values()];
 }
 
 /** Feed timestamp to epoch ms; unparseable or absent values stay undefined. */

@@ -85,7 +85,7 @@ describe("directional execution settings", () => {
     expect(loadBotConfig(before.id).execution).toBeUndefined();
     expect(JSON.parse(readFileSync(botConfigPath(before.id), "utf8"))).not.toHaveProperty("execution");
     expect(output.join("\n")).toMatch(/execution:\s+adaptive/);
-    expect(output.join("\n")).toMatch(/entry deadline:\s+120 sec/);
+    expect(output.join("\n")).toMatch(/entry deadline:\s+off \(entries start with the marketable limit\)/);
     expect(output.join("\n")).toMatch(/exit passive phase:\s+60 sec/);
   });
 
@@ -112,6 +112,14 @@ describe("directional execution settings", () => {
     expect(JSON.parse(readFileSync(botConfigPath(before.id), "utf8"))).not.toHaveProperty("reporting");
   });
 
+  it("saves a zero entry deadline so entries start with the marketable limit", async () => {
+    const before = bot();
+    await runStrategy(before.id, { entryDeadlineSeconds: "0" });
+    expect(loadBotConfig(before.id).execution).toEqual({ mode: "adaptive", entryDeadlineSec: 0, entryCrossingSec: 60, exitPassiveSec: 60 });
+    await runStrategy(before.id, { top: "unlimited" });
+    expect(output.join("\n")).toMatch(/entry deadline:\s+off \(entries start with the marketable limit\)/);
+  });
+
   it.each(["kalshi", "hyperliquid", "lighter"])("leaves %s on legacy execution and rejects execution flags", async (venue) => {
     const before = bot({ venue });
     await runStrategy(before.id, { top: "unlimited" });
@@ -136,7 +144,7 @@ describe("directional execution settings", () => {
 
   it.each<StrategyOptions>([
     { execution: "market" },
-    { entryDeadlineSeconds: "0" },
+    { entryDeadlineSeconds: "0", entryCrossingSeconds: "0" },
     { entryDeadlineSeconds: "-1" },
     { entryDeadlineSeconds: "3601" },
     { entryDeadlineSeconds: "Infinity" },

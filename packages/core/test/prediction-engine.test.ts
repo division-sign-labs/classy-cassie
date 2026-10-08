@@ -141,8 +141,8 @@ function harness(options: { side?: "YES" | "NO"; legacy?: boolean; maxHoldDays?:
   const signals: SignalSource = { latest: async () => published, refreshedAt: () => refreshedAt };
   const state = new MemoryStateStore();
   const config = parseBotConfig({ id: "prediction-engine", venue: "polymarket",
-    ...(options.legacy || options.entryCrossingSec !== undefined
-      ? { execution: { ...(options.legacy ? { mode: "legacy" } : {}), ...(options.entryCrossingSec !== undefined ? { entryCrossingSec: options.entryCrossingSec } : {}) } } : {}),
+    // These cases exercise the post-only phase, which is off by default.
+    execution: { entryDeadlineSec: 120, ...(options.legacy ? { mode: "legacy" } : {}), ...(options.entryCrossingSec !== undefined ? { entryCrossingSec: options.entryCrossingSec } : {}) },
     strategy: { id: "flip-flat", config: { allocationMode: "portfolio-kelly", minExitDepth2cUsd: 0, maxHoldDays: options.maxHoldDays ?? null,
       takeProfitPrice: null, signalPollIntervalMin: 1 } },
     risk: { slippagePct: 10, depthCapPct: 100, minDailyVolume: 0, minViableNotional: 1, maxOrderNotional: 1000 },

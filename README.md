@@ -174,8 +174,9 @@ managing exits on the last forecast it saw.
 
 ## Signals
 
-Polymarket signals bots use adaptive post-only limits: entries expire after 120 seconds,
-and normal exits have a 60-second passive phase before bounded immediate execution.
+Polymarket signals bots use adaptive limits: entries start with a limit at the signal's
+price bound that works for 60 seconds, and normal exits have a 60-second passive phase
+before bounded immediate execution.
 Partial fills are retained and stale remainders canceled. Tune the durations or select
 legacy crossing limits with `cassie strategy <botId> --execution adaptive|legacy`; see
 [execution settings](packages/cli/README.md#execution).

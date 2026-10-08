@@ -28,6 +28,8 @@ const EPS = 1e-8;
 const BOOK_AGE_MS = 10_000;
 const MINIMUM_REST_MS = 10_000;
 const FILL_OVERLAP_MS = 300_000;
+/** Reconciliation passes needed after the late-fill window before a canceled maker order counts as final. */
+const MAKER_SETTLE_SLACK_MS = 60_000;
 /** A venue that cannot be read for this long stops resting orders gracefully; shorter outages only defer. */
 const SUPERVISION_STALE_MS = 60_000;
 const SNAPSHOT_TIMEOUT_MS = 8_000;
@@ -127,6 +129,8 @@ interface Parent extends Omit<PredictionExecutionParentSummary, "reservedNotiona
   fakSubmitted?: boolean;
   /** Set when the single marketable-limit crossing child is reserved; never cross twice. */
   crossingAt?: number;
+  /** When the crossing window started: the first pass after the maker order was final. */
+  crossingOpenedAt?: number;
   minOrderSize?: number;
   inventoryObserved?: boolean;
   lastValidatedBookAt?: number;
@@ -309,14 +313,25 @@ export class PredictionExecutor {
     if (candidates.some(signal => signal.ts === latest.ts && signal.side !== latest.side)) return undefined;
     return latest;
   }
-  private get entryDuration(): number { return (this.d.config.execution?.entryDeadlineSec ?? (this.commodities ? this.strategyNumber("entryDeadlineSec", 20) : 120)) * 1000; }
+  private get entryDuration(): number { return (this.d.config.execution?.entryDeadlineSec ?? (this.commodities ? this.strategyNumber("entryDeadlineSec", 20) : 0)) * 1000; }
   private get exitDuration(): number { return (this.d.config.execution?.exitPassiveSec ?? (this.commodities ? this.strategyNumber("exitPassiveSec", 20) : 60)) * 1000; }
   /** Polymarket entries only: how long a marketable limit may work after the maker deadline. */
   private get entryCrossingDuration(): number { return this.commodities ? 0 : (this.d.config.execution?.entryCrossingSec ?? 60) * 1000; }
   private entryPhase(p: Parent): "maker" | "taker" | "expired" {
     const now = this.now();
     if (now < p.deadlineAt) return "maker";
-    return p.crossingDeadlineAt !== undefined && now < p.crossingDeadlineAt ? "taker" : "expired";
+    const closesAt = this.crossingClosesAt(p);
+    return closesAt !== undefined && now < closesAt ? "taker" : "expired";
+  }
+  /**
+   * Polymarket keeps no record of a canceled order, so the canceled maker child is final only
+   * after the late-fill window, which outlasts the crossing window. Until the window opens the
+   * entry waits for that; once open, the window runs its full length from that moment.
+   */
+  private crossingClosesAt(p: Parent): number | undefined {
+    if (p.crossingDeadlineAt === undefined) return undefined;
+    return p.crossingOpenedAt === undefined && p.crossingAt === undefined
+      ? p.crossingDeadlineAt + FILL_OVERLAP_MS + MAKER_SETTLE_SLACK_MS : p.crossingDeadlineAt;
   }
 
   private deferring(): boolean { return this.deferral !== undefined && this.now() < this.deferral.until; }
@@ -388,7 +403,7 @@ export class PredictionExecutor {
       await this.save();
       await this.reconcile(COLD_START_TIMEOUT_MS);
       for (const p of Object.values(c.parents).filter(active)) {
-        if (p.side === "BUY" && this.now() >= (p.crossingDeadlineAt ?? p.deadlineAt)) {
+        if (p.side === "BUY" && this.now() >= (this.crossingClosesAt(p) ?? p.deadlineAt)) {
           await this.stopParent(p, p.crossingDeadlineAt === undefined ? "entry deadline elapsed during restart" : "entry crossing window elapsed during restart");
         }
       }
@@ -692,6 +707,11 @@ export class PredictionExecutor {
     }
     const m = supplied ?? await this.rpc("execution market", () => this.d.adapter.executionMarket!(p.marketRef, p.outcome));
     const crossing = entryCross || phase === "taker" || (p.side === "SELL" && (p.urgent || this.now() >= p.deadlineAt || this.remaining(p) + EPS < m.minOrderSize));
+    if (polymarketEntry && phase === "taker" && !current && p.crossingOpenedAt === undefined && p.crossingAt === undefined) {
+      p.crossingOpenedAt = this.now();
+      p.crossingDeadlineAt = Math.max(p.crossingDeadlineAt!, p.crossingOpenedAt + this.entryCrossingDuration);
+      await this.save();
+    }
     this.validateMarket(m, p.marketRef, p.outcome, crossing && p.side === "SELL");
     if (m.tokenId !== p.tokenId || m.conditionId !== p.conditionId) throw new Error("execution token identity changed");
     const b = this.externalBook(m.book, m.tokenId);
@@ -1292,7 +1312,7 @@ export class PredictionExecutor {
           for (const { child, result } of results) {
             const parent = c.parents[child.parentId]!;
             // A maker child expiring with a crossing window ahead is only canceled; the supervise lane crosses.
-            if (parent.side === "BUY" && !this.commodities && this.now() >= (parent.crossingDeadlineAt ?? parent.deadlineAt)) {
+            if (parent.side === "BUY" && !this.commodities && this.now() >= (this.crossingClosesAt(parent) ?? parent.deadlineAt)) {
               parent.status = "canceling"; parent.cancelReason = parent.crossingDeadlineAt === undefined ? "entry deadline" : "entry crossing window expired";
             }
             if (working(child) && child.venueId) {
@@ -1355,7 +1375,7 @@ export class PredictionExecutor {
       const parents = Object.values(c.parents).map((p): PredictionExecutionParentSummary => {
         const remaining = this.remaining(p);
         const { targetSize: _target, maximumPrice: _max, minimumPrice: _min, budgetUsd: _budget, minimumEdge: _edge, sportsSignal: _sports, minimumNotional: _minimum,
-          children: _children, lastExitDecision: _decision, lastExitEvaluationAt: _evaluated, fakSubmitted: _fak, crossingAt: _crossing, minOrderSize: _minSize,
+          children: _children, lastExitDecision: _decision, lastExitEvaluationAt: _evaluated, fakSubmitted: _fak, crossingAt: _crossing, crossingOpenedAt: _opened, minOrderSize: _minSize,
           inventoryObserved: _inventory, lastValidatedBookAt: _bookTime, ...summary } = p;
         return { ...summary, remainingSize: remaining, reservedNotionalUsd: active(p) && p.side === "BUY" ? remaining * p.maximumPrice : 0,
           reservedSize: active(p) && p.side === "SELL" ? remaining : 0, childOrderIds: this.children(p).flatMap(child => child.venueId ? [child.venueId] : []),
