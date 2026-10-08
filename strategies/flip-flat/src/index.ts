@@ -1,10 +1,10 @@
 // strategies/flip-flat/src/index.ts
-// Reference strategy (§8): buy and hold to resolution. A take-profit price
-// and maximum holding period are optional. Behind
-// `scenarioExitEnabled`, held prediction positions run the confirmed
-// signal-exit state machine. The `hold` preset (fixed-notional lots, no
-// take-profit, no time stop, flip exit at any remaining edge, resolution
-// window) is the same strategy with those knobs set; see the README.
+// Reference strategy (§8): buy on a published signal and hold while Q keeps
+// its edge. Held prediction positions run the signal-exit state machine
+// (Q flip, Q falling to the market, Q collapse); a maximum holding period
+// is optional. The `hold` preset (fixed-notional lots, no time stop, flip
+// exit at any remaining edge, resolution window) is the same strategy with
+// those knobs set; see the README.
 // Pure decisions — the engine sizes, risk-checks, and executes.
 
 import { z } from "zod";
@@ -75,35 +75,29 @@ const FlipFlatConfigObjectSchema = z.object({
   signalPollIntervalMin: z.number().positive().default(5),
   /** Perps entry sanity bound: skip if mid drifted more than this % from refPrice. */
   refPriceSanityPct: z.number().positive().default(2),
-  /**
-   * Take-profit for prediction markets: sell once the held outcome's
-   * executable best bid reaches this price (0..1). Needs no forecast; the
-   * maximum holding period remains independent. Null (the default) disables it.
-   */
-  takeProfitPrice: z.number().positive().max(1).nullable().default(null),
   /** Optional prediction-position deadline; null (the default) disables the time stop. */
   maxHoldDays: z.number().positive().nullable().default(null),
 
-  // ---- Signal-exit state machine (opt-in) ---------------------------------
+  // ---- Signal-exit state machine ------------------------------------------
   /**
-   * Run the confirmed signal-exit state machine for held prediction
-   * positions. When on, it wraps the take-profit above in forecast-driven
-   * exits; the time stop reuses `maxHoldDays`. Off by default so existing
-   * bots keep their current behavior until an operator turns it on explicitly.
+   * Sell a held prediction position when Q's edge is gone: Q flips to the
+   * other side, Q falls to the market while the position is not in profit,
+   * or Q collapses. On by default; off holds every position to resolution,
+   * bounded only by the optional `maxHoldDays` time stop.
    */
-  scenarioExitEnabled: z.boolean().default(false),
+  scenarioExitEnabled: z.boolean().default(true),
   /** Adverse cross: remaining edge at or below this many pp counts as a non-positive spread. */
   adverseCrossEdgePp: z.number().default(0),
   /** Adverse cross: executable P&L at or below this percent. */
   adverseCrossMaxPnlPct: z.number().default(0),
   /** Adverse cross: distinct committed forecasts with a non-positive spread required to exit; null turns the exit off. */
-  adverseCrossConfirmations: z.number().int().positive().nullable().default(2),
+  adverseCrossConfirmations: z.number().int().positive().nullable().default(1),
   /** Q collapse: immediate exit once held-side Q has retreated by at least this many pp from entry; null turns the exit off. */
   qCollapsePp: z.number().positive().nullable().default(30),
   /** Q collapse: only when remaining edge is at or below this many pp. */
   qCollapseMaxRemainingEdgePp: z.number().default(0),
   /** Q flip: consecutive distinct committed forecasts below 50% on the held side required to confirm. */
-  flipConfirmations: z.number().int().positive().default(2),
+  flipConfirmations: z.number().int().positive().default(1),
   /** Q flip: exit a confirmed flip once remaining edge is at or below this many pp; null (the default) exits on confirmation at any edge. */
   flipExitMaxRemainingEdgePp: z.number().nullable().default(null),
   /** Fee rate, in basis points, deducted from executable sell proceeds in the P&L gates. */
@@ -259,7 +253,6 @@ export type ScenarioExitReason =
   | "q_collapse"
   | "adverse_cross"
   | "q_flip"
-  | "take_profit"
   | "time_stop";
 
 export interface ScenarioEntrySnapshot {
@@ -340,8 +333,6 @@ export interface ScenarioExitInput {
   midHeld?: number;
   /** Net executable return at the current bid, percent of actual entry cost. */
   executablePnlPct?: number;
-  /** Held outcome's executable best bid, 0..1. */
-  executableBidHeld?: number;
   ageMs: number;
   adverseCrossConfirmations: number;
   flipConfirmed: boolean;
@@ -355,7 +346,6 @@ export interface ScenarioExitDecision {
 
 type ScenarioExitConfig = Pick<
   FlipFlatConfig,
-  | "takeProfitPrice"
   | "adverseCrossEdgePp"
   | "adverseCrossMaxPnlPct"
   | "adverseCrossConfirmations"
@@ -368,10 +358,8 @@ type ScenarioExitConfig = Pick<
 
 /**
  * Exit precedence, evaluated top to bottom; exactly one reason is returned.
- * The take-profit is a price floor on the held outcome's executable bid: it
- * needs no forecast and applies to every position the same way, whatever
- * the market's resolution date. The adverse branches above it still take
- * precedence, and the deadline below it still bounds the hold.
+ * The forecast-driven branches come first; the optional deadline last bounds
+ * the hold.
  */
 export function evaluateScenarioExit(input: ScenarioExitInput, cfg: ScenarioExitConfig): ScenarioExitDecision {
   const remainingEdgePp =
@@ -411,13 +399,6 @@ export function evaluateScenarioExit(input: ScenarioExitInput, cfg: ScenarioExit
       (remainingEdgePp !== undefined && remainingEdgePp <= cfg.flipExitMaxRemainingEdgePp + EPSILON))
   ) {
     return { reason: "q_flip", ...metrics };
-  }
-  if (
-    cfg.takeProfitPrice !== null &&
-    input.executableBidHeld !== undefined &&
-    input.executableBidHeld + EPSILON >= cfg.takeProfitPrice
-  ) {
-    return { reason: "take_profit", ...metrics };
   }
   if (cfg.maxHoldDays !== null && input.ageMs + EPSILON >= cfg.maxHoldDays * DAY_MS) {
     return { reason: "time_stop", ...metrics };
@@ -700,7 +681,7 @@ export class FlipFlatStrategy implements Strategy {
       for (const marketRef of scenario.blockedMarkets) entryBlockedMarkets.add(marketRef);
     } else {
       actions.push(
-        ...(await this.legacyExits(ctx, cfg, heldPositions, holdStarts, openOrderMarkets, entryBlockedMarkets, now)),
+        ...this.legacyExits(cfg, heldPositions, holdStarts, openOrderMarkets, entryBlockedMarkets, now),
       );
     }
 
@@ -869,21 +850,18 @@ export class FlipFlatStrategy implements Strategy {
   }
 
   // -------------------------------------------------------------------------
-  // Legacy exits (take-profit price + maximum hold)
+  // Legacy exits (maximum hold only, when the signal-exit machine is off)
   // -------------------------------------------------------------------------
 
-  private async legacyExits(
-    ctx: StrategyContext,
+  private legacyExits(
     cfg: FlipFlatConfig,
     heldPositions: Position[],
     holdStarts: HoldStartsState,
     openOrderMarkets: Set<string>,
     entryBlockedMarkets: Set<string>,
     now: number,
-  ): Promise<Action[]> {
+  ): Action[] {
     const actions: Action[] = [];
-    // The maximum hold is checked first and needs no book. Before that
-    // deadline, the take-profit sells once the held side's bid is high enough.
     for (const held of heldPositions) {
       if (openOrderMarkets.has(held.marketRef) || entryBlockedMarkets.has(held.marketRef)) continue;
       const heldSince = holdStarts.byMarket[held.marketRef] ?? now;
@@ -895,17 +873,6 @@ export class FlipFlatStrategy implements Strategy {
           urgent: true,
           reason: `max hold reached: ${(heldMs / DAY_MS).toFixed(2)}d held (limit ${cfg.maxHoldDays}d)`,
           provenance: { exitModel: "legacy", heldSince, heldDays: heldMs / DAY_MS, maxHoldDays: cfg.maxHoldDays },
-        });
-        entryBlockedMarkets.add(held.marketRef);
-        continue;
-      }
-      const takeProfit = await this.takeProfitCheck(ctx, cfg, held);
-      if (takeProfit) {
-        actions.push({
-          kind: "exit",
-          marketRef: held.marketRef,
-          reason: takeProfit.reason,
-          provenance: { exitModel: "legacy", takeProfitPrice: cfg.takeProfitPrice, executableBid: takeProfit.bid },
         });
         // The position still consumes exposure until the exit actually
         // fills. Never spend that headroom speculatively in the same tick.
@@ -1033,7 +1000,7 @@ export class FlipFlatStrategy implements Strategy {
       actions.push({
         kind: "exit",
         marketRef,
-        urgent: telemetry.exitReason !== "take_profit",
+        urgent: true,
         reason: detail,
         provenance: { exitModel: "scenario", ...telemetry },
       });
@@ -1074,8 +1041,8 @@ export class FlipFlatStrategy implements Strategy {
   /**
    * Seed a record for a position that predates its entry snapshot. Entry Q
    * comes from the active published signal on the held side when one exists;
-   * without it, the collapse and take-profit branches stay off for that
-   * position while the adverse-cross, flip, and time stop still apply.
+   * without it, the collapse branch stays off for that position while the
+   * adverse-cross, flip, and time stop still apply.
    */
   private ensureScenarioRecord(
     ctx: StrategyContext,
@@ -1261,7 +1228,7 @@ export class FlipFlatStrategy implements Strategy {
     } else if (!forecast && record.lastForecastVersion) {
       ctx.log.info(`no fresh Q forecast for held market ${held.marketRef}; evaluating on the last committed forecast ${record.lastForecastVersion}`);
     } else if (!forecast) {
-      ctx.log.info(`no Q forecast for held market ${held.marketRef}; only the take-profit and time stop can fire`);
+      ctx.log.info(`no Q forecast for held market ${held.marketRef}; only the time stop can fire`);
     }
     const entryFilledAt = record.entryFilledAt ?? holdStarts.byMarket[held.marketRef] ?? record.entryPlacedAt ?? now;
     const ageMs = Math.max(0, now - entryFilledAt);
@@ -1272,7 +1239,6 @@ export class FlipFlatStrategy implements Strategy {
         currentQHeld,
         midHeld,
         executablePnlPct,
-        executableBidHeld: liquidation?.bestBid,
         ageMs,
         adverseCrossConfirmations: record.adverseCross.count,
         flipConfirmed: record.flip.confirmed,
@@ -1616,40 +1582,6 @@ export class FlipFlatStrategy implements Strategy {
       if (Number.isFinite(heldSince) && heldSince >= 0) byMarket[marketRef] = heldSince;
     }
     return { byMarket };
-  }
-
-  /**
-   * Take-profit on the held outcome's executable best bid, read from the held
-   * token's own book (the YES book mirrored where the venue has no exact-token
-   * read). An untradeable mark never counts as a realizable price.
-   */
-  private async takeProfitCheck(
-    ctx: StrategyContext,
-    cfg: FlipFlatConfig,
-    held: Position,
-  ): Promise<{ reason: string; bid: number } | undefined> {
-    if (cfg.takeProfitPrice === null) return undefined;
-    // Prediction markets only — perps carry no binary price to sell into.
-    if (held.side !== "YES" && held.side !== "NO") return undefined;
-
-    let bid: number;
-    try {
-      const heldBook = await outcomeBook(ctx, held.marketRef, held.side);
-      bid = heldBook.bids[0]?.price ?? Number.NaN;
-    } catch (err) {
-      if (ctx.execution) throw err;
-      ctx.log.warn(`take-profit check skipped for ${held.marketRef}: ${(err as Error).message}`);
-      return undefined;
-    }
-    if (!(bid > 0 && bid <= 1)) {
-      ctx.log.info(`no executable bid for held ${held.side} ${held.marketRef}; take-profit not evaluated`);
-      return undefined;
-    }
-    if (bid + EPSILON < cfg.takeProfitPrice) return undefined;
-    return {
-      reason: `take profit: held ${held.side} bid ${bid.toFixed(3)} >= ${cfg.takeProfitPrice.toFixed(3)}`,
-      bid,
-    };
   }
 
   /**

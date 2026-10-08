@@ -43,7 +43,6 @@ describe("signals recommended allocation", () => {
       maxHoldDays: null,
     });
     expect(recommendedStrategySummary("kalshi")).toBe("quarter-Kelly sizing, 5% per event");
-    expect(RECOMMENDED_STRATEGY.takeProfitPrice).toBeNull();
   });
 
   it("displays the recommended AUM caps for an empty prediction strategy config", async () => {
@@ -71,19 +70,20 @@ describe("signals recommended allocation", () => {
     expect(output).toMatch(/entry liquidity:\s+off/);
     expect(output).toMatch(/minimum entry edge:\s+0pp/);
     expect(output).toMatch(/maximum entry edge:\s+unlimited/);
-    expect(output).toMatch(/take profit:\s+off/);
-    expect(output).toMatch(/maximum hold:\s+unlimited/);
+    expect(output).toMatch(/exit model:\s+signal state machine/);
+    expect(output).toMatch(/adverse cross:\s+edge <= 0pp and P&L <= 0% on 1 distinct forecasts/);
+    expect(output).toMatch(/Q flip:\s+1 distinct forecasts below 50%, exit on confirmation at any remaining edge/);
+    expect(output).toMatch(/time stop:\s+off \(hold to resolution\)/);
   });
 
   it("defaults custom bot setup to hold to resolution and preserves explicit exits", async () => {
     vi.spyOn(context, "ask").mockImplementation(async (_message, options) => String(options?.default ?? ""));
 
     expect(await elicitStrategyConfig({}, "polymarket")).toMatchObject({
-      takeProfitPrice: null, maxHoldDays: null, marketCapPct: null, eventCapPct: 5,
+      maxHoldDays: null, marketCapPct: null, eventCapPct: 5,
       minExitDepth2cUsd: 0, entrySpreadPp: 0, maxEntrySpreadPp: null,
     });
-    expect(await elicitStrategyConfig({ takeProfitPrice: 0.9, maxHoldDays: 7 }, "polymarket"))
-      .toMatchObject({ takeProfitPrice: 0.9, maxHoldDays: 7 });
+    expect(await elicitStrategyConfig({ maxHoldDays: 7 }, "polymarket")).toMatchObject({ maxHoldDays: 7 });
   });
 
   it("can remove a saved market cap while keeping the event cap", async () => {
@@ -113,16 +113,15 @@ describe("signals recommended allocation", () => {
     vi.spyOn(console, "log").mockImplementation(() => {});
 
     await runStrategy(id, { top: "unlimited" });
-    expect(loadBotConfig(id).strategy.config).toMatchObject({ takeProfitPrice: 0.9, maxHoldDays: 7 });
-    await runStrategy(id, { takeProfitPrice: "off", maxHoldDays: "unlimited" });
-    expect(loadBotConfig(id).strategy.config).toMatchObject({ takeProfitPrice: null, maxHoldDays: null });
-    await runStrategy(id, { takeProfitPrice: "0.9", maxHoldDays: "7" });
+    expect(loadBotConfig(id).strategy.config).toMatchObject({ maxHoldDays: 7 });
+    await runStrategy(id, { maxHoldDays: "unlimited" });
+    expect(loadBotConfig(id).strategy.config).toMatchObject({ maxHoldDays: null });
+    await runStrategy(id, { maxHoldDays: "7" });
     await runStrategy(id, { preset: "recommended" });
-    expect(loadBotConfig(id).strategy.config).toMatchObject({
-      allocationMode: "portfolio-kelly",
-      takeProfitPrice: null,
-      maxHoldDays: null,
-    });
+    const reset = loadBotConfig(id).strategy.config;
+    expect(reset).toMatchObject({ allocationMode: "portfolio-kelly", maxHoldDays: null });
+    // The preset drops a take-profit saved by an older release.
+    expect(reset).not.toHaveProperty("takeProfitPrice");
   });
 
   it("accepts the near-resolution flags and reports the window as off when disabled", async () => {
@@ -145,10 +144,8 @@ describe("signals recommended allocation", () => {
     expect(lines.join("\n")).toMatch(/near resolution:\s+50% smaller when the market resolves within 2 days/);
 
     lines.length = 0;
-    await runStrategy("near-resolution", { nearResolutionDays: "off", takeProfitPrice: "off" });
+    await runStrategy("near-resolution", { nearResolutionDays: "off" });
     expect(lines.join("\n")).toMatch(/near resolution:\s+off/);
-    expect(lines.join("\n")).toMatch(/take profit:\s+off/);
     await expect(runStrategy("near-resolution", { nearResolutionSizeCutPct: "101" })).rejects.toThrow(/at most 100%/);
-    await expect(runStrategy("near-resolution", { takeProfitPrice: "1.5" })).rejects.toThrow(/between 0 and 1/);
   });
 });

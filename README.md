@@ -150,7 +150,7 @@ shows current state only and says so; redeploy to start recording.
 | `packages/core`        | venue adapters, wallet/keystore, strategy engine, risk module, signal client, alerts, thesis sizing |
 | `packages/cli`         | the `cassie` binary: wizard, wallet, fund, run, deploy, status, logs, dashboard, portfolio, trade, orders, ticket |
 | `packages/runtime-node` | the bot process: engine loop, SQLite state, unix-socket control API. Same code for `cassie run` and a droplet |
-| `strategies/flip-flat` | the `signals` strategy: follow Quotient signals and hold prediction positions to resolution, with no default take-profit or time limit; its `hold` preset (`--preset hold`) buys one fixed lot per market at 15pp+ edge and holds to resolution unless Q flips |
+| `strategies/flip-flat` | the `signals` strategy: follow Quotient signals and hold prediction positions while Q keeps its edge, selling on the first forecast that flips Q, puts Q at the market on a losing position, or collapses Q; its `hold` preset (`--preset hold`) buys one fixed lot per market at 15pp+ edge and holds to resolution unless two forecasts flip Q |
 | `skills/cassie`        | agent-facing operator manual ([SKILL.md](skills/cassie/SKILL.md)) + thesis policy (`thesis/mappings.json`) |
 | `fixtures/`            | signal + order-book fixtures for the offline e2e                     |
 
@@ -205,7 +205,7 @@ their latest Q forecasts.
 
 The runtime separates the two cadences: every five minutes it refreshes the entry-signal
 snapshot and batches Q forecast lookups for held markets; every 60 seconds it re-reads
-venue odds and checks the take-profit and hold deadlines. Entry-signal freshness never gates
+venue odds and evaluates the signal exits and the hold deadline. Entry-signal freshness never gates
 an exit. Held-market lookups cost $0.005 per batch of up to 10 markets per refresh.
 Configure the cadences with
 `cassie strategy <botId> --signal-check-minutes 5 --position-check-seconds 60`.
@@ -233,10 +233,13 @@ The optional exit-depth floor is off by default. Actual orders are sized against
 entry-side depth and a slippage band. Existing bots keep their saved settings;
 `--preset recommended` applies these defaults.
 
-Prediction positions hold to resolution by default (`takeProfitPrice: null`,
-`maxHoldDays: null`). Operators can set an optional take-profit or deadline with
-`--take-profit-price <price>` or `--max-hold-days <days>`. Existing bots keep saved
-settings; `--take-profit-price off --max-hold-days unlimited` disables both exits.
+Prediction positions sell when Q's edge is gone, each on one committed forecast by default:
+a Q flip to the other side of 50% (`--flip-confirmations`, at any remaining edge), Q at or
+below the market while the position is not in profit (`--adverse-cross-confirmations`), or a
+Q collapse of 30pp or more from entry (`--q-collapse-pp`). Otherwise they hold to resolution;
+`--max-hold-days <days>` adds an optional deadline (`unlimited` by default) and
+`--scenario-exit off` holds every position to resolution. There is no take-profit price.
+Existing bots keep saved settings.
 Low 24-hour volume never blocks an exit; executable depth and slippage still bound it.
 
 ```sh

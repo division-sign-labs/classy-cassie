@@ -347,10 +347,12 @@ floor are off by default. Same-side repeat signals may top up toward that target
 Positions already above a target or cap are not topped up and are not automatically trimmed.
 Existing bots keep their saved settings; `--preset recommended` applies these defaults.
 
-Prediction positions hold to resolution by default, with no take-profit or time limit.
-Optional exits are available through `--take-profit-price` (default `off`) and
-`--max-hold-days` (default `unlimited`). Existing bots keep saved settings; use
-`--take-profit-price off --max-hold-days unlimited` to disable both exits.
+Prediction positions sell when Q's edge is gone, each on one committed forecast by default:
+a Q flip to the other side of 50% (`--flip-confirmations`), Q at or below the market while
+the position is not in profit (`--adverse-cross-confirmations`), or a Q collapse of 30pp or
+more from entry (`--q-collapse-pp`). Otherwise they hold to resolution. `--max-hold-days`
+adds an optional deadline (default `unlimited`); `--scenario-exit off` holds every position
+to resolution. There is no take-profit price. Existing bots keep saved settings.
 An optional 24-hour volume floor, when set, filters entries but never blocks an exit; exit
 slippage and executable depth still apply.
 
@@ -378,7 +380,7 @@ cassie strategy <bot> --max-entry-edge unlimited
 per market (`--lot-notional`, default $10, no top-ups), a 15pp entry floor with no ceiling,
 markets resolving within 60 days (`--max-window-days`; `off` disables), sold only after two
 consecutive forecasts put Q on the other side of 50% at any remaining edge, otherwise held
-to the payout with no take-profit and no time stop. `--preset recommended` restores the
+to the payout with no time stop. `--preset recommended` restores the
 default rule. Each gated exit accepts `off`: `--q-collapse-pp off`,
 `--adverse-cross-confirmations off`, `--flip-exit-max-remaining-edge-pp off`.
 

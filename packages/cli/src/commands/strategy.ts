@@ -22,7 +22,6 @@ export const RECOMMENDED_STRATEGY = {
   entrySpreadPp: 0,
   maxEntrySpreadPp: null,
   minEntryNotional: 1,
-  takeProfitPrice: null,
   maxHoldDays: null,
   universe: "from-signals",
   tickIntervalMin: 1,
@@ -41,7 +40,6 @@ const LEGACY_DAILY_BUDGET_STRATEGY = {
   entrySpreadPp: 10,
   maxEntrySpreadPp: 30,
   minEntryNotional: 1,
-  takeProfitPrice: null,
   maxHoldDays: null,
   universe: "from-signals",
   tickIntervalMin: 1,
@@ -72,7 +70,6 @@ export const HOLD_STRATEGY = {
   maxEntrySpreadPp: null,
   maxWindowDays: 60,
   minEntryNotional: 1,
-  takeProfitPrice: null,
   maxHoldDays: null,
   scenarioExitEnabled: true,
   adverseCrossConfirmations: null,
@@ -87,7 +84,7 @@ export const HOLD_STRATEGY = {
 export const HOLD_SUMMARY =
   "one fixed $10 lot per market with no top-ups, 15pp+ entry edge with no ceiling, 60 days or less to resolution, " +
   "sell only after two consecutive forecasts put Q on the other side of 50%, otherwise hold to the payout; " +
-  "no take-profit, no time stop, no collapse or adverse-cross exit";
+  "no time stop, no collapse or adverse-cross exit";
 
 export type StrategyPreset = "recommended" | "hold";
 
@@ -185,12 +182,6 @@ export async function elicitStrategyConfig(
     "minimum entry",
     await ask("Minimum viable entry after risk caps ($)", { default: d("minEntryNotional", "1") }),
   );
-  const takeProfitPrice = optionalPrice(
-    "take-profit price",
-    await ask("Take-profit held-side bid (0–1, or off)", {
-      default: current.takeProfitPrice === null ? "off" : d("takeProfitPrice", "off"),
-    }),
-  );
   const maxHoldDays = optionalPositiveNumber(
     "maximum hold",
     await ask("Maximum hold (days or unlimited)", {
@@ -215,7 +206,6 @@ export async function elicitStrategyConfig(
     entrySpreadPp,
     maxEntrySpreadPp,
     minEntryNotional,
-    takeProfitPrice,
     maxHoldDays,
     universe: universeRaw === "from-signals" ? "from-signals" : universeRaw.split(",").map((s) => s.trim()),
     tickIntervalMin: positionCheckSeconds / 60,
@@ -243,7 +233,6 @@ export interface StrategyOptions {
   maxEntryEdge?: string;
   maxWindowDays?: string;
   minEntryNotional?: string;
-  takeProfitPrice?: string;
   maxHoldDays?: string;
   positionCheckSeconds?: string;
   signalCheckMinutes?: string;
@@ -263,15 +252,15 @@ export interface StrategyOptions {
   pendingEntryReservationSeconds?: string;
 }
 
-/** Defaults of the opt-in signal-exit state machine, mirrored from the strategy schema. */
+/** Defaults of the signal-exit state machine, mirrored from the strategy schema. */
 export const SCENARIO_EXIT_DEFAULTS = {
-  scenarioExitEnabled: false,
+  scenarioExitEnabled: true,
   adverseCrossEdgePp: 0,
   adverseCrossMaxPnlPct: 0,
-  adverseCrossConfirmations: 2,
+  adverseCrossConfirmations: 1,
   qCollapsePp: 30,
   qCollapseMaxRemainingEdgePp: 0,
-  flipConfirmations: 2,
+  flipConfirmations: 1,
   flipExitMaxRemainingEdgePp: null,
   exitFeeBps: 0,
   exitRetrySec: 300,
@@ -394,9 +383,6 @@ export async function runStrategy(botId: string, opts: StrategyOptions = {}): Pr
     if (opts.minEntryNotional !== undefined) {
       strategyConfig.minEntryNotional = nonnegativeNumber("minimum entry notional", opts.minEntryNotional);
     }
-    if (opts.takeProfitPrice !== undefined) {
-      strategyConfig.takeProfitPrice = optionalPrice("take-profit price", opts.takeProfitPrice);
-    }
     if (opts.maxHoldDays !== undefined) {
       strategyConfig.maxHoldDays = optionalPositiveNumber("maximum hold", opts.maxHoldDays);
     }
@@ -515,14 +501,6 @@ function positionLimit(raw: string): number | null {
   const normalized = raw.trim().toLowerCase();
   if (normalized === "unlimited" || normalized === "none" || normalized === "off") return null;
   return positiveInteger("position limit", raw);
-}
-
-function optionalPrice(label: string, raw: string): number | null {
-  const normalized = raw.trim().toLowerCase();
-  if (normalized === "off" || normalized === "none") return null;
-  const value = positiveNumber(label, raw);
-  if (value > 1) throw new Error(`${label} must be a price between 0 and 1`);
-  return value;
 }
 
 function optionalPositiveNumber(label: string, raw: string): number | null {
@@ -674,11 +652,6 @@ function printStrategy(
   console.log(`  minimum viable entry: $${Number(current.minEntryNotional).toFixed(2)} (entries only; exits are never floored)`);
   const scenario = { ...SCENARIO_EXIT_DEFAULTS, ...normalized } as Record<string, unknown>;
   const maxHold = current.maxHoldDays === null ? "unlimited" : `${current.maxHoldDays} days`;
-  const takeProfit =
-    current.takeProfitPrice === null
-      ? "off"
-      : `sell once the held-side bid reaches $${Number(current.takeProfitPrice).toFixed(2)}`;
-  console.log(`  take profit:          ${takeProfit}`);
   if (scenario.scenarioExitEnabled === true) {
     console.log("  exit model:           signal state machine (scenarioExitEnabled)");
     console.log(
@@ -706,7 +679,7 @@ function printStrategy(
     console.log(`  exit fee assumed:     ${scenario.exitFeeBps}bps on executable proceeds`);
     console.log(`  exit retry window:    ${scenario.exitRetrySec}s before an invisible exit is re-evaluated`);
   } else {
-    console.log("  exit model:           hold to resolution with optional exits (scenarioExitEnabled off)");
+    console.log("  exit model:           hold to resolution (scenarioExitEnabled off)");
     console.log(`  maximum hold:         ${maxHold}`);
   }
   console.log(`  entry handoff hold:   ${scenario.pendingEntryReservationSec}s reservation while a fill is not yet visible`);

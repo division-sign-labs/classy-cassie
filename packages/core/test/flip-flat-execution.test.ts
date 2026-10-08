@@ -29,7 +29,7 @@ function setup(config: Record<string, unknown> = {}) {
   const signals: Signal[] = [];
   const marketData = new Map<string, { bid: number; ask: number }>();
   const ctx: StrategyContext = {
-    botId: "adaptive-test", venueId: "polymarket", config: { minExitDepth2cUsd: 0, takeProfitPrice: null, maxHoldDays: null, ...config },
+    botId: "adaptive-test", venueId: "polymarket", config: { minExitDepth2cUsd: 0, maxHoldDays: null, ...config },
     positions: [], openOrders: [], equity: 1000, log: silentLogger, now: () => NOW,
     memory: { get: async <T>(key: string) => memory.get(key) as T | undefined, set: async (key, value) => { memory.set(key, value); } },
     signals: { latest: async () => signals },
@@ -167,14 +167,15 @@ describe("signals strategy fill-receipt reconciliation", () => {
 });
 
 describe("signals strategy working-order exits", () => {
-  it.each(["BUY", "SELL"] as const)("reevaluates routine exits while a managed %s order works", async (side) => {
-    const { ctx, signals, marketData, strategy } = setup({ takeProfitPrice: 0.45 });
+  it.each(["BUY", "SELL"] as const)("reevaluates exits while a managed %s order works", async (side) => {
+    const { ctx, signals, marketData, strategy } = setup();
     ctx.execution!.parents = [parent({ side, priorMarketSize: 10 })];
-    ctx.positions = [{ marketRef: "a", side: "YES", size: 10, avgPrice: 0.4 }];
+    ctx.positions = [{ marketRef: "a", side: "YES", size: 10, avgPrice: 0.55 }];
     ctx.openOrders = [{ id: "child-a", marketRef: "a", tokenId: "a-yes", side, size: 10, filledSize: 0, price: 0.6, status: "open" }];
-    signals.push(signal("a", 0.51));
-    // The exact-token bid of 0.49 clears the 0.45 floor on every tick the order works.
+    signals.push(signal("a", 0.5));
+    // Q at the exact-token mid with the position under water: the adverse cross holds on every tick the order works.
     for (let i = 0; i < 2; i++) expect(await strategy.tick(ctx)).toContainEqual(expect.objectContaining({ kind: "exit", marketRef: "a" }));
+    // The market falls back below Q: the edge is back, so nothing sells.
     marketData.set("a:YES", { bid: 0.4, ask: 0.42 });
     expect((await strategy.tick(ctx)).filter((action) => action.kind === "exit")).toEqual([]);
   });
@@ -193,15 +194,18 @@ describe("signals strategy working-order exits", () => {
   });
 
   it("uses the NO outcome quote for exits and entries", async () => {
-    const { ctx, signals, marketData, strategy } = setup({ takeProfitPrice: 0.6 });
-    ctx.positions = [{ marketRef: "a", side: "NO", size: 10, avgPrice: 0.4 }];
+    const { ctx, signals, marketData, strategy } = setup();
+    ctx.positions = [{ marketRef: "a", side: "NO", size: 10, avgPrice: 0.75 }];
     marketData.set("a:NO", { bid: 0.69, ask: 0.71 });
-    signals.push(signal("a", 0.71, "NO"));
-    expect(await strategy.tick(ctx)).toContainEqual(expect.objectContaining({ kind: "exit", marketRef: "a" }));
+    // Q on NO (0.69) sits below the NO mid (0.70) and the position is under water on the NO bid.
+    signals.push(signal("a", 0.69, "NO"));
+    expect(await strategy.tick(ctx)).toContainEqual(
+      expect.objectContaining({ kind: "exit", marketRef: "a", provenance: expect.objectContaining({ exitReason: "adverse_cross" }) }),
+    );
   });
 
   it("leaves the previous exit decision intact when the exact token read fails", async () => {
-    const { ctx, signals, strategy } = setup({ takeProfitPrice: 0.5 });
+    const { ctx, signals, strategy } = setup();
     ctx.positions = [{ marketRef: "a", side: "YES", size: 10, avgPrice: 0.5 }];
     signals.push(signal("a", 0.51));
     ctx.venue.executionMarket = async () => { throw new Error("book unavailable"); };

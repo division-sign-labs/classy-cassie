@@ -74,18 +74,19 @@ describe("exits during a Quotient outage", () => {
   it("still exits on the last committed forecast when every Quotient read fails", async () => {
     const { state, ctx, logs } = harness();
     const strategy = new FlipFlatStrategy();
-    // Tick 1: Quotient answers. Entry Q is 0.70 from the signal; the committed
-    // forecast has retreated to 0.38, but at mid 0.30 the held side still has
-    // +8pp of edge, so the collapse branch waits.
-    state.forecasts = [forecast(0.38)];
-    state.mid = 0.3;
+    // Tick 1: Quotient answers. Entry Q is 0.85 from the signal; the committed
+    // forecast has retreated to 0.52, but at mid 0.45 the held side still has
+    // +7pp of edge, so the collapse branch waits (and Q is not below 50%).
+    state.signals = [signal(0.85)];
+    state.forecasts = [forecast(0.52)];
+    state.mid = 0.45;
     expect((await strategy.tick(ctx() as never)).filter((a) => a.kind === "exit")).toHaveLength(0);
 
     // Outage. The market rises through the committed forecast: the collapse
     // fires on that forecast, without waiting for fresh data.
     state.outage = true;
     state.now += 60_000;
-    state.mid = 0.4;
+    state.mid = 0.55;
     const actions = await strategy.tick(ctx() as never);
     expect(actions.filter((a) => a.kind === "enter")).toHaveLength(0);
     expect(actions.filter((a) => a.kind === "exit")).toMatchObject([{ marketRef: MARKET, reason: expect.stringContaining("q_collapse") }]);

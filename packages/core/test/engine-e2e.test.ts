@@ -1,13 +1,13 @@
 // packages/core/test/engine-e2e.test.ts
 // Offline strategy e2e: entry with visible capacity cap, fill reconciliation,
-// then a signal-side flip that is held: exits are the price floor or the deadline.
+// then a signal-side flip that sells the position on the next tick.
 
 import { describe, expect, it } from "vitest";
 import { StateKeys } from "@quotient-forecasting/cassie-core";
 import { buildFixtureEngine } from "./helpers.js";
 
 describe("flip-flat against fixtures (offline e2e)", () => {
-  it("enters capped and holds through a signal-side flip", async () => {
+  it("enters capped and sells on a signal-side flip", async () => {
     const { engine, venue, alerter, state } = buildFixtureEngine();
 
     // Tick 1: flat + YES signal (spread 15pp ≥ 10) → entry, size capped by depth.
@@ -45,15 +45,15 @@ describe("flip-flat against fixtures (offline e2e)", () => {
     expect(positions[0]!.size).toBe(8);
 
     // Tick 3: the signal moves to NO at 0.70, valuing the held YES at 0.30.
-    // Default prediction exits hold to resolution, so nothing sells.
+    // One flipped forecast sells the position; nothing new is entered.
     const t3 = await engine.tick();
-    expect(t3.ordersPlaced).toBe(0);
-    expect(alerter.ofKind("exit")).toHaveLength(0);
+    expect(t3.ordersPlaced).toBe(1);
+    const exitAlerts = alerter.ofKind("exit");
+    expect(exitAlerts).toHaveLength(1);
+    expect(exitAlerts[0]).toMatchObject({ market: { ref: "fx-yes-1" }, trade: { side: "SELL", size: 8 } });
     expect(alerter.ofKind("entry")).toHaveLength(1);
-    positions = await venue.positions();
-    expect(positions).toHaveLength(1);
-    expect(positions[0]!.side).toBe("YES");
-    expect(positions[0]!.size).toBe(8);
+    positions = (await venue.positions()).filter((position) => position.size > 0);
+    expect(positions).toHaveLength(0);
     // No error alerts anywhere in the run.
     expect(alerter.ofKind("error")).toHaveLength(0);
   });

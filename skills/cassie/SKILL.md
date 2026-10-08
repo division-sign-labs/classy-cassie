@@ -139,14 +139,14 @@ Every step happens in the terminal; you only leave it to copy-paste dashboard va
    one fixed-dollar lot per market (`--lot-notional`, default $10, no top-ups), a 15pp entry
    floor with no ceiling, markets resolving within 60 days (`--max-window-days`), sold only
    after two consecutive forecasts put Q on the other side of 50% at any remaining edge,
-   otherwise held to the payout with no take-profit, time stop, collapse or adverse-cross
+   otherwise held to the payout with no time stop, collapse or adverse-cross
    exit (each accepts `off`). Replayed on every published Polymarket signal 2026-06-29 to
    09-16 it made about 20% per lot at 1.3 lots a day; the bot keeps the `signals` id. `market-make` is the
    deterministic Q-directed passive-inventory strategy, not a symmetric dealer; see §14.
    The `agent` strategy is the monitoring agent — plain-language mandate, Quotient
    research, model-selected entries, quarter-Kelly sizing; see §13. `signals` follows
-   Quotient signals. Prediction positions hold to resolution, with no default
-   take-profit or time limit. The recommended allocation has no position-count
+   Quotient signals. Prediction positions hold while Q keeps its edge and sell on
+   the first forecast that removes it; there is no default time limit. The recommended allocation has no position-count
    cap and prioritizes the widest eligible edges for new entries. Published Quotient signals
    determine entry eligibility; no additional entry-edge band applies by default. On prediction
    venues, the recommended allocator targets quarter Kelly from current portfolio equity,
@@ -155,16 +155,15 @@ Every step happens in the terminal; you only leave it to copy-paste dashboard va
    may top up only the remaining target and cap headroom. New deposits automatically affect subsequent targets. A holding already above
    its target or cap is not topped up and is not automatically trimmed. There is no daily
    throttle in this mode. The optional exit-depth floor is off by default;
-   live executable depth and slippage still constrain orders. Take-profit and time limits are off by default
-   (`takeProfitPrice: null`, `maxHoldDays: null`). Operators can enable them with
-   `--take-profit-price <price>` or `--max-hold-days <days>`. Existing bots keep saved
-   settings; `--take-profit-price off --max-hold-days unlimited` disables both exits.
-   `--scenario-exit on` enables the confirmed signal-exit
-   state machine (Q collapse, confirmed adverse cross, confirmed Q flip, optional
-   take-profit, optional time stop from the entry fill), evaluated in that
-   precedence with one canonical reason per exit; it is off
-   unless an operator turns it on. A configured take-profit applies to every position
-   the same way whatever the market's resolution date. The optional 24h-volume floor (off by
+   live executable depth and slippage still constrain orders. The signal-exit state machine
+   is on by default (`--scenario-exit on`): Q collapse (30pp or more from entry with no
+   remaining edge, `--q-collapse-pp`), adverse cross (Q at or below the market while the
+   position is not in profit, `--adverse-cross-confirmations`, default 1 forecast), Q flip
+   (Q below 50% on the held side, `--flip-confirmations`, default 1 forecast, exit at any
+   remaining edge), and the optional time stop from the entry fill (`--max-hold-days`,
+   default `unlimited`), evaluated in that precedence with one canonical reason per exit.
+   `--scenario-exit off` holds every position to resolution. There is no take-profit price.
+   Existing bots keep saved settings. The optional 24h-volume floor (off by
    default) and the minimum-notional floor apply to entries, never exits; exit slippage and executable depth still apply. An
    accepted entry stays reserved against market and event caps until the venue position or
    a resting order shows it, so a fill lag cannot admit a duplicate entry. The legacy
@@ -174,7 +173,7 @@ Every step happens in the terminal; you only leave it to copy-paste dashboard va
    positions. Hyperliquid keeps this legacy mode as its recommendation.
    The engine re-reads venue odds for held positions every 60 seconds. Every 5 minutes it
    separately refreshes entry signals and batches the latest Q forecasts for held markets,
-   so stale or unpublished entry signals do not suppress take-profit checks or hold-deadline
+   so stale or unpublished entry signals do not suppress signal exits or hold-deadline
    exits. Held-market forecast lookups cost $0.005 per batch of up to 10 markets per refresh.
    Declining the recommendation asks for an optional position cap, allocation mode and its
    mode-specific parameters, minimum and maximum entry edges, minimum viable entry, tick
@@ -287,7 +286,7 @@ cassie strategy <botId> --min-exit-depth-2c-usd 2500 --max-hold-days unlimited
 cassie strategy <botId> --daily-budget 100 --position-budget-pct 25   # legacy allocator
 cassie strategy <botId> --max-entry-edge unlimited   # remove the forecast-edge ceiling
 cassie strategy <botId> --position-check-seconds 60 --signal-check-minutes 5
-cassie strategy <botId> --scenario-exit on      # confirmed signal-exit state machine
+cassie strategy <botId> --scenario-exit off     # hold every position to resolution
 cassie deploy <botId> [--region <slug>] [--size <slug>] [--no-dashboard] [--dashboard-port <n>] [-y]   # a droplet in YOUR DigitalOcean account
 cassie destroy <botId> [-y] [--force]        # cancel resting orders, delete the droplet
 cassie status <botId>                        # droplet + service + engine, one screen
@@ -516,7 +515,7 @@ blank line.
 Will Bitcoin close above $100k on Sep 30?
 YES · sold 120 @ 0.71 · $85.20 · fee $0.43 · maker
 polymarket · signals · wti-1
-take-profit: 71¢ bid reached
+q_flip: entryQ 64.0% → Q 41.0%
 
 orderId: "0x…"
 signalId: "sig_8f21"
@@ -577,7 +576,7 @@ The JSON body:
   "trade": { "side": "SELL", "size": 120, "price": 0.71, "notional_usd": 85.2, "fee_usd": 0.43,
              "order_id": "0x…", "maker": true, "position_side": "YES", "filled": true },
   "pnl": { "usd": 12.4, "pct": 8.3, "basis": "realized" },
-  "reason": "take-profit: 71¢ bid reached",
+  "reason": "q_flip: entryQ 64.0% → Q 41.0%",
   "message": "the engine's one-line message",
   "data": { "orderId": "0x…", "signalId": "sig_8f21" }
 }
@@ -681,8 +680,8 @@ keys, or funds:
 pnpm exec vitest run packages/core/test/engine-e2e.test.ts
 ```
 
-The test enters YES with size capped by the thin test book, then holds through a
-signal-side flip that is nowhere near the take-profit. The fixture venue and signal source are test doubles, not
+The test enters YES with size capped by the thin test book, then sells on a
+signal-side flip. The fixture venue and signal source are test doubles, not
 product options.
 
 ## 8. Trade reporting (opt-in, Polymarket only)
@@ -801,9 +800,9 @@ Confidence maps to an entry-spread threshold (low 12pp / medium 10pp / high 7pp)
 reuses min(fixed-fractional, quarter-Kelly) with `p` = model probability and `b` implied by
 the share price. When a fresh live Quotient signal covers the market, the CLI takes `p`
 from it automatically (mirrored if the signal's side differs from the thesis side);
-otherwise it asks the operator. Flip-flat holds prediction positions to resolution by
-default. Saved take-profit and maximum-hold settings still apply;
-`--scenario-exit on` enables the confirmed signal-exit state machine.
+otherwise it asks the operator. Flip-flat sells a prediction position on the first forecast
+that removes Q's edge (flip, adverse cross, collapse) and otherwise holds to resolution; a
+saved maximum hold still applies.
 
 ## 10. Rules for the agent operating cassie
 

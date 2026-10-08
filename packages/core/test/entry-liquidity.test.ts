@@ -75,7 +75,6 @@ function context(input: {
       marketCapPct: 2.5,
       eventCapPct: 5,
       minExitDepth2cUsd: 2_500,
-      takeProfitPrice: null,
       ...input.config,
     },
     signals: { latest: async () => [input.signal ?? signal()] },
@@ -213,16 +212,17 @@ describe("flip-flat entry-side unwind liquidity", () => {
     expect(got).toHaveLength(0);
   });
 
-  it("never applies the entry-depth floor to a take-profit exit", async () => {
+  it("never applies the entry-depth floor to a forecast exit", async () => {
+    // Q moved to NO: the held YES flips out on a book with one share of depth.
     const actions = await new FlipFlatStrategy().tick(
       context({
-        signal: signal("YES", 0.54),
-        mid: 0.91,
+        signal: signal("NO", 0.6),
+        mid: 0.41,
         positions: [{ marketRef: MARKET, side: "YES", size: 10, avgPrice: 0.5 }],
-        config: { takeProfitPrice: 0.9, minExitDepth2cUsd: 2_500 },
+        config: { minExitDepth2cUsd: 2_500 },
         book: book({
-          bids: [{ price: 0.9, size: 1 }],
-          asks: [{ price: 0.92, size: 1 }],
+          bids: [{ price: 0.4, size: 1 }],
+          asks: [{ price: 0.42, size: 1 }],
         }),
       }),
     );
