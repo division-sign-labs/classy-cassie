@@ -1,5 +1,5 @@
 // packages/core/src/risk/capacity.ts
-// Capacity and volume checks (§9). Runs before every order the strategy or
+// Capacity checks (§9). Runs before every order the strategy or
 // manual-trade path emits. Pure functions over book/quote snapshots.
 
 import type { OrderBook, OrderSide, Quote } from "../types.js";
@@ -41,9 +41,8 @@ export interface CapacityResult {
 /**
  * Compute executable size within the slippage band — `risk.slippagePct`
  * measured from the best executable price (the touch) — cap at
- * min(desired, depthCapPct × bandDepth, maxOrderNotional), enforce the
- * volume eligibility floor and minViableNotional (entries only unless
- * `enforceMinimumNotional` is false). Execution quality is
+ * min(desired, depthCapPct × bandDepth, maxOrderNotional), and enforce
+ * minViableNotional (entries only unless `enforceMinimumNotional` is false). Execution quality is
  * governed by how far the order may walk the book, not by the quoted
  * bid–ask spread: a wide quote costs nothing when the order fills at the
  * touch, so there is no spread-based eligibility gate.
@@ -59,11 +58,6 @@ export function checkCapacity(input: CapacityInput): CapacityResult {
   const anchor = touch ?? quote.mid;
   const band = anchor * (risk.slippagePct / 100);
   const limitPrice = side === "BUY" ? anchor + band : anchor - band;
-
-  // Market eligibility floor (§9).
-  if (quote.volume24h < risk.minDailyVolume) {
-    skipReasons.push(`24h volume $${quote.volume24h.toFixed(0)} < minDailyVolume $${risk.minDailyVolume}`);
-  }
 
   // Executable depth within the band.
   let bandDepth = 0;

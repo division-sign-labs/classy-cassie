@@ -70,7 +70,7 @@ function build(actions: Action[], minViableNotional: number) {
     id: "min-notional-test",
     venue: "polymarket",
     strategy: { id: "one-shot", config: {} },
-    risk: { slippagePct: 10, minDailyVolume: 1_000, minViableNotional, maxOrderNotional: 1_000 },
+    risk: { slippagePct: 10, minViableNotional, maxOrderNotional: 1_000 },
   });
   const engine = new Engine({
     botId: config.id,
@@ -101,7 +101,7 @@ async function seedPosition(venue: RecordingVenue, size: number): Promise<void> 
 }
 
 describe("checkCapacity minimum-notional mode", () => {
-  const risk = RiskConfigSchema.parse({ slippagePct: 10, minDailyVolume: 0, minViableNotional: 5 });
+  const risk = RiskConfigSchema.parse({ slippagePct: 10, minViableNotional: 5 });
   const book: OrderBook = { marketRef: "m", bids: [{ price: 0.49, size: 1_000 }], asks: [{ price: 0.51, size: 1_000 }], ts: 0 };
   const quote: Quote = { marketRef: "m", bid: 0.49, ask: 0.51, mid: 0.5, volume24h: 50_000, spreadBps: 400, ts: 0 };
 
@@ -190,7 +190,7 @@ describe("engine exits below the entry floor", () => {
       id: "reject-test",
       venue: "polymarket",
       strategy: { id: "one-shot", config: {} },
-      risk: { slippagePct: 10, minDailyVolume: 1_000, minViableNotional: 1 },
+      risk: { slippagePct: 10, minViableNotional: 1 },
     });
     // Seed through the base class so the position exists before the rejecting override applies.
     await FixtureVenue.prototype.placeOrder.call(venue, account, {

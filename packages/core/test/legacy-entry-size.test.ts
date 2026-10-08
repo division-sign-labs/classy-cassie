@@ -53,7 +53,7 @@ function setup(notional: number, side: "YES" | "NO" = "YES") {
   const config = parseBotConfig({
     id: "legacy-size", venue: "polymarket", execution: { mode: "legacy" },
     strategy: { id: "signals", config: {} },
-    risk: { minDailyVolume: 1000, minViableNotional: 1, maxOrderNotional: 1000, slippagePct: 3 },
+    risk: { minViableNotional: 1, maxOrderNotional: 1000, slippagePct: 3 },
   });
   const engine = new Engine({
     botId: config.id, config, adapter: venue, account, strategy,

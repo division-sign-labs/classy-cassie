@@ -32,7 +32,7 @@ export function configureCommodities(botId: string, opts: { config?: string; exe
   const config = CommodityConfigSchema.parse({ ...raw, ...(opts.execution ? { entryStyle: opts.execution } : {}) });
   saveBotConfig(parseBotConfig({ ...cfg, strategy: { id: "kalshi-commodities", config }, tickIntervalMin: 1,
     signals: { ...cfg.signals, maxAgeSec: config.maxForecastAgeHours * 3600 },
-    risk: { ...cfg.risk, minDailyVolume: 0, depthCapPct: config.depthParticipationPct, minViableNotional: config.minEntryNotional,
+    risk: { ...cfg.risk, depthCapPct: config.depthParticipationPct, minViableNotional: config.minEntryNotional,
       maxOrderNotional: Math.min(cfg.risk.maxOrderNotional, 100) },
     execution: { mode: "adaptive", entryDeadlineSec: config.entryDeadlineSec, exitPassiveSec: config.exitPassiveSec } }));
   console.log(`Configured ${botId}.`);

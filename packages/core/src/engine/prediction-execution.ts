@@ -505,7 +505,7 @@ export class PredictionExecutor {
         ? held.reduce((sum, p) => sum + (p.avgPrice > 0 ? p.size * p.avgPrice : 0), 0) / pricedSize : undefined;
       const desiredSize = action.kind === "enter" ? budget / this.entryUnitCost(maximumPrice, provenance) : heldSize * Math.min(1, Math.max(0, action.fraction ?? 1));
       const cap = checkCapacity({ side: action.kind === "enter" ? "BUY" : "SELL", desiredSize, refPrice: action.kind === "enter" ? maximumPrice : bid, book: external,
-        quote: { ...market.quote, bid, ask, mid: (bid + ask) / 2 }, risk: action.kind === "exit" ? { ...this.d.config.risk, minDailyVolume: 0 } : this.d.config.risk,
+        quote: { ...market.quote, bid, ask, mid: (bid + ask) / 2 }, risk: this.d.config.risk,
         minimumNotional: action.kind === "enter" ? action.minNotional : undefined, enforceMinimumNotional: action.kind === "enter" });
       if (!cap.ok) return this.refuse(action, `capacity: ${cap.skipReasons.join("; ")}`);
       let size = this.normalize(cap.size);

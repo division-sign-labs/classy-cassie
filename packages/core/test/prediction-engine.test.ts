@@ -144,8 +144,8 @@ function harness(options: { side?: "YES" | "NO"; legacy?: boolean; maxHoldDays?:
     // These cases exercise the post-only phase, which is off by default.
     execution: { entryDeadlineSec: 120, ...(options.legacy ? { mode: "legacy" } : {}), ...(options.entryCrossingSec !== undefined ? { entryCrossingSec: options.entryCrossingSec } : {}) },
     strategy: { id: "flip-flat", config: { allocationMode: "portfolio-kelly", minExitDepth2cUsd: 0, maxHoldDays: options.maxHoldDays ?? null,
-      takeProfitPrice: null, signalPollIntervalMin: 1 } },
-    risk: { slippagePct: 10, depthCapPct: 100, minDailyVolume: 0, minViableNotional: 1, maxOrderNotional: 1000 },
+      signalPollIntervalMin: 1 } },
+    risk: { slippagePct: 10, depthCapPct: 100, minViableNotional: 1, maxOrderNotional: 1000 },
   });
   const createEngine = () => new Engine({ botId: config.id, config, adapter: venue, account: ACCOUNT, strategy: new FlipFlatStrategy(), signals,
     state, alerter: { send: async () => undefined }, log: silentLogger, now: () => clock.now });

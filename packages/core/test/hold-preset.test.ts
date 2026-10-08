@@ -23,7 +23,6 @@ const HOLD = {
   entrySpreadPp: 15,
   maxEntrySpreadPp: null,
   maxWindowDays: 60,
-  takeProfitPrice: null,
   maxHoldDays: null,
   scenarioExitEnabled: true,
   adverseCrossConfirmations: null,

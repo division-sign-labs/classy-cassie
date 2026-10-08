@@ -144,7 +144,7 @@ function harness(options: { side?: "YES" | "NO"; style?: "marketable" | "adaptiv
       prob: c.qYes > .5 ? c.qYes : 1 - c.qYes, refPrice: .5, ts: new Date(c.forecastAt).toISOString(), ttlSec: 21600,
       settlementBasis: c.settlementBasis, rulesHash: c.rulesHash, endsAt: c.closeAt } as Signal)) };
   const config = BotConfigSchema.parse({ id: "commodity-engine", venue: "kalshi", strategy: { id: "kalshi-commodities", config: CommodityConfigSchema.parse({ assets: ["gold"], entryStyle: options.style ?? "marketable" }) },
-    execution: { entryDeadlineSec: 20, exitPassiveSec: 20 }, risk: { minDailyVolume: 0, minViableNotional: 1, maxOrderNotional: 1000, depthCapPct: 2 } });
+    execution: { entryDeadlineSec: 20, exitPassiveSec: 20 }, risk: { minViableNotional: 1, maxOrderNotional: 1000, depthCapPct: 2 } });
   const createEngine = () => new Engine({ botId: config.id, config, adapter: venue, account: ACCOUNT, strategy: new KalshiCommoditiesStrategy(), signals,
     state, alerter: { send: async () => {} }, log, now: () => clock.now });
   const advance = async (engine: Engine, ms = 5000) => { clock.now += ms; await engine.supervisePredictions(); };

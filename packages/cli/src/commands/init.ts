@@ -673,7 +673,7 @@ export async function runInit(): Promise<void> {
       id: strategyId,
       config: strategyConfig,
     },
-    risk: strategyId === "kalshi-commodities" ? { ...existing?.risk, minDailyVolume: 0, depthCapPct: 2, minViableNotional: 1, maxOrderNotional: 100, slippagePct: 3 } : existing?.risk,
+    risk: strategyId === "kalshi-commodities" ? { ...existing?.risk, depthCapPct: 2, minViableNotional: 1, maxOrderNotional: 100, slippagePct: 3 } : existing?.risk,
     signals: strategyId === "kalshi-commodities" ? { ...existing?.signals, maxAgeSec: Number(strategyConfig.maxForecastAgeHours) * 3600 } : existing?.signals ?? {},
     execution: strategyId === "kalshi-commodities" ? { mode: "adaptive", entryDeadlineSec: strategyConfig.entryDeadlineSec, exitPassiveSec: strategyConfig.exitPassiveSec } : existing?.execution,
     alerts: { ...existing?.alerts, telegram },

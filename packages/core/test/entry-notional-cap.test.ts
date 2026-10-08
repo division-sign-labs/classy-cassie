@@ -92,7 +92,6 @@ function buildEngine(
     risk: {
       slippagePct: 10,
       depthCapPct: 100,
-      minDailyVolume: 10_000,
       minViableNotional: 1,
       maxOrderNotional: opts.maxOrderNotional ?? 1_000,
     },
@@ -167,43 +166,5 @@ describe("engine entry notional ceiling", () => {
     expect(venue.intents).toHaveLength(0);
     expect(strategy.results[0]).toEqual({ placed: false });
     expect(alerter.events.some((event) => event.kind === "skipped-order")).toBe(true);
-  });
-});
-
-describe("strategy exit volume handling", () => {
-  it("allows an exit below minDailyVolume while retaining slippage and depth checks", async () => {
-    const { engine, venue } = buildEngine(
-      { kind: "exit", marketRef: "deep-book", reason: "converged" },
-      { volume24h: 1 },
-    );
-    await venue.placeOrder(account, {
-      marketRef: "deep-book",
-      outcome: "YES",
-      side: "BUY",
-      size: 10,
-      limitPrice: 0.51,
-      tif: "IOC",
-      clientId: "seed-position",
-    });
-    venue.intents.length = 0;
-
-    const tick = await engine.tick();
-
-    expect(tick.ordersPlaced).toBe(1);
-    expect(venue.intents).toHaveLength(1);
-    expect(venue.intents[0]).toMatchObject({ side: "SELL", size: 10, limitPrice: 0.441 });
-  });
-
-  it("still blocks entries below minDailyVolume", async () => {
-    const { engine, venue, alerter } = buildEngine(
-      { kind: "enter", marketRef: "deep-book", side: "YES", notional: 25 },
-      { volume24h: 1 },
-    );
-
-    const tick = await engine.tick();
-
-    expect(tick.ordersPlaced).toBe(0);
-    expect(venue.intents).toHaveLength(0);
-    expect(alerter.events.some((event) => event.message.includes("minDailyVolume"))).toBe(true);
   });
 });

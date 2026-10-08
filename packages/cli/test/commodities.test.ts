@@ -56,7 +56,7 @@ describe("commodity CLI configuration and review", () => {
     h.load.mockReturnValue(bot("signals")); configureCommodities("commodities-test");
     expect(h.save).toHaveBeenCalledOnce();
     expect(h.save.mock.calls[0]![0]).toMatchObject({ strategy: { id: "kalshi-commodities", config: { assets: ["oil"], entryStyle: "marketable", grossCapPct: 10 } },
-      tickIntervalMin: 1, risk: { depthCapPct: 2, maxOrderNotional: 100, minDailyVolume: 0 }, execution: { mode: "adaptive", entryDeadlineSec: 20, exitPassiveSec: 20 } });
+      tickIntervalMin: 1, risk: { depthCapPct: 2, maxOrderNotional: 100 }, execution: { mode: "adaptive", entryDeadlineSec: 20, exitPassiveSec: 20 } });
     expect(h.creds).not.toHaveBeenCalled(); expect(h.control).not.toHaveBeenCalled(); expect(h.service).not.toHaveBeenCalled();
   });
 

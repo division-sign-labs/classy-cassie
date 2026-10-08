@@ -163,8 +163,8 @@ Every step happens in the terminal; you only leave it to copy-paste dashboard va
    remaining edge), and the optional time stop from the entry fill (`--max-hold-days`,
    default `unlimited`), evaluated in that precedence with one canonical reason per exit.
    `--scenario-exit off` holds every position to resolution. There is no take-profit price.
-   Existing bots keep saved settings. The optional 24h-volume floor (off by
-   default) and the minimum-notional floor apply to entries, never exits; exit slippage and executable depth still apply. An
+   Existing bots keep saved settings. The minimum-notional floor applies to entries,
+   never exits; exit slippage and executable depth still apply. An
    accepted entry stays reserved against market and event caps until the venue position or
    a resting order shows it, so a fill lag cannot admit a duplicate entry. The legacy
    `daily-budget` mode remains available; it defaults to
@@ -337,9 +337,8 @@ Notes:
 - Every order — strategy, manual, or thesis-driven — passes the risk module:
   slippage (percentage of book walk from the best price, default 3% — set per bot with
   `cassie strategy <botId> --slippage <pct>` or per order with `--slippage`), available
-  in-band depth, and min-viable-notional. The 24h volume floor (`risk.minDailyVolume`) is
-  off by default because the signal publisher screens liquidity; when set, it is entry
-  eligibility, not an exit veto. Existing bots keep their saved value. There is no additional
+  in-band depth, and min-viable-notional. There is no 24h volume floor: the signal
+  publisher screens liquidity. There is no additional
   depth-percentage cap by default. Skips
   raise alerts. There is no quoted-spread gate: a wide market with depth at the touch is
   tradable, because execution cost is bounded by the slippage band, not the quote.
@@ -655,7 +654,7 @@ skips its minimum and maximum entry-edge thresholds for the sports sleeve, inclu
 adaptive order supervision. Sports order prices stay capped at the admission ask or a
 lower explicit limit. Current Q and venue prices still determine Kelly sizing; a zero
 Kelly target produces no entry. Forecast age, liquidity, cash, and exposure limits
-still apply, plus a volume floor if one is configured. Other signal sleeves retain the configured edge thresholds.
+still apply. Other signal sleeves retain the configured edge thresholds.
 
 For sports markets with team names as outcomes, Cassie maps `sports.yes_side` to the
 venue tokens before selecting a side. The mapping also applies to held-market forecasts
@@ -830,8 +829,8 @@ saved maximum hold still applies.
 
 Kalshi notes: RSA API-key auth (key id + private key; no wallet, no gas); markets settle
 cash automatically at resolution, so there is no redeem step; quotes and orders convert
-between cassie's dollars-0–1 and Kalshi's integer cents at the adapter; the 24h volume
-the risk module sees is approximated from contract volume × mid.
+between cassie's dollars-0–1 and Kalshi's integer cents at the adapter; the quote's 24h
+volume is approximated from contract volume × mid.
 
 Lighter is not a supported venue. An adapter for it exists in the tree and `cassie init`
 does not offer it; `cassie deploy`, `cassie fund --from splits`, and `cassie withdraw`
@@ -909,7 +908,7 @@ week"* — an optional persona, and a bankroll. Each wake the bot:
    confidence bar; the stake is `buildPredictionSize` (min of fixed-fractional and
    quarter-Kelly) on `min(equity, budgetUsd)`, capped by bankroll headroom, the optional
    daily budget, and `maxPositions`. **No model-produced figure ever reaches an order**,
-   and the engine's risk module (slippage band, depth, volume floor, per-order cap) still
+   and the engine's risk module (slippage band, depth, per-order cap) still
    gates every placement.
 
 Prerequisites: a Quotient API key (research + persona) and **`SURPLUS_API_KEY`**

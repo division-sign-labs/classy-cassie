@@ -66,8 +66,6 @@ export interface ManualOrderParams {
   stopPx?: number;
   tpPx?: number;
   trailBps?: number;
-  /** Skip §9 volume-floor eligibility (still slippage/depth-capped). Manual override only. */
-  ignoreVolumeFloor?: boolean;
   /** Per-order slippage tolerance as a percentage from the touch; overrides risk.slippagePct. */
   slippagePct?: number;
   /**
@@ -494,7 +492,6 @@ export class Engine {
           side: orderSide,
           desiredSize: pos.size,
           reduceOnly: !isPrediction,
-          ignoreVolumeFloor: true,
           // The minimum-notional floor is an entry-only rule. A strategy exit
           // must be able to close a small position; slippage and depth still apply.
           enforceMinimumNotional: false,
@@ -619,7 +616,6 @@ export class Engine {
     tif?: "GTC" | "IOC" | "FOK";
     reduceOnly?: boolean;
     triggers?: { stopPx?: number; tpPx?: number };
-    ignoreVolumeFloor?: boolean;
     /** False for exits: the minimum-notional floor is an entry-only rule. */
     enforceMinimumNotional?: boolean;
     reason: string;
@@ -636,7 +632,7 @@ export class Engine {
     const desiredSize = p.desiredSize ?? (p.desiredNotional ?? 0) / refPrice;
     const enforceMinimumNotional = p.enforceMinimumNotional ?? true;
 
-    const risk = p.ignoreVolumeFloor ? { ...config.risk, minDailyVolume: 0 } : config.risk;
+    const risk = config.risk;
     const cap = checkCapacity({
       side: p.side,
       desiredSize,
@@ -823,7 +819,6 @@ export class Engine {
     const refPrice = p.limitPrice ?? quote.mid;
     const risk = {
       ...config.risk,
-      ...(p.ignoreVolumeFloor ? { minDailyVolume: 0 } : {}),
       ...(p.slippagePct !== undefined ? { slippagePct: p.slippagePct } : {}),
     };
     const cap = checkCapacity({ side: p.side, desiredSize: p.size, refPrice, book, quote, risk });
@@ -1028,7 +1023,6 @@ export class Engine {
         side: t.posSide === "SHORT" ? "BUY" : "SELL",
         desiredSize: pos.size,
         reduceOnly: !isPrediction,
-        ignoreVolumeFloor: true, // a firing stop must exit even in a quiet market
         enforceMinimumNotional: false,
         reason: `synthetic-${t.kind}`,
         alertKind: "exit",

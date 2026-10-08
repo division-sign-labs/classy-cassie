@@ -933,7 +933,7 @@ export class PerpExecutor {
     }
     if (!positive(notional)) return refuse("no notional headroom under the risk caps");
     const cap = checkCapacity({ side: long ? "BUY" : "SELL", desiredSize: notional / price, refPrice: price, book: m.book, quote: m.quote,
-      risk: { slippagePct, depthCapPct: 100, minDailyVolume: 100_000, minViableNotional: Math.max(10, m.instrument.minNotional), maxOrderNotional: notional, orderTtlSec: 900 } });
+      risk: { slippagePct, depthCapPct: 100, minViableNotional: Math.max(10, m.instrument.minNotional), maxOrderNotional: notional, orderTtlSec: 900 } });
     if (!cap.ok) return refuse(`capacity: ${cap.skipReasons.join("; ")}`);
     const step = 10 ** -m.instrument.szDecimals;
     const size = Math.floor(cap.size / step) * step;
@@ -989,7 +989,7 @@ export class PerpExecutor {
     }
     const slippagePct = urgent ? this.n("emergencyGapFraction", .02) * 100 : .5;
     const cap = checkCapacity({ side: buy ? "BUY" : "SELL", desiredSize: Math.min(size, p.size), refPrice: quote.mid, book, quote,
-      risk: { slippagePct, depthCapPct: 100, minDailyVolume: 0, minViableNotional: 0, maxOrderNotional: Number.MAX_SAFE_INTEGER, orderTtlSec: 300 }, enforceMinimumNotional: false });
+      risk: { slippagePct, depthCapPct: 100, minViableNotional: 0, maxOrderNotional: Number.MAX_SAFE_INTEGER, orderTtlSec: 300 }, enforceMinimumNotional: false });
     if (!cap.ok) { await this.alert("error", `Exit blocked by liquidity for ${c.marketRef}`, { reasons: cap.skipReasons }); return { placed: false }; }
     const passive = !urgent && (postOnly ?? true);
     const price = limitPrice ?? (passive ? (buy ? quote.bid : quote.ask) : cap.limitPrice);

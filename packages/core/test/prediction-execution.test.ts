@@ -1243,18 +1243,16 @@ describe("adaptive prediction execution", () => {
     expect(h.log.warn).toHaveBeenCalledWith("enter refused for yes: no refreshed signals yet");
     await h.executor.admit(enter(), []);
     expect(h.log.warn.mock.calls.filter(([message]) => String(message).startsWith("enter refused for yes"))).toHaveLength(1);
-    await h.ready(); h.config.risk.minDailyVolume = 1_000; h.setVolume(10);
-    expect(await h.executor.admit(enter(), [])).toEqual({ placed: false });
-    expect(h.log.warn).toHaveBeenCalledWith(expect.stringMatching(/^enter refused for yes: capacity: 24h volume/));
-    h.setVolume(100_000);
+    await h.ready();
+    expect(await h.executor.admit(enter({ minNotional: 1_000 }), [])).toEqual({ placed: false });
+    expect(h.log.warn).toHaveBeenCalledWith(expect.stringMatching(/^enter refused for yes: capacity: /));
     await h.executor.admit(enter(), []);
     expect(h.submissions).toHaveLength(1);
     expect((await h.executor.snapshot()).blocked).toBe(false);
   });
 
-  it("admits a thin market by default because the publisher screens liquidity", async () => {
+  it("admits a thin market; the signal publisher screens liquidity", async () => {
     const h = harness();
-    expect(h.config.risk.minDailyVolume).toBe(0);
     await h.ready(); h.setVolume(10);
     await h.executor.admit(enter(), []);
     expect(h.submissions).toHaveLength(1);

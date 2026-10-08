@@ -2,8 +2,8 @@
 
 The `signals` strategy for [cassie](https://www.npmjs.com/package/@quotient-forecasting/cassie).
 It follows published [Quotient](https://dev.quotient.social) forecasts. On prediction
-markets, it enters where a forecast diverges from the market price and holds to
-resolution. Take-profit and time limits are off by default.
+markets, it enters where a forecast diverges from the market price and holds while Q
+keeps its edge, selling on the first forecast that removes it. Time limits are off by default.
 
 The strategy has no position-count cap by default and ranks competing signals widest edge
 first. Quotient's published signals determine entry eligibility. There is no additional
@@ -25,20 +25,15 @@ The legacy `daily-budget` mode remains available. It caps cumulative entry notio
 or risk consumes only what it actually placed. The UTC reset replenishes entry capacity
 without closing anything.
 
-Prediction positions hold to resolution by default (`takeProfitPrice: null`,
-`maxHoldDays: null`). A rising price alone does not trigger an exit.
+A rising price alone does not trigger an exit; there is no take-profit price. An optional
+deadline is available with `--max-hold-days <days>` (`maxHoldDays: null` by default).
+Exits are position-driven: a stale or unpublished entry signal cannot suppress them.
+The minimum-notional floor never blocks a sell; executable slippage and depth still apply.
 
-Operators can enable an optional take-profit with `--take-profit-price <price>` or a
-deadline with `--max-hold-days <days>`. Existing bots keep saved settings;
-`--take-profit-price off --max-hold-days unlimited` disables both exits. These optional
-exits are position-driven: a stale or unpublished entry signal cannot suppress them.
-Neither the entry volume floor nor the minimum-notional floor blocks a sell;
-executable slippage and depth still apply.
+## Signal-exit state machine
 
-## Signal-exit state machine (opt-in)
-
-`scenarioExitEnabled: true` enables a confirmed state machine
-that reads the latest Q forecast for every held market on the five-minute forecast
+The state machine is on by default (`scenarioExitEnabled: true`; `--scenario-exit off`
+holds every position to resolution). It reads the latest Q forecast for every held market on the five-minute forecast
 cadence. Everything is measured on the contract actually held: for a NO position,
 Q, the midpoint, and the executable bid are all mirrored. The immutable entry Q is the
 published signal's held-side probability captured when the entry is accepted; it never
@@ -51,18 +46,16 @@ Exits are evaluated in this order and exactly one reason is emitted:
 1. `market_resolved` — redeem.
 2. `q_collapse` — held-side Q retreated at least 30pp from entry and remaining edge is at
    or below 0pp. Immediate, regardless of P&L.
-3. `adverse_cross` — remaining edge at or below 0pp, executable P&L at or below 0%, and two
-   distinct committed forecasts observed with the spread non-positive. A new forecast that
+3. `adverse_cross` — remaining edge at or below 0pp and executable P&L at or below 0%, on
+   one committed forecast by default (`adverseCrossConfirmations`). A new forecast that
    restores positive edge resets the run.
-4. `q_flip` — two consecutive distinct committed forecasts below 50% on the held side
-   confirm the flip, and the position is sold on confirmation at any remaining edge. A
-   forecast back above 50% resets the count. `flipExitMaxRemainingEdgePp` adds an optional
+4. `q_flip` — one committed forecast below 50% on the held side by default
+   (`flipConfirmations`) confirms the flip, and the position is sold on confirmation at any
+   remaining edge. A forecast back above 50% resets the count. `flipExitMaxRemainingEdgePp` adds an optional
    edge gate: with it set, a confirmed flip waits until remaining edge is at or below that
    many pp, and the confirmation is retained while Q stays flipped so a later market move
    can still trigger it. Replayed, the gate made no difference to returns.
-5. `take_profit` — when `takeProfitPrice` is set, the held outcome's executable best bid
-   is at or above that price, whatever edge the forecast still shows. Off by default (`null`).
-6. `time_stop` — when `maxHoldDays` is set, position age at or above that limit measured
+5. `time_stop` — when `maxHoldDays` is set, position age at or above that limit measured
    from the actual entry fill, regardless of P&L. Off by default (`null`).
 
 Executable P&L walks the held-side bids for the full position and deducts `exitFeeBps`.
@@ -75,12 +68,12 @@ with no visible order.
 
 Positions that predate the record are seeded from the active same-side signal when one
 exists; without an entry Q, the collapse branch stays off for that position while the
-adverse-cross, flip, take-profit, and time stop still apply.
+adverse-cross, flip, and time stop still apply.
 
 ```sh
-cassie strategy <botId> --scenario-exit on
-cassie strategy <botId> --take-profit-price off --adverse-cross-confirmations 2 \
-  --q-collapse-pp 30 --flip-confirmations 2 --flip-exit-max-remaining-edge-pp off --max-hold-days unlimited
+cassie strategy <botId> --scenario-exit off
+cassie strategy <botId> --adverse-cross-confirmations 1 \
+  --q-collapse-pp 30 --flip-confirmations 1 --flip-exit-max-remaining-edge-pp off --max-hold-days unlimited
 ```
 
 ## Hold-to-resolution preset
@@ -92,7 +85,7 @@ least 15pp of edge and no ceiling (`entrySpreadPp: 15`, `maxEntrySpreadPp: null`
 most 60 days to resolution (`maxWindowDays: 60`); sold only after two consecutive
 committed forecasts put Q on the other side of 50%, at any remaining edge
 (`flipConfirmations: 2`, `flipExitMaxRemainingEdgePp: null`); otherwise held to the
-payout (`takeProfitPrice: null`, `maxHoldDays: null`, `qCollapsePp: null`,
+payout (`maxHoldDays: null`, `qCollapsePp: null`,
 `adverseCrossConfirmations: null`). A market that resolves within the near-resolution
 window is not sized down (`nearResolutionDays: null`).
 
@@ -102,8 +95,7 @@ with open lots marked (95% range +4.3 to +36.0), +17.7% on the last three weeks 
 about 1.3 lots a day, a lot held 8 days at the median. The literal rule, every signal a
 lot and a one-forecast flip, made +1.5% per lot because repeat signals piled into a few
 markets; the three changes above are the ones that held in both halves of the tape. The
-90c take-profit and the 7-day cap lower the mean on this book, so the preset turns them
-off; the 15pp floor is where the marginal lot stops losing money, and above 20pp the book
+90c take-profit and the 7-day cap lower the mean on this book, so the preset has neither; the 15pp floor is where the marginal lot stops losing money, and above 20pp the book
 gets too thin to trade daily.
 
 ```sh
@@ -137,11 +129,11 @@ cassie strategy <botId> --allocation-mode portfolio-kelly \
 cassie strategy <botId> --near-resolution-days 3 --near-resolution-size-cut-pct 25
 cassie strategy <botId> --daily-budget 100 --position-budget-pct 25
 cassie strategy <botId> --max-entry-edge unlimited
-cassie strategy <botId> --scenario-exit on
+cassie strategy <botId> --scenario-exit off
 cassie strategy <botId> --preset hold
 ```
 
-Every entry still passes the engine's per-order, liquidity, slippage, and volume guardrails.
+Every entry still passes the engine's per-order, liquidity, and slippage guardrails.
 Cassie does not cap the quoted bid/ask spread.
 
 [Source](https://github.com/Quotient-Solutions-Inc/classy-cassie) ·

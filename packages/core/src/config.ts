@@ -33,8 +33,6 @@ export const RiskConfigSchema = z.preprocess(
     slippagePct: z.number().positive().max(100).default(3),
     /** Cap order size at this % of executable depth within the band. Defaults to no extra cap. */
     depthCapPct: z.number().positive().max(100).default(100),
-    /** Optional market eligibility floor: 24h volume in USD. Off by default; the signal publisher screens liquidity. */
-    minDailyVolume: z.number().nonnegative().default(0),
     /** Skip rather than dribble below this notional. */
     minViableNotional: z.number().nonnegative().default(1),
     /** Hard cap per order, USD notional. */

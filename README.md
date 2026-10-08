@@ -240,7 +240,7 @@ Q collapse of 30pp or more from entry (`--q-collapse-pp`). Otherwise they hold t
 `--max-hold-days <days>` adds an optional deadline (`unlimited` by default) and
 `--scenario-exit off` holds every position to resolution. There is no take-profit price.
 Existing bots keep saved settings.
-Low 24-hour volume never blocks an exit; executable depth and slippage still bound it.
+Executable depth and slippage bound every exit.
 
 ```sh
 cassie strategy <botId> --preset recommended
@@ -320,7 +320,6 @@ thesis ticket:
 
 - Executable size within a slippage band from the best executable price, 3% by default.
 - Order size capped at available in-band depth and at a per-order notional cap.
-- Entry eligibility: an optional 24-hour volume floor, off by default because the signal publisher screens liquidity. Exits ignore this volume floor.
 - A minimum viable notional, so a capped order is skipped rather than dribbled out.
 - A TTL that re-prices or cancels a resting remainder.
 
