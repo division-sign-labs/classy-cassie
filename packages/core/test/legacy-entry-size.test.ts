@@ -40,11 +40,12 @@ class MinimumVenue extends FixtureVenue {
   }
 }
 
-function setup(notional: number, side: "YES" | "NO" = "YES") {
+function setup(notional: number, side: "YES" | "NO" = "YES", action: Action = { kind: "enter", marketRef: "market", side, notional, reason: "top-up" }) {
   const venue = new MinimumVenue();
   const results: StrategyActionResult[] = [];
   const alerts: AlertEvent[] = [];
-  const action: Action = { kind: "enter", marketRef: "market", side, notional, reason: "top-up" };
+  const warnings: string[] = [];
+  let now = 1000;
   const strategy: Strategy = {
     id: "signals",
     tick: async () => [action],
@@ -58,20 +59,42 @@ function setup(notional: number, side: "YES" | "NO" = "YES") {
   const engine = new Engine({
     botId: config.id, config, adapter: venue, account, strategy,
     signals: { latest: async () => [] }, state: new MemoryStateStore(),
-    alerter: { send: async event => { alerts.push(event); } }, log: silentLogger, now: () => 1000,
+    alerter: { send: async event => { alerts.push(event); } },
+    log: { ...silentLogger, warn: (message: string) => { warnings.push(message); } }, now: () => now,
   });
-  return { engine, venue, results, alerts };
+  return { engine, venue, results, alerts, warnings, advance: (ms: number) => { now += ms; } };
 }
 
 describe("legacy prediction entry quantities", () => {
-  it("skips a dollar-eligible top-up below the live share minimum without submitting or recording an error", async () => {
+  it("skips a dollar-eligible top-up below the live share minimum without submitting, recording an error, or alerting", async () => {
     const h = setup(1.5);
     expect(await h.engine.tick()).toMatchObject({ ordersPlaced: 0, errors: 0 });
     expect(h.venue.intents).toEqual([]);
     expect(h.results).toEqual([{ placed: false }]);
-    expect(h.alerts).toContainEqual(expect.objectContaining({
-      kind: "skipped-order", message: expect.stringContaining("below venue minimum 5"),
-    }));
+    expect(h.alerts.filter(alert => alert.kind === "skipped-order")).toEqual([]);
+    expect(h.warnings).toEqual([expect.stringContaining("below venue minimum 5")]);
+  });
+
+  it("logs a repeated below-minimum top-up every five minutes, not on every tick", async () => {
+    const h = setup(1.2);
+    for (let i = 0; i < 10; i += 1) {
+      await h.engine.tick();
+      h.advance(60_000);
+    }
+    expect(h.venue.intents).toEqual([]);
+    expect(h.alerts.filter(alert => alert.kind === "skipped-order")).toEqual([]);
+    expect(h.warnings.filter(message => message.includes("below venue minimum 5"))).toHaveLength(2);
+  });
+
+  it("holds a position below the share minimum instead of submitting an exit the venue refuses", async () => {
+    const h = setup(0, "YES", { kind: "exit", marketRef: "market", reason: "q-flip", urgent: true });
+    await h.venue.placeOrder(account, { marketRef: "market", outcome: "YES", side: "BUY", size: 2.34, limitPrice: 0.51, tif: "IOC", clientId: "seed" });
+    h.venue.intents.length = 0;
+    expect(await h.engine.tick()).toMatchObject({ ordersPlaced: 0, errors: 0 });
+    expect(h.venue.intents).toEqual([]);
+    expect(h.results).toEqual([{ placed: false }]);
+    expect(h.alerts.filter(alert => alert.kind === "skipped-order" || alert.kind === "error")).toEqual([]);
+    expect(h.warnings).toEqual([expect.stringContaining("SELL market: size 2.34 is below venue minimum 5")]);
   });
 
   it("admits the minimum whole lot without rounding a smaller request up", async () => {

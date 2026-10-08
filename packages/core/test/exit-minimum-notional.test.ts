@@ -1,7 +1,7 @@
 // packages/core/test/exit-minimum-notional.test.ts
 // The minimum-notional floor is entry-only: a strategy SELL below it is still
 // submitted (slippage and depth checks intact), an entry BUY below it is
-// skipped, and a venue-native rejection of genuinely untradeable dust is
+// skipped without an alert, and a venue-native rejection of genuinely untradeable dust is
 // reported under its own error code.
 
 import { describe, expect, it } from "vitest";
@@ -109,6 +109,10 @@ describe("checkCapacity minimum-notional mode", () => {
     const res = checkCapacity({ side: "SELL", desiredSize: 4, refPrice: 0.49, book, quote, risk });
     expect(res.ok).toBe(false);
     expect(res.skipReasons.join()).toMatch(/minimum notional \$5/);
+    expect(res.belowMinimum).toBe(true);
+    const empty = checkCapacity({ side: "SELL", desiredSize: 4, refPrice: 0.49, book: { ...book, bids: [] }, quote, risk });
+    expect(empty.ok).toBe(false);
+    expect(empty.belowMinimum).toBeUndefined();
   });
 
   it("lets an exit through below the floor while keeping slippage and depth checks", () => {
@@ -153,7 +157,7 @@ describe("engine exits below the entry floor", () => {
 
     expect(tick.ordersPlaced).toBe(0);
     expect(venue.intents).toHaveLength(0);
-    expect(events.some((event) => event.kind === "skipped-order" && /minimum notional \$5/.test(event.message))).toBe(true);
+    expect(events.some((event) => event.kind === "skipped-order")).toBe(false);
   });
 
   it.each(["throw", "ack"] as const)("reports a venue dust rejection distinctly (%s)", async (mode) => {

@@ -36,6 +36,8 @@ export interface CapacityResult {
   capped: boolean;
   skipReasons: string[];
   notes: string[];
+  /** The only skip reason is the minimum notional: a non-event, not a failure. */
+  belowMinimum?: boolean;
 }
 
 /**
@@ -94,7 +96,8 @@ export function checkCapacity(input: CapacityInput): CapacityResult {
   }
 
   if (skipReasons.length > 0) {
-    return { ok: false, size: 0, limitPrice, bandDepth, capped, skipReasons, notes };
+    const belowMinimum = bandDepth > 0 && skipReasons.length === 1;
+    return { ok: false, size: 0, limitPrice, bandDepth, capped, skipReasons, notes, ...(belowMinimum ? { belowMinimum } : {}) };
   }
   return { ok: true, size, limitPrice, bandDepth, capped, skipReasons, notes };
 }

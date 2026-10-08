@@ -165,6 +165,6 @@ describe("engine entry notional ceiling", () => {
     expect(tick.ordersPlaced).toBe(0);
     expect(venue.intents).toHaveLength(0);
     expect(strategy.results[0]).toEqual({ placed: false });
-    expect(alerter.events.some((event) => event.kind === "skipped-order")).toBe(true);
+    expect(alerter.events.some((event) => event.kind === "skipped-order")).toBe(false);
   });
 });

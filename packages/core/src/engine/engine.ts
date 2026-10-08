@@ -38,6 +38,7 @@ import { PerpExecutor, isProtectiveOrder } from "./perp-execution.js";
 import { PredictionExecutor, assertPredictionExecutionSettled } from "./prediction-execution.js";
 import { positionMarketValue } from "../portfolio.js";
 import { isRateLimitError } from "../venues/transient.js";
+import { RefusalLog } from "./refusal-log.js";
 
 export interface ArmedTrigger {
   marketRef: string;
@@ -212,6 +213,11 @@ function isAdvanceable(s: SignalSource): s is SignalSource & AdvanceableSource {
   return typeof (s as Partial<AdvanceableSource>).advance === "function";
 }
 
+type MinimumSkipOrder = { marketRef: string; outcome?: "YES" | "NO"; side: OrderSide };
+function minimumSkipKey(p: MinimumSkipOrder): string {
+  return `${p.side}:${p.marketRef}:${p.outcome ?? ""}`;
+}
+
 export class Engine {
   private readonly d: EngineDeps;
   private readonly now: () => number;
@@ -225,10 +231,13 @@ export class Engine {
   private triggerCheck?: Promise<void>;
   private readonly redemptions = new Map<string, Promise<number>>();
   private redemptionsStopping = false;
+  /** Orders below a venue or notional minimum: logged, never alerted. */
+  private readonly minimumSkips: RefusalLog;
 
   constructor(deps: EngineDeps) {
     this.d = deps;
     this.now = deps.now ?? (() => Date.now());
+    this.minimumSkips = new RefusalLog(deps.log, this.now);
     if (deps.config.strategy.id === "quotient-swing") this.perps = new PerpExecutor({ ...deps, config: deps.config.strategy.config });
     if ((deps.config.venue === "polymarket" && ["signals", "flip-flat"].includes(deps.config.strategy.id) && deps.config.execution?.mode !== "legacy")
       || (deps.config.venue === "kalshi" && deps.config.strategy.id === "kalshi-commodities")) {
@@ -655,6 +664,7 @@ export class Engine {
         enforceMinimumNotional,
       });
     if (!cap.ok) {
+      if (cap.belowMinimum) return this.skipBelowMinimum(p, cap.skipReasons.join("; "));
       await this.alert({
         kind: "skipped-order",
         botId,
@@ -680,15 +690,19 @@ export class Engine {
     // A market exit's limit is only a floor; the venue fills it at the resting bids.
     const placedNotional = size * (p.market && quote.bid > 0 ? quote.bid : limitPrice);
     const effectiveMinimumNotional = Math.max(risk.minViableNotional, p.minimumNotional ?? 0);
-    if (p.side === "BUY" && enforceMinimumNotional && minOrderSize !== undefined &&
-      (!Number.isFinite(minOrderSize) || minOrderSize <= 0 || size + 1e-9 < minOrderSize)) {
+    const knownMinimum = minOrderSize !== undefined && Number.isFinite(minOrderSize) && minOrderSize > 0;
+    // The venue refuses any order below its share minimum, exits included.
+    if (knownMinimum && size + 1e-9 < minOrderSize) {
+      return this.skipBelowMinimum(p, `size ${size} is below venue minimum ${minOrderSize}`);
+    }
+    if (p.side === "BUY" && enforceMinimumNotional && minOrderSize !== undefined && !knownMinimum) {
       await this.alert({
         kind: "skipped-order",
         botId,
-        message: `skipped BUY ${shortRef(p.marketRef)}: size ${size} is below venue minimum ${minOrderSize}`,
+        message: `skipped BUY ${shortRef(p.marketRef)}: venue minimum ${minOrderSize} is not usable`,
         ...this.baseAlert(),
         market: this.alertMarket(p.marketRef, p.outcome),
-        reason: `size ${size} is below venue minimum ${minOrderSize}`,
+        reason: `venue minimum ${minOrderSize} is not usable`,
       });
       return { placed: false };
     }
@@ -696,20 +710,11 @@ export class Engine {
       entrySpendCeiling !== undefined &&
       (size <= 0 || placedNotional < effectiveMinimumNotional)
     ) {
-      const reason =
-        size <= 0
-          ? "entry size rounds to zero at the final limit price"
-          : `capped notional $${placedNotional.toFixed(2)} < minimum notional $${effectiveMinimumNotional} — skip rather than dribble`;
-      await this.alert({
-        kind: "skipped-order",
-        botId,
-        message: `skipped ${p.side} ${shortRef(p.marketRef)}: ${reason}`,
-        ...this.baseAlert(),
-        market: this.alertMarket(p.marketRef, p.outcome),
-        reason,
-      });
-      return { placed: false };
+      return this.skipBelowMinimum(p, size <= 0
+        ? "entry size rounds to zero at the final limit price"
+        : `capped notional $${placedNotional.toFixed(2)} < minimum notional $${effectiveMinimumNotional} — skip rather than dribble`);
     }
+    this.minimumSkips.resolve(minimumSkipKey(p));
     const entrySizeCapped = entrySpendCeiling !== undefined && size < cap.size;
     const intent: OrderIntent = {
       marketRef: p.marketRef,
@@ -1194,6 +1199,15 @@ export class Engine {
   // -------------------------------------------------------------------------
   // Errors and alerts (§14): structured error table + deduped Telegram alert
   // -------------------------------------------------------------------------
+
+  /**
+   * An order below a minimum is not an order. The strategy asks again on every
+   * tick, so log the reason once per market and send no alert.
+   */
+  private skipBelowMinimum(p: MinimumSkipOrder, reason: string): StrategyActionResult {
+    this.minimumSkips.refuse(minimumSkipKey(p), `skipped ${p.side} ${shortRef(p.marketRef)}: ${reason}`);
+    return { placed: false };
+  }
 
   private async alert(event: AlertEvent): Promise<void> {
     try {
