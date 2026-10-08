@@ -31,7 +31,7 @@ describe("checkCapacity (§9)", () => {
     const res = checkCapacity({ side: "BUY", desiredSize: 90, refPrice: 0.55, book, quote: quote(), risk });
     expect(risk.slippagePct).toBe(3);
     expect(risk.depthCapPct).toBe(100);
-    expect(risk.minDailyVolume).toBe(1_000);
+    expect(risk.minDailyVolume).toBe(0);
     expect(res.limitPrice).toBeCloseTo(0.5768, 10);
     expect(res.size).toBe(90);
     expect(res.capped).toBe(false);
@@ -90,12 +90,19 @@ describe("checkCapacity (§9)", () => {
     expect(res.skipReasons).toHaveLength(0);
   });
 
-  it("skips when 24h volume is below the floor", () => {
-    const risk = RiskConfigSchema.parse({ slippagePct: 3 });
+  it("skips when 24h volume is below a configured floor", () => {
+    const risk = RiskConfigSchema.parse({ slippagePct: 3, minDailyVolume: 1_000 });
     const res = checkCapacity({ side: "BUY", desiredSize: 10, refPrice: 0.55, book, quote: quote(999), risk });
     expect(res.ok).toBe(false);
     expect(res.size).toBe(0);
     expect(res.skipReasons.join(" ")).toMatch(/volume/);
+  });
+
+  it("applies no volume floor by default", () => {
+    const risk = RiskConfigSchema.parse({});
+    const res = checkCapacity({ side: "BUY", desiredSize: 10, refPrice: 0.55, book, quote: quote(10), risk });
+    expect(res.ok).toBe(true);
+    expect(res.skipReasons).toHaveLength(0);
   });
 
   it("skips rather than dribbles below minViableNotional", () => {

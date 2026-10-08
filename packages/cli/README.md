@@ -334,8 +334,9 @@ Nothing secret goes into droplet user-data, into a command line, or into a log.
 
 Every order — strategy, manual, or thesis — passes engine-enforced limits: a 3% slippage band
 from the best executable price, available in-band liquidity, a per-order notional cap, a
-minimum viable size, and a TTL that re-prices or cancels a resting remainder. The 24-hour
-volume floor is entry eligibility and does not veto exits. Skipped orders raise an alert
+minimum viable size, and a TTL that re-prices or cancels a resting remainder. The optional
+24-hour volume floor is off by default, because the signal publisher screens liquidity; when
+set, it is entry eligibility and does not veto exits. Skipped orders raise an alert
 saying which limit stopped them.
 
 The strategy has no position-count cap by default. `cassie strategy <bot>` shows the
@@ -350,8 +351,8 @@ Prediction positions hold to resolution by default, with no take-profit or time 
 Optional exits are available through `--take-profit-price` (default `off`) and
 `--max-hold-days` (default `unlimited`). Existing bots keep saved settings; use
 `--take-profit-price off --max-hold-days unlimited` to disable both exits.
-The 24-hour volume floor remains an entry filter but never blocks an exit; exit slippage
-and executable depth still apply.
+An optional 24-hour volume floor, when set, filters entries but never blocks an exit; exit
+slippage and executable depth still apply.
 
 Use `--kelly-fraction`, `--market-cap-pct`, or `--event-cap-pct` to tune that allocator;
 any of those flags selects `portfolio-kelly`. The legacy fixed daily allowance remains

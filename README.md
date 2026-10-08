@@ -317,7 +317,7 @@ thesis ticket:
 
 - Executable size within a slippage band from the best executable price, 3% by default.
 - Order size capped at available in-band depth and at a per-order notional cap.
-- Entry eligibility: a 24-hour volume floor, $1k by default. Exits ignore this volume floor.
+- Entry eligibility: an optional 24-hour volume floor, off by default because the signal publisher screens liquidity. Exits ignore this volume floor.
 - A minimum viable notional, so a capped order is skipped rather than dribbled out.
 - A TTL that re-prices or cancels a resting remainder.
 

@@ -164,8 +164,8 @@ Every step happens in the terminal; you only leave it to copy-paste dashboard va
    take-profit, optional time stop from the entry fill), evaluated in that
    precedence with one canonical reason per exit; it is off
    unless an operator turns it on. A configured take-profit applies to every position
-   the same way whatever the market's resolution date. The 24h-volume floor and the minimum-notional floor
-   apply to entries, never exits; exit slippage and executable depth still apply. An
+   the same way whatever the market's resolution date. The optional 24h-volume floor (off by
+   default) and the minimum-notional floor apply to entries, never exits; exit slippage and executable depth still apply. An
    accepted entry stays reserved against market and event caps until the venue position or
    a resting order shows it, so a fill lag cannot admit a duplicate entry. The legacy
    `daily-budget` mode remains available; it defaults to
@@ -338,8 +338,9 @@ Notes:
 - Every order — strategy, manual, or thesis-driven — passes the risk module:
   slippage (percentage of book walk from the best price, default 3% — set per bot with
   `cassie strategy <botId> --slippage <pct>` or per order with `--slippage`), available
-  in-band depth, and min-viable-notional. The 24h volume floor ($1k) is entry eligibility,
-  not an exit veto. There is no additional
+  in-band depth, and min-viable-notional. The 24h volume floor (`risk.minDailyVolume`) is
+  off by default because the signal publisher screens liquidity; when set, it is entry
+  eligibility, not an exit veto. Existing bots keep their saved value. There is no additional
   depth-percentage cap by default. Skips
   raise alerts. There is no quoted-spread gate: a wide market with depth at the touch is
   tradable, because execution cost is bounded by the slippage band, not the quote.
@@ -654,8 +655,8 @@ Published sports signals use the publisher's edge screening. The `signals` strat
 skips its minimum and maximum entry-edge thresholds for the sports sleeve, including
 adaptive order supervision. Sports order prices stay capped at the admission ask or a
 lower explicit limit. Current Q and venue prices still determine Kelly sizing; a zero
-Kelly target produces no entry. Forecast age, liquidity, volume, cash, and exposure
-limits still apply. Other signal sleeves retain the configured edge thresholds.
+Kelly target produces no entry. Forecast age, liquidity, cash, and exposure limits
+still apply, plus a volume floor if one is configured. Other signal sleeves retain the configured edge thresholds.
 
 For sports markets with team names as outcomes, Cassie maps `sports.yes_side` to the
 venue tokens before selecting a side. The mapping also applies to held-market forecasts
