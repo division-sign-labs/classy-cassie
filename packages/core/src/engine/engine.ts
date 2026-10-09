@@ -39,6 +39,7 @@ import { PredictionExecutor, assertPredictionExecutionSettled } from "./predicti
 import { positionMarketValue } from "../portfolio.js";
 import { isRateLimitError } from "../venues/transient.js";
 import { RefusalLog } from "./refusal-log.js";
+import { SportsHoldGuard, SPORTS_HOLD_REASON } from "./sports-hold.js";
 
 export interface ArmedTrigger {
   marketRef: string;
@@ -233,15 +234,17 @@ export class Engine {
   private redemptionsStopping = false;
   /** Orders below a venue or notional minimum: logged, never alerted. */
   private readonly minimumSkips: RefusalLog;
+  private readonly sportsHold: SportsHoldGuard;
 
   constructor(deps: EngineDeps) {
     this.d = deps;
     this.now = deps.now ?? (() => Date.now());
+    this.sportsHold = new SportsHoldGuard({ ...deps, now: this.now });
     this.minimumSkips = new RefusalLog(deps.log, this.now);
     if (deps.config.strategy.id === "quotient-swing") this.perps = new PerpExecutor({ ...deps, config: deps.config.strategy.config });
     if ((deps.config.venue === "polymarket" && ["signals", "flip-flat"].includes(deps.config.strategy.id) && deps.config.execution?.mode !== "legacy")
       || (deps.config.venue === "kalshi" && deps.config.strategy.id === "kalshi-commodities")) {
-      this.predictions = new PredictionExecutor(deps);
+      this.predictions = new PredictionExecutor({ ...deps, sportsHold: this.sportsHold });
     }
   }
 
@@ -441,6 +444,11 @@ export class Engine {
     this.rememberTitles(positions);
     const collateral = balances.reduce((s, b) => s + b.total, 0);
     const posValue = positions.reduce((s, p) => s + positionMarketValue(p), 0);
+    const lifecycleRefs = [...positions.map(p => p.marketRef), ...openOrders.map(o => o.marketRef)];
+    if (this.sportsHold.enabled) {
+      const currentSignals = await signals.latest({ venue: config.venue }).catch(() => []);
+      await this.sportsHold.refresh(lifecycleRefs, currentSignals);
+    }
     return {
       botId,
       venueId: adapter.id,
@@ -448,6 +456,7 @@ export class Engine {
       signals,
       venue: this.readApi(),
       positions,
+      sportsHolds: lifecycleRefs.filter(ref => this.sportsHold.isHeld(ref)),
       openOrders,
       equity: adapter.id === "hyperliquid" ? collateral : collateral + posValue,
       ...(this.predictions ? { execution: await this.predictions.snapshot() } : {}),
@@ -463,6 +472,13 @@ export class Engine {
 
   private async executeAction(action: Action, ctx: StrategyContext): Promise<StrategyActionResult> {
     if (this.perps) return this.perps.execute(action);
+    if ((action.kind === "enter" || action.kind === "exit") && this.sportsHold.enabled) {
+      await this.sportsHold.refresh([action.marketRef]);
+      if (this.sportsHold.isHeld(action.marketRef)) {
+        this.d.log.info(`${action.kind} deferred for ${action.marketRef}: ${SPORTS_HOLD_REASON}`);
+        return { placed: false };
+      }
+    }
     if (this.predictions && (action.kind === "enter" || action.kind === "exit")) {
       return this.predictions.admit(action, ctx.positions);
     }
@@ -973,6 +989,7 @@ export class Engine {
     const triggers = await this.loadTriggers();
     if (triggers.length === 0) return;
     const positions = await this.d.adapter.positions(this.d.account);
+    await this.sportsHold.refresh(triggers.map(t => t.marketRef));
     this.rememberTitles(positions);
     const execution = await this.predictions?.snapshot();
     const remaining: ArmedTrigger[] = [];
@@ -1004,6 +1021,7 @@ export class Engine {
         }
       }
       if (!pos || (pos.size <= 0 && !unresolved)) continue;
+      if (isPrediction && this.sportsHold.isHeld(t.marketRef)) { remaining.push(t); continue; }
       // Both YES and NO are held long in their own token price space.
       const bullish = t.posSide !== "SHORT";
       let fired = t.firedAt !== undefined;

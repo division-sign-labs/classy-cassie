@@ -26,6 +26,17 @@ afterEach(() => {
 });
 
 describe("signals recommended allocation", () => {
+  it("saves and displays the sports hold policy without changing the Q exit settings", async () => {
+    const root = mkdtempSync(join(tmpdir(), "cassie-sports-hold-")); roots.push(root); process.env.CASSIE_HOME = root;
+    saveBotConfig(parseBotConfig({ id: "sports", venue: "polymarket", strategy: { id: "signals", config: { scenarioExitEnabled: true, flipConfirmations: 2 } } }));
+    const lines: string[] = []; vi.spyOn(console, "log").mockImplementation((...parts) => { lines.push(parts.map(String).join(" ")); });
+    await runStrategy("sports", { sportsHoldAfterStart: "on" });
+    expect(loadBotConfig("sports").strategy.config).toMatchObject({ sportsHoldAfterStart: true, scenarioExitEnabled: true, flipConfirmations: 2 });
+    expect(lines.join("\n")).toMatch(/sports after kickoff:\s+hold to settlement/);
+    await runStrategy("sports", { sportsHoldAfterStart: "off" });
+    expect(loadBotConfig("sports").strategy.config.sportsHoldAfterStart).toBe(false);
+    await expect(runStrategy("sports", { sportsHoldAfterStart: "maybe" })).rejects.toThrow(/on or off/);
+  });
   it("uses quarter Kelly with a 5% event cap on prediction venues", async () => {
     const recommended = await elicitRecommendedStrategyConfig({}, "polymarket");
 

@@ -30,6 +30,18 @@ function forecast(over: Partial<MarketForecast> = {}): MarketForecast {
 }
 
 describe("PollingSignalSource", () => {
+  it("caches sports lifecycle separately from usable Q and retains it through an outage", async () => {
+    let now = 1000;
+    const upstream = { latest: vi.fn(async () => []), forecasts: vi.fn(async (): Promise<MarketForecast[]> => []),
+      marketMetadata: vi.fn(async () => [{ marketRef: "market-1", sports: { kickoffAt: 50_000 } }]) };
+    const source = new PollingSignalSource(upstream, 300_000, { now: () => now });
+    const query = { venue: "polymarket" as const, marketRefs: ["market-1"] };
+    expect(await source.marketMetadata(query)).toEqual([{ marketRef: "market-1", sports: { kickoffAt: 50_000 } }]);
+    await source.forecasts(query); now += 60_000; await source.marketMetadata(query);
+    expect(upstream.forecasts).toHaveBeenCalledTimes(1); expect(upstream.marketMetadata).toHaveBeenCalledTimes(1);
+    upstream.forecasts.mockRejectedValue(new Error("offline")); now += 300_000;
+    expect(await source.marketMetadata(query)).toEqual([{ marketRef: "market-1", sports: { kickoffAt: 50_000 } }]);
+  });
   it("refreshes once per interval and filters the cached snapshot", async () => {
     let now = 1_000;
     const upstream = {

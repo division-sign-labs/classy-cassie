@@ -29,6 +29,8 @@ export const QUOTIENT_LOOKUP_BATCH_LIMIT = 10;
 
 /** Sports probabilities refer to this named outcome, which may be the second venue token. */
 export const QuotientSportsSchema = z.object({
+  game_key: z.string().nullish(),
+  kickoff_at: z.string().nullish(),
   yes_side: z.object({
     name: z.string().nullish(),
     canonical_name: z.string().nullish(),
@@ -81,7 +83,7 @@ export interface QuotientMarketRow {
   endDate?: string;
   conditionId?: string;
   nativeMarketId?: string;
-  sports?: { yesSideName?: string; yesSideCanonicalName?: string };
+  sports?: { yesSideName?: string; yesSideCanonicalName?: string; gameKey?: string; kickoffAt?: string };
 }
 
 function mapRow(raw: unknown): QuotientMarketRow | null {
@@ -107,6 +109,8 @@ function mapRow(raw: unknown): QuotientMarketRow | null {
     conditionId: r.condition_id ?? undefined,
     nativeMarketId: r.nativeMarketId ?? undefined,
     ...(r.sports ? { sports: {
+      gameKey: r.sports.game_key ?? undefined,
+      kickoffAt: r.sports.kickoff_at ?? undefined,
       yesSideName: r.sports.yes_side?.name ?? undefined,
       yesSideCanonicalName: r.sports.yes_side?.canonical_name ?? undefined,
     } } : {}),

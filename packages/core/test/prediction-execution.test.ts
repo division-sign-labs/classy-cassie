@@ -3,6 +3,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { PredictionExecutor, PREDICTION_EXECUTION_KEY, assertPredictionExecutionSettled } from "../src/engine/prediction-execution.js";
 import { BotConfigSchema, PredictionExecutionConfigSchema } from "../src/config.js";
 import { MemoryStateStore } from "../src/state.js";
+import { SportsHoldGuard } from "../src/engine/sports-hold.js";
 import type { Action, Fill, Order, OrderIntent, OrderLifecycleHooks, Position, PredictionExecutionMarket, PredictionOrderState, Signal, VenueAccount, VenueAdapter } from "../src/types.js";
 
 const NOW = Date.UTC(2026, 8, 4, 12);
@@ -90,7 +91,9 @@ function harness(strategy: Record<string, unknown> = {}, execution?: Record<stri
     }),
   };
   const deps = { botId: "limits", adapter: adapter as unknown as VenueAdapter, account: ACCOUNT, state, config, log, alerter, now: () => now };
-  let executor = new PredictionExecutor(deps);
+  const sportsHold = new SportsHoldGuard({ ...deps, signals: { latest: async () => [] } });
+  const guardedDeps = { ...deps, sportsHold };
+  let executor = new PredictionExecutor(guardedDeps);
   async function ready(side: "YES" | "NO" = "YES") { await executor.supervise({ signals: [signal(side)], refreshedAt: now }); }
   function fill(orderId: string, quantity: number, status: NonNullable<Fill["settlementStatus"]> = "CONFIRMED", id = `trade-${fills.length}`, price?: number) {
     const order = orders.get(orderId);
@@ -114,7 +117,7 @@ function harness(strategy: Record<string, unknown> = {}, execution?: Record<stri
   }
   return { adapter, state, submissions, orders, history, fills, trace, config, log, alerter, positions, ready, fill, market,
     get executor() { return executor; }, now: () => now, advance: (ms: number) => { now += ms; },
-    restart: () => { executor = new PredictionExecutor(deps); return executor; },
+    restart: () => { executor = new PredictionExecutor(guardedDeps); return executor; },
     setBook: (nextBid: number, nextAsk: number, depth = 10000) => { bid = nextBid; ask = nextAsk; askDepth = depth; },
     setHeld: (qty: number, token = "yes") => { tokenHoldings.set(token, qty); },
     setCash: (value: number) => { cash = value; }, setVolume: (value: number) => { volume = value; },
@@ -126,6 +129,43 @@ function harness(strategy: Record<string, unknown> = {}, execution?: Record<stri
 
 describe("adaptive prediction execution", () => {
   afterEach(() => { vi.useRealTimers(); });
+
+  it("cancels a resting sports SELL at kickoff and does not replace it after restart", async () => {
+    const h = harness(); h.setHeld(96);
+    const sports: Signal = { id: "sports", venue: "polymarket", marketRef: "yes", side: "YES", sleeve: "sports", sports: { kickoffAt: NOW + 5000 }, prob: .76, refPrice: .55, ts: new Date(NOW).toISOString(), ttlSec: 10800 };
+    await h.executor.supervise({ signals: [sports], refreshedAt: h.now() });
+    await h.executor.admit({ kind: "exit", marketRef: "yes" }, h.positions());
+    expect(h.submissions).toHaveLength(1); expect(h.orders.size).toBe(1);
+    h.advance(5000); await h.restart().recover(); await h.executor.supervise({ signals: [] });
+    expect(h.orders.size).toBe(0); expect(h.submissions).toHaveLength(1);
+    expect(await h.executor.admit({ kind: "exit", marketRef: "yes", urgent: true }, h.positions())).toEqual({ placed: false });
+    expect((await h.executor.snapshot()).parents[0]!.cancelReason).toMatch(/sports hold/);
+  });
+
+  it("clears a queued urgent sports exit at kickoff instead of replaying it", async () => {
+    const h = harness();
+    const sports: Signal = { id: "sports", venue: "polymarket", marketRef: "yes", side: "YES", sleeve: "sports", sports: { kickoffAt: NOW + 5000 }, prob: .76, refPrice: .55, ts: new Date(NOW).toISOString(), ttlSec: 10800 };
+    await h.executor.supervise({ signals: [sports], refreshedAt: h.now() });
+    await h.executor.admit(enter(), []); h.fill("order-1", 20);
+    await h.executor.admit({ kind: "exit", marketRef: "yes", urgent: true }, h.positions());
+    expect((await h.executor.snapshot()).queuedExitCount).toBe(1);
+    h.advance(5000); await h.restart().recover(); await h.executor.supervise({ signals: [] });
+    await h.settleCancel();
+    expect((await h.executor.snapshot()).queuedExitCount).toBe(0);
+    expect(h.submissions.every(order => order.side === "BUY")).toBe(true);
+  });
+
+  it("refuses a sports order when kickoff occurs while the venue prepares its signature", async () => {
+    const h = harness(); h.setHeld(96);
+    await h.executor.supervise({ signals: [{ id: "sports", venue: "polymarket", marketRef: "yes", side: "YES", sleeve: "sports", sports: { kickoffAt: NOW + 1 }, prob: .76, refPrice: .55, ts: new Date(NOW).toISOString(), ttlSec: 10800 }], refreshedAt: h.now() });
+    h.adapter.placeOrderWithLifecycle.mockImplementationOnce(async (_account, intent, hooks) => {
+      h.advance(1); await hooks.onPrepared({ preparedHash: "prepared", tokenId: intent.tokenId! });
+      throw new Error("a blocked order must not reach POST");
+    });
+    await h.executor.admit({ kind: "exit", marketRef: "yes", urgent: true }, h.positions());
+    expect(h.submissions).toHaveLength(0);
+    expect(h.log.warn).toHaveBeenCalledWith("prediction submission failed", expect.objectContaining({ ambiguous: false }));
+  });
 
   it.each([.60, .95])("executes published signals at Q=%s without a default 10–30pp band", async prob => {
     const h = harness();
@@ -163,7 +203,7 @@ describe("adaptive prediction execution", () => {
 
   it.each([.58, .95])("executes published sports at Q=%s without applying the local edge band", async prob => {
     const h = harness({ entrySpreadPp: 15, maxEntrySpreadPp: 30 });
-    const signal: Signal = { id: "sports", marketRef: "yes", venue: "polymarket", side: "YES", sleeve: "sports", prob,
+    const signal: Signal = { id: "sports", marketRef: "yes", venue: "polymarket", side: "YES", sleeve: "sports", sports: { kickoffAt: NOW + 86_400_000 }, prob,
       refPrice: .6, ts: new Date(NOW).toISOString(), ttlSec: 10800 };
     await h.executor.supervise({ signals: [signal], refreshedAt: h.now() });
     await h.executor.admit(enter({ provenance: { qHeld: prob, signalId: signal.id, signalTs: signal.ts } }), []);
@@ -188,7 +228,7 @@ describe("adaptive prediction execution", () => {
 
   it.each(["withdrawn", "stale", "side-flipped"])("cancels a working sports entry when its signal is %s", async reason => {
     const h = harness({ entrySpreadPp: 15 });
-    const signal: Signal = { id: "sports", marketRef: "yes", venue: "polymarket", side: "YES", sleeve: "sports", prob: .58,
+    const signal: Signal = { id: "sports", marketRef: "yes", venue: "polymarket", side: "YES", sleeve: "sports", sports: { kickoffAt: NOW + 86_400_000 }, prob: .58,
       refPrice: .6, ts: new Date(NOW).toISOString(), ttlSec: 10800 };
     await h.executor.supervise({ signals: [signal], refreshedAt: h.now() });
     await h.executor.admit(enter({ provenance: { qHeld: .58 } }), []);

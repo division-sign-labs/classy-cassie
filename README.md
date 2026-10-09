@@ -239,6 +239,14 @@ below the market while the position is not in profit (`--adverse-cross-confirmat
 Q collapse of 30pp or more from entry (`--q-collapse-pp`). Otherwise they hold to resolution;
 `--max-hold-days <days>` adds an optional deadline (`unlimited` by default) and
 `--scenario-exit off` holds every position to resolution. There is no take-profit price.
+
+Sports positions hold to settlement from scheduled kickoff by default. This overrides
+Q exits, time stops, and synthetic triggers, cancels working entries and exits, and
+stops queued sell attempts. The hold survives restarts and disappearance from the
+active feed. Pregame exits keep the usual rules. Known sports markets with no kickoff,
+and live markets whose lifecycle cannot yet be classified, defer automatic trading
+until metadata is available. Settlement and redemption continue. Use
+`--sports-hold-after-start off` to restore the usual exits for sports.
 Existing bots keep saved settings.
 Executable depth and slippage bound every exit.
 

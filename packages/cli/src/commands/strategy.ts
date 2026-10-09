@@ -240,6 +240,7 @@ export interface StrategyOptions {
   slippage?: string;
   maxOrderNotional?: string;
   scenarioExit?: string;
+  sportsHoldAfterStart?: string;
   adverseCrossEdgePp?: string;
   adverseCrossMaxPnlPct?: string;
   adverseCrossConfirmations?: string;
@@ -254,6 +255,7 @@ export interface StrategyOptions {
 
 /** Defaults of the signal-exit state machine, mirrored from the strategy schema. */
 export const SCENARIO_EXIT_DEFAULTS = {
+  sportsHoldAfterStart: true,
   scenarioExitEnabled: true,
   adverseCrossEdgePp: 0,
   adverseCrossMaxPnlPct: 0,
@@ -444,6 +446,7 @@ function signedNumber(label: string, raw: string): number {
 }
 
 function applyScenarioExitOptions(config: Record<string, unknown>, opts: StrategyOptions): void {
+  if (opts.sportsHoldAfterStart !== undefined) config.sportsHoldAfterStart = onOff("sports hold after start", opts.sportsHoldAfterStart);
   if (opts.scenarioExit !== undefined) config.scenarioExitEnabled = onOff("scenario exit", opts.scenarioExit);
   if (opts.adverseCrossEdgePp !== undefined) config.adverseCrossEdgePp = signedNumber("adverse cross edge", opts.adverseCrossEdgePp);
   if (opts.adverseCrossMaxPnlPct !== undefined) {
@@ -652,6 +655,7 @@ function printStrategy(
   console.log(`  minimum viable entry: $${Number(current.minEntryNotional).toFixed(2)} (entries only; exits are never floored)`);
   const scenario = { ...SCENARIO_EXIT_DEFAULTS, ...normalized } as Record<string, unknown>;
   const maxHold = current.maxHoldDays === null ? "unlimited" : `${current.maxHoldDays} days`;
+  console.log(`  sports after kickoff: ${scenario.sportsHoldAfterStart === false ? "normal exit rules" : "hold to settlement"}`);
   if (scenario.scenarioExitEnabled === true) {
     console.log("  exit model:           signal state machine (scenarioExitEnabled)");
     console.log(

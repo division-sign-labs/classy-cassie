@@ -19,9 +19,11 @@ import { z } from "zod";
 import type {
   ForecastQuery,
   MarketForecast,
+  MarketMetadata,
   Signal,
   SignalQuery,
   SignalSource,
+  SportsGameMetadata,
   VenueId,
 } from "../types.js";
 import { DEFAULT_SIGNAL_MAX_AGE_SEC, type SignalsConfig } from "../config.js";
@@ -37,6 +39,7 @@ export const SignalSchema = z.object({
   marketRef: z.string(),
   side: z.enum(["YES", "NO", "LONG", "SHORT"]),
   sleeve: z.string().optional(),
+  sports: z.object({ gameKey: z.string().optional(), kickoffAt: z.number().optional(), inPlay: z.boolean().optional() }).optional(),
   prob: z.number().min(0).max(1).optional(),
   refPrice: z.number(),
   spreadPp: z.number().optional(),
@@ -61,6 +64,7 @@ export function marketForecastFromSignal(sig: Signal): MarketForecast | null {
     venue: sig.venue,
     marketRef: sig.marketRef,
     probYes,
+    ...(sig.sports ? { sports: sig.sports } : {}),
     ...(sig.endsAt !== undefined ? { endsAt: sig.endsAt } : {}),
   };
 }
@@ -123,6 +127,7 @@ const SportsGameSchema = z.object({
   published_at: z.string().nullish(),
   is_active: z.boolean().nullish(),
   in_play: z.boolean().nullish(),
+  sports: QuotientSportsSchema.nullish(),
   pick: z.object({ probability: z.number().min(0).max(1).nullish() }),
   markets: z.array(z.unknown()),
 });
@@ -172,6 +177,8 @@ export class LiveSignalSource implements SignalSource {
   readonly #clobBase: string;
   readonly #gammaBase: string;
   readonly #research: QuotientResearchClient;
+  readonly #metadata = new Map<string, MarketMetadata>();
+  readonly #metadataAt = new Map<string, number>();
 
   constructor(
     cfg: LiveSignalConfig,
@@ -250,8 +257,11 @@ export class LiveSignalSource implements SignalSource {
       const forecasts = await Promise.all(rows.map(async (row): Promise<MarketForecast | null> => {
         const marketKey = row.marketKey?.toLowerCase();
         const resolved = marketKey ? byKey.get(marketKey) : undefined;
-        if (!resolved || row.qProbability === undefined) return null;
+        if (!resolved) return null;
         const { marketRef, identity } = resolved;
+        const sports = row.sports ? sportsMetadata(row.sports.gameKey, row.sports.kickoffAt) : undefined;
+        this.#metadata.set("polymarket:" + marketRef, { marketRef, ...(sports ? { sports } : {}) });
+        if (row.qProbability === undefined) return null;
         let probYes = row.qProbability;
         if (row.sports) {
           const conditionId = row.conditionId ?? identity.conditionId;
@@ -268,9 +278,11 @@ export class LiveSignalSource implements SignalSource {
           venue: "polymarket" as const,
           marketRef,
           probYes,
+          ...(sports ? { sports } : {}),
           ...(endsAt !== undefined ? { endsAt } : {}),
         };
       }));
+      for (const marketRef of marketRefs) this.#metadataAt.set("polymarket:" + marketRef, Date.now());
       return forecasts.filter((forecast): forecast is MarketForecast => forecast !== null);
     }
 
@@ -280,9 +292,13 @@ export class LiveSignalSource implements SignalSource {
         marketKeys: marketRefs.map((marketRef) => "kalshi:" + marketRef),
         venue: "kalshi",
       });
+      for (const marketRef of marketRefs) this.#metadataAt.set("kalshi:" + marketRef, Date.now());
       return rows.flatMap((row) => {
         const marketRef = row.nativeMarketId ?? row.marketKey?.replace(/^kalshi:/, "");
-        if (!marketRef || !wanted.has(marketRef) || row.qProbability === undefined) return [];
+        if (!marketRef || !wanted.has(marketRef)) return [];
+        const sports = row.sports ? sportsMetadata(row.sports.gameKey, row.sports.kickoffAt) : undefined;
+        this.#metadata.set("kalshi:" + marketRef, { marketRef, ...(sports ? { sports } : {}) });
+        if (row.qProbability === undefined) return [];
         const endsAt = epochMs(row.endDate);
         return [{
           id: row.marketKey ?? "forecast:" + marketRef,
@@ -290,12 +306,20 @@ export class LiveSignalSource implements SignalSource {
           venue: "kalshi" as const,
           marketRef,
           probYes: row.qProbability,
+          ...(sports ? { sports } : {}),
           ...(endsAt !== undefined ? { endsAt } : {}),
         }];
       });
     }
 
     return [];
+  }
+
+  /** Lifecycle reads reuse the forecast lookup, including rows without a forecast. */
+  async marketMetadata(query: ForecastQuery): Promise<MarketMetadata[]> {
+    const prefix = query.venue + ":";
+    if (query.marketRefs.some(ref => Date.now() - (this.#metadataAt.get(prefix + ref) ?? 0) >= 30_000)) await this.forecasts(query);
+    return query.marketRefs.flatMap(ref => { const row = this.#metadata.get(prefix + ref); return row ? [row] : []; });
   }
 }
 
@@ -346,6 +370,7 @@ async function mapGatewayRow(
     marketRef,
     side,
     ...(sports ? { sleeve: "sports" } : g.sleeve ? { sleeve: g.sleeve } : {}),
+    ...(sports ? { sports: sportsMetadata(g.sports?.game_key, g.sports?.kickoff_at) } : {}),
     prob,
     refPrice,
     spreadPp,
@@ -397,6 +422,7 @@ async function mapSportsGameRow(
       marketRef,
       side,
       sleeve: "sports",
+      sports: sportsMetadata(g.sports?.game_key, g.sports?.kickoff_at, g.in_play),
       prob,
       refPrice: listing.current_cost_cents / 100,
       spreadPp: Math.abs(prob * 100 - listing.current_cost_cents),
@@ -405,6 +431,11 @@ async function mapSportsGameRow(
     });
   }
   return [...out.values()];
+}
+
+function sportsMetadata(gameKey?: string | null, kickoff?: string | null, inPlay?: boolean | null): SportsGameMetadata {
+  const kickoffAt = epochMs(kickoff);
+  return { ...(gameKey ? { gameKey } : {}), ...(kickoffAt !== undefined ? { kickoffAt } : {}), ...(inPlay != null ? { inPlay } : {}) };
 }
 
 /** Feed timestamp to epoch ms; unparseable or absent values stay undefined. */

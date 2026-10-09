@@ -28,6 +28,14 @@ without closing anything.
 A rising price alone does not trigger an exit; there is no take-profit price. An optional
 deadline is available with `--max-hold-days <days>` (`maxHoldDays: null` by default).
 Exits are position-driven: a stale or unpublished entry signal cannot suppress them.
+Sports positions hold to settlement from scheduled kickoff by default
+(`sportsHoldAfterStart: true`; `--sports-hold-after-start on`). Pregame exits retain
+the usual rules. The engine saves game identity and kickoff independently of entry
+signals, so the hold survives restarts and feed removal. It cancels pending entries
+and exits, clears queued sell attempts, and blocks synthetic triggers after kickoff.
+Known sports with no kickoff and unclassified live markets defer automatic trading
+until lifecycle metadata is available. Redemption remains active. Set
+`--sports-hold-after-start off` to restore the usual sports exits.
 The minimum-notional floor never blocks a sell; executable slippage and depth still apply.
 
 ## Signal-exit state machine

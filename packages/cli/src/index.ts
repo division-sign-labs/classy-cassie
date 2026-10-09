@@ -251,6 +251,7 @@ program
   .option("--slippage <pct>", "max book walk from the best executable price, as a percentage")
   .option("--max-order-notional <usd>", "hard per-order notional cap in the risk module")
   .option("--scenario-exit <on|off>", "sell when Q flips, falls to the market, or collapses (default on); off holds to resolution")
+  .option("--sports-hold-after-start <on|off>", "hold sports positions to settlement from kickoff (default on)")
   .option("--adverse-cross-edge-pp <pp>", "adverse cross: remaining edge at or below this counts as non-positive")
   .option("--adverse-cross-max-pnl-pct <pct>", "adverse cross: executable P&L at or below this")
   .option("--adverse-cross-confirmations <n|off>", "adverse cross: distinct committed forecasts required; off disables the exit")

@@ -1,6 +1,7 @@
 // packages/core/test/directional-redemption.test.ts
 import { describe, expect, it, vi } from "vitest";
 import { Engine } from "../src/engine/engine.js";
+import { SPORTS_HOLD_KEY } from "../src/engine/sports-hold.js";
 import { computePortfolio, MemoryStateStore, parseBotConfig, silentLogger,
   type Position, type RedemptionHooks, type VenueAdapter } from "@quotient-forecasting/cassie-core";
 
@@ -28,6 +29,13 @@ function setup() {
 }
 
 describe("directional resolution settlement", () => {
+  it("redeems a sports holding while its saved hold blocks automatic exits", async () => {
+    const s = setup();
+    await s.state.set(SPORTS_HOLD_KEY, JSON.stringify({ version: 1, markets: { [loss.marketRef]: { marketRef: loss.marketRef, sports: { kickoffAt: 1 }, started: true } } }));
+    s.strategyTick.mockResolvedValue([{ kind: "exit", marketRef: loss.marketRef }] as never);
+    expect((await s.engine().tick()).errors).toBe(0);
+    expect(s.redeem).toHaveBeenCalledOnce();
+  });
   it("redeems resolved holdings even when the strategy fails", async () => {
     const s = setup(); s.strategyTick.mockRejectedValue(new Error("forecast unavailable"));
     expect((await s.engine().tick(1)).errors).toBe(1);

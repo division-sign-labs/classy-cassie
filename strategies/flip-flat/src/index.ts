@@ -77,6 +77,8 @@ const FlipFlatConfigObjectSchema = z.object({
   refPriceSanityPct: z.number().positive().default(2),
   /** Optional prediction-position deadline; null (the default) disables the time stop. */
   maxHoldDays: z.number().positive().nullable().default(null),
+  /** Hold sports positions to settlement from kickoff; unknown kickoff defers automatic trading. */
+  sportsHoldAfterStart: z.boolean().default(true),
 
   // ---- Signal-exit state machine ------------------------------------------
   /**
@@ -663,8 +665,12 @@ export class FlipFlatStrategy implements Strategy {
       (position) =>
         position.size > 0 &&
         !position.redeemable &&
+        !ctx.sportsHolds?.includes(position.marketRef) &&
         (position.side === "YES" || position.side === "NO"),
     );
+    for (const order of ctx.openOrders) {
+      if (ctx.sportsHolds?.includes(order.marketRef)) actions.push({ kind: "cancel", orderId: order.id, marketRef: order.marketRef, reason: "sports hold after start; hold to settlement" });
+    }
     if (cfg.scenarioExitEnabled) {
       const scenario = await this.scenarioExits(
         ctx,
@@ -693,6 +699,7 @@ export class FlipFlatStrategy implements Strategy {
 
     if (ctx.execution?.blocked && ranked.length) ctx.log.info(`entries paused: ${ctx.execution.haltReason ?? "operator pause"}`);
     for (const [marketRef, sig] of ranked) {
+      if (ctx.sportsHolds?.includes(marketRef)) continue;
       if (ctx.execution?.blocked) continue;
       if (entryBlockedMarkets.has(marketRef)) continue;
       if (ctx.execution?.parents.some((parent) => parent.marketRef === marketRef && activeExecution(parent))) continue;
@@ -747,6 +754,7 @@ export class FlipFlatStrategy implements Strategy {
             signalId: sig.id,
             signalTs: sig.ts,
             ...(sig.sleeve ? { signalSleeve: sig.sleeve } : {}),
+            ...(sig.sports ? { sports: sig.sports } : {}),
             side: sig.side,
             ...(sig.prob !== undefined ? { qHeld: sig.prob } : {}),
             signalRefPrice: sig.refPrice,
@@ -778,6 +786,7 @@ export class FlipFlatStrategy implements Strategy {
             signalId: sig.id,
             signalTs: sig.ts,
             ...(sig.sleeve ? { signalSleeve: sig.sleeve } : {}),
+            ...(sig.sports ? { sports: sig.sports } : {}),
             side: sig.side,
             ...(sig.prob !== undefined ? { qHeld: sig.prob } : {}),
             signalRefPrice: sig.refPrice,
@@ -1767,6 +1776,7 @@ export class FlipFlatStrategy implements Strategy {
       signalId: sig.id,
       signalTs: sig.ts,
       ...(sig.sleeve ? { signalSleeve: sig.sleeve } : {}),
+      ...(sig.sports ? { sports: sig.sports } : {}),
       side: sig.side,
       qHeld: sig.prob,
       signalRefPrice: sig.refPrice,

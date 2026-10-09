@@ -9,6 +9,7 @@ import { checkCapacity } from "../risk/capacity.js";
 import { derivePredictionExecutionMetrics, type PredictionExecutionMetrics } from "./prediction-execution-metrics.js";
 import { positionMarketValue } from "../portfolio.js";
 import { RefusalLog } from "./refusal-log.js";
+import { SPORTS_HOLD_REASON, type SportsHoldGuard } from "./sports-hold.js";
 
 export const PREDICTION_EXECUTION_KEY = "prediction:execution:v1";
 
@@ -202,6 +203,7 @@ interface Checkpoint {
 }
 
 export interface PredictionExecutorDeps {
+  sportsHold?: SportsHoldGuard;
   botId: string;
   adapter: VenueAdapter;
   account: VenueAccount;
@@ -393,6 +395,7 @@ export class PredictionExecutor {
     return this.serial(async () => {
       this.requireSupport();
       const c = await this.load();
+      await this.d.sportsHold?.refresh(Object.values(c.parents).filter(active).map(p => p.marketRef));
       for (const child of Object.values(c.children)) {
         if (child.status === "reserved") child.status = "rejected";
         else if (child.status === "signed") {
@@ -424,6 +427,8 @@ export class PredictionExecutor {
   private async admitInternal(action: DirectionalAction, positions: Position[], exitEvaluatedAt = this.now()): Promise<StrategyActionResult> {
       this.requireSupport();
       const c = await this.load();
+      await this.d.sportsHold?.refresh([action.marketRef], this.signals);
+      if (this.d.sportsHold?.isHeld(action.marketRef)) return this.refuse(action, SPORTS_HOLD_REASON);
       // A supervision pass moments ago already applied every settlement; admission reuses it.
       if (this.now() - (this.lastReconciledAt ?? 0) > SNAPSHOT_REUSE_MS) {
         try { await this.reconcile(); }
@@ -557,6 +562,10 @@ export class PredictionExecutor {
       const c = await this.load();
       this.paused = this.stopping || this.operatorPaused;
       if (options.signals) this.signals = options.signals;
+      await this.d.sportsHold?.refresh([...Object.values(c.parents).filter(active).map(p => p.marketRef), ...Object.keys(c.queuedExits)], this.signals);
+      for (const p of Object.values(c.parents).filter(active)) {
+        if (this.d.sportsHold?.isHeld(p.marketRef)) await this.stopParent(p, SPORTS_HOLD_REASON);
+      }
       if (options.refreshedAt !== undefined && Number.isFinite(options.refreshedAt) && options.refreshedAt > (c.refreshedAt ?? 0)) c.refreshedAt = options.refreshedAt;
       for (const p of Object.values(c.parents).filter(active)) {
         const decision = options.exitDecisions?.[p.marketRef];
@@ -566,6 +575,7 @@ export class PredictionExecutor {
         }
       }
       for (const [marketRef, queued] of Object.entries(c.queuedExits)) {
+        if (this.d.sportsHold?.isHeld(marketRef)) { delete c.queuedExits[marketRef]; continue; }
         const action = queued.action;
         const decision = options.exitDecisions?.[marketRef];
         if (!action.urgent) {
@@ -679,6 +689,7 @@ export class PredictionExecutor {
   }
 
   private async workParent(p: Parent, supplied?: PredictionExecutionMarket, snapshot?: PortfolioSnapshot): Promise<void> {
+    if (this.d.sportsHold?.isHeld(p.marketRef)) { await this.stopParent(p, SPORTS_HOLD_REASON); return; }
     const children = this.children(p);
     const current = children.find(working);
     if (p.status === "canceling") {
@@ -852,7 +863,7 @@ export class PredictionExecutor {
     try {
       const ack = await this.rpc("order submission", () => this.d.adapter.placeOrderWithLifecycle!(this.d.account, intent, { onPrepared: async meta => {
         const horizon = intent.postOnly ? p.deadlineAt : this.commodities ? p.deadlineAt + KALSHI_CROSSING_WINDOW_MS : (p.crossingDeadlineAt ?? p.deadlineAt);
-        if (this.paused || this.stopping || generation !== this.safetyGeneration || p.status !== "active" || this.now() - m.book.ts > BOOK_AGE_MS || (p.side === "BUY" && this.now() >= horizon)) {
+        if (this.paused || this.stopping || generation !== this.safetyGeneration || p.status !== "active" || this.d.sportsHold?.isHeld(p.marketRef) || this.now() - m.book.ts > BOOK_AGE_MS || (p.side === "BUY" && this.now() >= horizon)) {
           stoppedBeforePost = true; throw new Error("execution authorization or book expired before POST");
         }
         if (meta.tokenId !== p.tokenId || (meta.conditionId && meta.conditionId !== p.conditionId)) { stoppedBeforePost = true; throw new Error("prepared token identity mismatch"); }
@@ -862,7 +873,7 @@ export class PredictionExecutor {
         }
         child.intent = { ...intent, limitPrice: signedPrice, size: signedSize };
         child.preparedHash = meta.preparedHash; child.status = "signed"; await this.save();
-        if (generation !== this.safetyGeneration) { stoppedBeforePost = true; throw new Error("execution halted before POST"); }
+        if (generation !== this.safetyGeneration || this.d.sportsHold?.isHeld(p.marketRef)) { stoppedBeforePost = true; throw new Error("execution halted before POST"); }
       } }), () => { this.safetyGeneration += 1; });
       child.venueId = ack.orderId;
       child.observedMatched = ack.filledSize ?? (ack.status === "filled" ? child.intent.size : 0);

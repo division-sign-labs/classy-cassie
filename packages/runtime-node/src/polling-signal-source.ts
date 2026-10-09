@@ -5,6 +5,7 @@ import {
   marketForecastFromSignal,
   type ForecastQuery,
   type MarketForecast,
+  type MarketMetadata,
   type Signal,
   type SignalQuery,
   type SignalSource,
@@ -38,6 +39,7 @@ export class PollingSignalSource implements SignalSource {
   #cached?: { refreshedAt: number; signals: Signal[] };
   #refreshing?: Promise<Signal[]>;
   readonly #forecastCache = new Map<string, { refreshedAt: number; forecast?: MarketForecast }>();
+  readonly #metadataCache = new Map<string, MarketMetadata>();
   #forecastRefreshing?: Promise<void>;
 
   constructor(source: SignalSource, intervalMs: number, opts: PollingSignalSourceOptions = {}) {
@@ -91,7 +93,10 @@ export class PollingSignalSource implements SignalSource {
         continue;
       }
 
-      const refresh = fetchForecasts({ venue: query.venue, marketRefs: stale }).then((forecasts) => {
+      const refresh = fetchForecasts({ venue: query.venue, marketRefs: stale }).then(async (forecasts) => {
+        const metadata = this.#source.marketMetadata ? await this.#source.marketMetadata({ venue: query.venue, marketRefs: stale })
+          : forecasts.map(f => ({ marketRef: f.marketRef, ...(f.sports ? { sports: f.sports } : {}) }));
+        for (const row of metadata ?? []) this.#metadataCache.set(forecastKey(query.venue, row.marketRef), row);
         const refreshedAt = this.#now();
         const byRef = new Map(forecasts.map((forecast) => [forecast.marketRef, forecast]));
         for (const marketRef of stale) {
@@ -126,6 +131,16 @@ export class PollingSignalSource implements SignalSource {
     return marketRefs.flatMap((marketRef) => {
       const forecast = this.#forecastCache.get(forecastKey(query.venue, marketRef))?.forecast;
       return forecast ? [forecast] : [];
+    });
+  }
+
+  async marketMetadata(query: ForecastQuery): Promise<MarketMetadata[]> {
+    const forecasts = await this.forecasts(query);
+    return query.marketRefs.flatMap(ref => {
+      const row = this.#metadataCache.get(forecastKey(query.venue, ref));
+      if (row) return [row];
+      const forecast = forecasts.find(f => f.marketRef === ref);
+      return forecast ? [{ marketRef: ref, ...(forecast.sports ? { sports: forecast.sports } : {}) }] : [];
     });
   }
 

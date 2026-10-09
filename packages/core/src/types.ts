@@ -328,6 +328,18 @@ export type RuntimeCreds =
 // Signals (§7) — the Quotient signal contract
 // ---------------------------------------------------------------------------
 
+/** Game lifecycle, separate from a contract's resolution/close time. */
+export interface SportsGameMetadata {
+  gameKey?: string;
+  kickoffAt?: number;
+  inPlay?: boolean;
+}
+
+export interface MarketMetadata {
+  marketRef: string;
+  sports?: SportsGameMetadata;
+}
+
 export interface Signal {
   id: string;
   ts: string; // ISO timestamp
@@ -337,6 +349,7 @@ export interface Signal {
   side: PositionSide;
   /** Published signal sleeve. Sports entry edges are screened by the publisher. */
   sleeve?: string;
+  sports?: SportsGameMetadata;
   /** Model probability (prediction markets). */
   prob?: number;
   /** Market price at signal time. */
@@ -360,6 +373,7 @@ export interface MarketForecast {
   marketRef: string;
   /** Quotient's calibrated probability for the YES outcome. */
   probYes: number;
+  sports?: SportsGameMetadata;
   /** Venue resolution/close time in epoch ms, when the feed carries one. */
   endsAt?: number;
 }
@@ -442,6 +456,8 @@ export type Action =
     };
 
 export interface StrategyContext {
+  /** Markets held to settlement by the sports lifecycle policy. */
+  sportsHolds?: readonly string[];
   /** Durable directional executions, present only for adaptive Polymarket signals. */
   execution?: import("./engine/prediction-execution.js").PredictionExecutionSnapshot;
   botId: string;
@@ -719,6 +735,8 @@ export interface SignalSource {
   latest(query: SignalQuery): Promise<Signal[]>;
   /** Held-market forecasts are independent of whether an entry signal is active. */
   forecasts?(query: ForecastQuery): Promise<MarketForecast[]>;
+  /** Held-market lifecycle metadata, including markets with no usable Q forecast. */
+  marketMetadata?(query: ForecastQuery): Promise<MarketMetadata[]>;
 }
 
 // ---------------------------------------------------------------------------

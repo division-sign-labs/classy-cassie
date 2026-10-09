@@ -649,6 +649,15 @@ to the YES-token marketRef, `latest_q` becomes the side-adjusted model probabili
 freshness by default; `signals.maxAgeSec` can override that per bot. Freshness never
 suppresses an exit.
 
+Sports positions hold to settlement from scheduled kickoff by default
+(`--sports-hold-after-start on`). Q exits, time stops, synthetic triggers, and queued
+sell attempts stop at kickoff; working entries and exits are canceled. Saved game
+metadata preserves the hold through restarts and removal from the active feed.
+Pregame exits retain the normal rules. Known sports with no kickoff, and unclassified
+live markets, defer automatic trading until lifecycle metadata is available.
+Settlement and redemption continue. `--sports-hold-after-start off` restores the
+normal sports exit rules. Redeploy a running bot to apply a configuration change.
+
 Published sports signals use the publisher's edge screening. The `signals` strategy
 skips its minimum and maximum entry-edge thresholds for the sports sleeve, including
 adaptive order supervision. Sports order prices stay capped at the admission ask or a

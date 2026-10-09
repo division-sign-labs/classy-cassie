@@ -250,6 +250,7 @@ describe("LiveSignalSource (gateway contract, verified 2026-10-06)", () => {
       kind: "sports_game", id: "g-1", rule_version: "one-signal/1", sleeve: "sports",
       forecast_updated_at: new Date().toISOString(), published_at: new Date().toISOString(),
       is_active: true, in_play: false, pick_label: "Patriots",
+      sports: { game_key: "nfl:ne-lv", kickoff_at: "2026-10-11T17:00:00.000Z" },
       pick: { code: "ne", label: "Patriots", probability: .76, entry_probability: .71 },
       markets: [{ ...listing, venue: "hl_outcomes", nativeMarketId: "#1", condition_id: null, signal_outcome: null }, listing],
     };
@@ -377,12 +378,28 @@ describe("LiveSignalSource (gateway contract, verified 2026-10-06)", () => {
         { token_id: "111", outcome: "Los Angeles Dodgers" }, { token_id: "222", outcome: "Atlanta Braves" },
       ] }));
       return new Response(JSON.stringify({ results: [{ marketKey: "polymarket:game", quotient_odds: .34,
-        last_updated: gatewayRow.forecast_updated_at, sports: { yes_side: { name: "Atlanta Braves" } } }] }));
+        last_updated: gatewayRow.forecast_updated_at, sports: { kickoff_at: "2026-10-08T20:00:00Z", game_key: "mlb:game", yes_side: { name: "Atlanta Braves" } } }] }));
     }) as unknown as typeof fetch;
     const src = new LiveSignalSource({ baseUrl: "https://gw.example", path: "/s" }, "t", fetchImpl, "https://clob.example", "https://gamma.example");
     const [forecast] = await src.forecasts({ venue: "polymarket", marketRefs: ["111"] });
     expect(forecast).toMatchObject({ marketRef: "111", id: "polymarket:game" });
     expect(forecast!.probYes).toBeCloseTo(.66);
+    expect(forecast!.sports).toEqual({ kickoffAt: Date.parse("2026-10-08T20:00:00Z"), gameKey: "mlb:game" });
+    const reads = (fetchImpl as ReturnType<typeof vi.fn>).mock.calls.length;
+    expect(await src.marketMetadata({ venue: "polymarket", marketRefs: ["111"] })).toEqual([{ marketRef: "111", sports: forecast!.sports }]);
+    expect((fetchImpl as ReturnType<typeof vi.fn>).mock.calls).toHaveLength(reads);
+  });
+
+  it("recovers sports lifecycle without a Q forecast or an outcome mapping", async () => {
+    const fetchImpl = vi.fn(async (input: string | URL | Request) => {
+      const url = new URL(String(input));
+      if (url.origin === "https://gamma.example") return new Response(JSON.stringify([{ id: "game", conditionId: "condition" }]));
+      return new Response(JSON.stringify({ results: [{ marketKey: "polymarket:game", sports: { kickoff_at: "2026-10-08T20:00:00Z" } }] }));
+    }) as unknown as typeof fetch;
+    const src = new LiveSignalSource({ baseUrl: "https://gw.example", path: "/s" }, "t", fetchImpl, "https://clob.example", "https://gamma.example");
+    expect(await src.forecasts({ venue: "polymarket", marketRefs: ["111"] })).toEqual([]);
+    expect(await src.marketMetadata({ venue: "polymarket", marketRefs: ["111"] })).toEqual([{ marketRef: "111", sports: { kickoffAt: Date.parse("2026-10-08T20:00:00Z") } }]);
+    expect((fetchImpl as ReturnType<typeof vi.fn>).mock.calls).toHaveLength(2);
   });
 
   it("retries a 5xx three times, then throws", async () => {
@@ -407,10 +424,11 @@ describe("LiveSignalSource (gateway contract, verified 2026-10-06)", () => {
     // ForecastQuery likewise accepts only market identity, never position state.
     // @ts-expect-error — sizes and P&L must not flow toward the forecast API
     void (() => src.forecasts?.({ venue: "polymarket", marketRefs: ["m"], size: 10, pnl: 50 }));
-    // Runtime: both methods take exactly one market-scoped query object.
+    // Runtime: all methods take exactly one market-scoped query object.
     const publicMethods = Object.getOwnPropertyNames(Object.getPrototypeOf(src)).filter((n) => n !== "constructor");
-    expect(publicMethods.sort()).toEqual(["forecasts", "latest"]);
+    expect(publicMethods.sort()).toEqual(["forecasts", "latest", "marketMetadata"]);
     expect(src.latest.length).toBe(1);
+    expect(src.marketMetadata.length).toBe(1);
     expect(src.forecasts).toBeTypeOf("function");
     expect(src.forecasts!.length).toBe(1);
   });
