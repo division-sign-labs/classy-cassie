@@ -11,6 +11,12 @@ import {
 import { UnexpectedResponseError } from "@polymarket/client";
 import { z } from "zod";
 
+const prepareRedeemPositions = vi.hoisted(() => vi.fn(async () => undefined));
+vi.mock("@polymarket/client/actions", async importOriginal => ({
+  ...await importOriginal<typeof import("@polymarket/client/actions")>(),
+  prepareRedeemPositions,
+}));
+
 const account: VenueAccount = { venue: "polymarket", signerAddress: "0x1", funder: "0x2", signatureType: 3 };
 const tokens = [{ tokenId: "yes", outcome: "Yes" }, { tokenId: "no", outcome: "No" }];
 const rawBook = (tokenId = "yes", tickSize = 0.01) => ({
@@ -195,8 +201,20 @@ describe("Polymarket authenticated reconciliation", () => {
     const positions = await adapter.positions(account);
     expect(positions).toEqual([expect.objectContaining({ marketRef: "yes", tokenId: "no", conditionId: "condition", redeemable: true, currentPrice: 0 })]);
     await adapter.redeem(account, positions[0]!);
+    expect(prepareRedeemPositions).toHaveBeenCalledWith(expect.anything(), { conditionId: "condition" });
     expect(redeemPositions).toHaveBeenCalledExactlyOnceWith({ conditionId: "condition" });
     expect(metadata).not.toHaveBeenCalled();
+  });
+
+  it("fails a redemption before its submission fence while Gamma has not indexed the closed market", async () => {
+    prepareRedeemPositions.mockRejectedValueOnce(new Error("No market found for condition condition"));
+    const redeemPositions = vi.fn();
+    const beforeSubmit = vi.fn(async () => undefined);
+    const adapter = adapterWith({ redeemPositions });
+    const position = { marketRef: "yes", tokenId: "no", conditionId: "condition", side: "NO" as const, size: 1, avgPrice: 0.5, redeemable: true };
+    await expect(adapter.redeem(account, position, { beforeSubmit, submitted: vi.fn() })).rejects.toThrow("No market found");
+    expect(beforeSubmit).not.toHaveBeenCalled();
+    expect(redeemPositions).not.toHaveBeenCalled();
   });
 
   it("reads matchup holdings whose outcomes are team names, in the canonical first-token-is-YES orientation", async () => {

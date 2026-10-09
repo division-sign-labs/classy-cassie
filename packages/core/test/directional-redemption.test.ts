@@ -74,6 +74,14 @@ describe("directional resolution settlement", () => {
     await s.engine().tick(2);
     expect(s.redeem).toHaveBeenCalledOnce();
   });
+  it("retries a redemption that failed before its submission fence", async () => {
+    const s = setup();
+    s.redeem.mockRejectedValueOnce(new Error("No market found for condition condition"));
+    expect((await s.engine().tick(1)).errors).toBe(1);
+    expect((await s.engine().tick(2)).errors).toBe(0);
+    expect(s.redeem).toHaveBeenCalledTimes(2);
+    expect(JSON.parse((await s.state.get("engine:redemption:condition"))!).status).toBe("confirmed");
+  });
   it("recovers a timed-out receipt by reading its authoritative settlement", async () => {
     const s = setup();
     s.redeem.mockImplementationOnce(async (_a, _p, hooks) => {
