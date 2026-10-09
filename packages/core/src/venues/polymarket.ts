@@ -154,6 +154,7 @@ import {
   fetchBalanceAllowance,
   fetchMarketInfo,
   fetchTransaction,
+  prepareRedeemPositions,
   resolveConditionByToken,
   updateBalanceAllowance,
 } from "@polymarket/client/actions";
@@ -1354,6 +1355,10 @@ export class PolymarketAdapter implements VenueAdapter {
       throw new Error("Polymarket redemption position condition does not match its market token");
     }
     const client = await this.secure();
+    // redeemPositions first looks the condition up in Gamma, which can lag the
+    // resolution, and only then submits. Run that read-only lookup before the
+    // fence: a failure before the fence retries next tick, one after it never does.
+    await prepareRedeemPositions(client, { conditionId });
     await hooks?.beforeSubmit();
     const handle = await client.redeemPositions({ conditionId });
     await hooks?.submitted({
