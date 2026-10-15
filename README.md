@@ -222,7 +222,7 @@ or remove it with `--max-entry-edge unlimited`. Set an explicit position cap wit
 
 Prediction markets use portfolio-relative sizing by default. Each signal gets a
 quarter-Kelly target based on current portfolio equity, capped at 5% across one parent
-event. Sports positions have a hard cap of 1% of current equity per market in every
+event. Sports positions have a hard cap of 2% of current equity per market in every
 allocation mode, counting held cost basis and pending buys. Lower configured caps still
 apply. The optional market cap for other markets and near-resolution size cut are off by default.
 A repeat signal on the same side may top the

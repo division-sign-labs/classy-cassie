@@ -218,16 +218,16 @@ describe("adaptive prediction execution", () => {
     expect(h.submissions).toContainEqual(expect.objectContaining({ postOnly: false, limitPrice: .6 }));
   });
 
-  it.each(["portfolio-kelly", "daily-budget", "fixed-notional"])("caps sports orders at 1%% of current equity in %s mode", async allocationMode => {
+  it.each(["portfolio-kelly", "daily-budget", "fixed-notional"])("caps sports orders at 2%% of current equity in %s mode", async allocationMode => {
     const h = harness({ allocationMode, marketCapPct: null }); h.setCash(1000);
     const signal: Signal = { id: "sports", marketRef: "yes", venue: "polymarket", side: "YES", sleeve: "sports",
       sports: { kickoffAt: NOW + 86_400_000 }, prob: .76, ts: new Date(NOW).toISOString(), ttlSec: 10800 };
     await h.executor.supervise({ signals: [signal], refreshedAt: h.now() });
     await h.executor.admit(enter(), []);
     expect(h.submissions).toHaveLength(1);
-    expect(h.submissions[0]!.size * .6).toBeLessThanOrEqual(10);
-    expect(h.submissions[0]!.size * .6).toBeGreaterThan(9.99);
-    expect((await h.executor.snapshot()).parents[0]!.reservedNotionalUsd).toBeLessThanOrEqual(10);
+    expect(h.submissions[0]!.size * .6).toBeLessThanOrEqual(20);
+    expect(h.submissions[0]!.size * .6).toBeGreaterThan(19.99);
+    expect((await h.executor.snapshot()).parents[0]!.reservedNotionalUsd).toBeLessThanOrEqual(20);
   });
 
   it.each(["YES", "NO"] as const)("includes held cost basis when capping sports %s top-ups", async side => {
@@ -238,8 +238,8 @@ describe("adaptive prediction execution", () => {
     await h.executor.admit(enter({ side }), h.positions());
     expect(h.submissions).toHaveLength(1);
     const total = 8 * .51 + h.submissions[0]!.size * .6;
-    expect(total).toBeLessThanOrEqual(10);
-    expect(total).toBeGreaterThan(9.99);
+    expect(total).toBeLessThanOrEqual(20);
+    expect(total).toBeGreaterThan(19.99);
   });
 
   it("refuses sports entries when the cap is below the venue minimum", async () => {
@@ -250,7 +250,7 @@ describe("adaptive prediction execution", () => {
     expect(h.submissions).toEqual([]);
   });
 
-  it.each([false, true])("cancels sports commitments above 1%% after an equity drop and restart (crossing %s)", async crossing => {
+  it.each([false, true])("cancels sports commitments above 2%% after an equity drop and restart (crossing %s)", async crossing => {
     const h = harness(); h.setCash(1000);
     const signal: Signal = { id: "sports", marketRef: "yes", venue: "polymarket", side: "YES", sleeve: "sports",
       sports: { kickoffAt: NOW + 86_400_000 }, prob: .76, ts: new Date(NOW).toISOString(), ttlSec: 10800 };

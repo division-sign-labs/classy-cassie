@@ -175,33 +175,33 @@ describe("flip-flat portfolio allocation", () => {
   });
 
   it.each(["portfolio-kelly", "daily-budget", "fixed-notional"])("uses publication edge eligibility for sports in %s mode", async (allocationMode) => {
-    const ctx = context({ config: { allocationMode, entrySpreadPp: 15, maxEntrySpreadPp: 30 }, signals: [
+    const ctx = context({ config: { allocationMode, lotNotionalUsd: 100, entrySpreadPp: 15, maxEntrySpreadPp: 30 }, signals: [
       signal("sport-low", 5, { sleeve: "sports" }), signal("sport-high", 40, { sleeve: "sports" }),
       signal("other-low", 5), signal("other-high", 40),
     ] });
     const got = await entries(ctx);
     expect(got.map(action => action.marketRef).sort()).toEqual(["sport-high", "sport-low"]);
     expect(got.every(action => action.provenance?.signalSleeve === "sports")).toBe(true);
-    for (const action of got) expect(action.notional).toBeCloseTo(10);
+    for (const action of got) expect(action.notional).toBeCloseTo(20);
   });
 
-  it.each([null, 5, 0.5])("caps sports top-ups at 1%% of equity with marketCapPct=%s", async marketCapPct => {
+  it.each([null, 5, 0.5])("caps sports top-ups at 2%% of equity with marketCapPct=%s", async marketCapPct => {
     const ctx = context({ config: { marketCapPct }, signals: [signal("sport", 20, { sleeve: "sports" })],
       positions: [{ marketRef: "sport", side: "YES", size: 8, avgPrice: .5 }] });
     const got = await entries(ctx);
     expect(got).toHaveLength(1);
-    expect(got[0]!.notional).toBeCloseTo(marketCapPct === 0.5 ? 1 : 6);
-    expect(got[0]!.provenance?.marketCapUsd).toBe(marketCapPct === 0.5 ? 5 : 10);
+    expect(got[0]!.notional).toBeCloseTo(marketCapPct === 0.5 ? 1 : 16);
+    expect(got[0]!.provenance?.marketCapUsd).toBe(marketCapPct === 0.5 ? 5 : 20);
   });
 
   it("does not add to sports positions at or above the cap", async () => {
     const ctx = context({ signals: [signal("sport", 20, { sleeve: "sports" })],
-      positions: [{ marketRef: "sport", side: "YES", size: 22, avgPrice: .5 }] });
+      positions: [{ marketRef: "sport", side: "YES", size: 44, avgPrice: .5 }] });
     expect(await entries(ctx)).toEqual([]);
   });
 
   it.each(["portfolio-kelly", "daily-budget", "fixed-notional"])("skips sports below the minimum entry in %s mode", async allocationMode => {
-    const ctx = context({ equity: 50, config: { allocationMode }, signals: [signal("sport", 20, { sleeve: "sports" })] });
+    const ctx = context({ equity: 25, config: { allocationMode }, signals: [signal("sport", 20, { sleeve: "sports" })] });
     expect(await entries(ctx)).toEqual([]);
   });
 
