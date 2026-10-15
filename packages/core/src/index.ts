@@ -9,6 +9,7 @@ export * from "./metrics.js";
 export * from "./state.js";
 export * from "./risk/capacity.js";
 export * from "./risk/passive.js";
+export * from "./risk/sports.js";
 export * from "./signals/index.js";
 export * from "./alerts/index.js";
 export * from "./llm/surplus.js";

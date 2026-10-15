@@ -10,6 +10,7 @@
 import { z } from "zod";
 import {
   INVENTORY_DUST_SHARES,
+  SPORTS_POSITION_CAP_PCT,
   isSignalFresh,
   marketForecastFromSignal,
   mirrorBookForNo,
@@ -1745,13 +1746,14 @@ export class FlipFlatStrategy implements Strategy {
     // The haircut scales the target rather than this tick's order, so a
     // same-side top-up converges to the reduced size instead of restoring it.
     const sizeFactor = nearResolutionSizeFactor(sig.endsAt, ctx.now(), cfg);
+    const marketCapPct = sig.sleeve === "sports" ? Math.min(cfg.marketCapPct ?? Infinity, SPORTS_POSITION_CAP_PCT) : cfg.marketCapPct;
     const targetUsd =
       portfolioKellyTargetUsd({
         prob: sig.prob,
         price,
         equity: ctx.equity,
         kellyFraction: cfg.kellyFraction,
-        marketCapPct: cfg.marketCapPct,
+        marketCapPct,
       }) * sizeFactor;
     if (sizeFactor < 1) {
       ctx.log.info(
@@ -1760,7 +1762,7 @@ export class FlipFlatStrategy implements Strategy {
     }
     const currentMarketUsd = state.marketExposureUsd.get(sig.marketRef) ?? 0;
     const currentEventUsd = state.eventExposureUsd.get(eventRef) ?? 0;
-    const marketCapUsd = cfg.marketCapPct === null ? undefined : (cfg.marketCapPct / 100) * ctx.equity;
+    const marketCapUsd = marketCapPct === null ? undefined : (marketCapPct / 100) * ctx.equity;
     const eventCapUsd = (cfg.eventCapPct / 100) * ctx.equity;
     const headroom: Array<[string, number]> = [
       ["target", targetUsd - currentMarketUsd],
@@ -1851,7 +1853,8 @@ export class FlipFlatStrategy implements Strategy {
    */
   private fixedEntryNotional(ctx: StrategyContext, cfg: FlipFlatConfig, sig: Signal, cashUsd: number): number {
     const sizeFactor = nearResolutionSizeFactor(sig.endsAt, ctx.now(), cfg);
-    const notional = Math.min(cfg.lotNotionalUsd, cashUsd * 0.95) * sizeFactor;
+    const sportsCapUsd = sig.sleeve === "sports" ? ctx.equity * Math.min(cfg.marketCapPct ?? Infinity, SPORTS_POSITION_CAP_PCT) / 100 : Infinity;
+    const notional = Math.min(Math.min(cfg.lotNotionalUsd, cashUsd * 0.95) * sizeFactor, sportsCapUsd);
     if (sizeFactor < 1) {
       ctx.log.info(
         `${sig.marketRef} resolves within ${cfg.nearResolutionDays}d; lot sized down ${cfg.nearResolutionSizeCutPct}% to $${notional.toFixed(2)}`,
@@ -1888,7 +1891,8 @@ export class FlipFlatStrategy implements Strategy {
       .reduce((sum, parent) => sum + parent.reservedNotionalUsd, 0) ?? 0;
     const perPositionUsd = (cfg.dailyBudgetUsd * cfg.positionBudgetPct) / 100;
     const sizeFactor = nearResolutionSizeFactor(sig.endsAt, ctx.now(), cfg);
-    const notional = Math.min(perPositionUsd, remainingBudgetUsd, available * 0.95) * sizeFactor;
+    const sportsCapUsd = sig.sleeve === "sports" ? ctx.equity * Math.min(cfg.marketCapPct ?? Infinity, SPORTS_POSITION_CAP_PCT) / 100 : Infinity;
+    const notional = Math.min(Math.min(perPositionUsd, remainingBudgetUsd, available * 0.95) * sizeFactor, sportsCapUsd);
     if (sizeFactor < 1) {
       ctx.log.info(
         `${sig.marketRef} resolves within ${cfg.nearResolutionDays}d; entry sized down ${cfg.nearResolutionSizeCutPct}% to $${notional.toFixed(2)}`,

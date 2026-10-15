@@ -182,7 +182,27 @@ describe("flip-flat portfolio allocation", () => {
     const got = await entries(ctx);
     expect(got.map(action => action.marketRef).sort()).toEqual(["sport-high", "sport-low"]);
     expect(got.every(action => action.provenance?.signalSleeve === "sports")).toBe(true);
-    if (allocationMode === "portfolio-kelly") expect(got.find(action => action.marketRef === "sport-low")!.notional).toBeCloseTo(25);
+    for (const action of got) expect(action.notional).toBeCloseTo(10);
+  });
+
+  it.each([null, 5, 0.5])("caps sports top-ups at 1%% of equity with marketCapPct=%s", async marketCapPct => {
+    const ctx = context({ config: { marketCapPct }, signals: [signal("sport", 20, { sleeve: "sports" })],
+      positions: [{ marketRef: "sport", side: "YES", size: 8, avgPrice: .5 }] });
+    const got = await entries(ctx);
+    expect(got).toHaveLength(1);
+    expect(got[0]!.notional).toBeCloseTo(marketCapPct === 0.5 ? 1 : 6);
+    expect(got[0]!.provenance?.marketCapUsd).toBe(marketCapPct === 0.5 ? 5 : 10);
+  });
+
+  it("does not add to sports positions at or above the cap", async () => {
+    const ctx = context({ signals: [signal("sport", 20, { sleeve: "sports" })],
+      positions: [{ marketRef: "sport", side: "YES", size: 22, avgPrice: .5 }] });
+    expect(await entries(ctx)).toEqual([]);
+  });
+
+  it.each(["portfolio-kelly", "daily-budget", "fixed-notional"])("skips sports below the minimum entry in %s mode", async allocationMode => {
+    const ctx = context({ equity: 50, config: { allocationMode }, signals: [signal("sport", 20, { sleeve: "sports" })] });
+    expect(await entries(ctx)).toEqual([]);
   });
 
   it("still rejects stale sports forecasts and insufficient sports exit liquidity", async () => {

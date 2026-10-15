@@ -6,6 +6,7 @@ import { getJson, setJson } from "../state.js";
 import { closingPnl } from "../alerts/format.js";
 import { isTransientVenueError, retryAfterMs } from "../venues/transient.js";
 import { checkCapacity } from "../risk/capacity.js";
+import { SPORTS_POSITION_CAP_PCT } from "../risk/sports.js";
 import { derivePredictionExecutionMetrics, type PredictionExecutionMetrics } from "./prediction-execution-metrics.js";
 import { positionMarketValue } from "../portfolio.js";
 import { RefusalLog } from "./refusal-log.js";
@@ -503,7 +504,9 @@ export class PredictionExecutor {
       if (!(maximumPrice > 0) || (action.kind === "enter" && maximumPrice + EPS < bid)) return this.refuse(action, "price bound below the best bid", { maximumPrice, bid, ask });
       const cash = snapshot?.cash ?? 0;
       const reserved = Object.values(c.parents).filter(p => active(p) && p.side === "BUY").reduce((sum, p) => sum + this.remaining(p) * p.maximumPrice, 0);
-      const budget = action.kind === "enter" ? Math.min(action.notional, this.d.config.risk.maxOrderNotional, Math.max(0, cash - reserved)) : 0;
+      const sportsHeadroom = sportsSignal && snapshot
+        ? await this.entryHeadroom({ id: "", marketRef: action.marketRef, sportsSignal: true, provenance }, market, snapshot) : Infinity;
+      const budget = action.kind === "enter" ? Math.min(action.notional, this.d.config.risk.maxOrderNotional, Math.max(0, cash - reserved), sportsHeadroom) : 0;
       const heldSize = held.reduce((sum, p) => sum + p.size, 0);
       const pricedSize = held.reduce((sum, p) => sum + (p.avgPrice > 0 ? p.size : 0), 0);
       const entryAvgPrice = action.kind === "exit" && pricedSize > EPS
@@ -732,11 +735,6 @@ export class PredictionExecutor {
     const bid = b.bids[0]!.price, ask = b.asks[0]?.price ?? bid, tick = m.tickSize;
     p.lastValidatedBookAt = Math.min(m.book.ts, m.observedAt);
     if (polymarketEntry && !current && this.remaining(p) + EPS < m.minOrderSize) { this.finish(p, "completed"); return; }
-    if (phase === "taker" && p.crossingAt !== undefined && current) {
-      // The crossing remainder rests at the bound until the window closes; it is never chased.
-      if (current.intent.limitPrice > p.maximumPrice + EPS) await this.cancel(current, "price bound moved below the crossing remainder");
-      return;
-    }
     if (p.side === "BUY") {
       const latestSignal = this.latestSignal(p.marketRef);
       const signalQ = latestSignal?.side === p.outcome ? latestSignal.prob : this.signals ? undefined : p.qHeld;
@@ -775,6 +773,11 @@ export class PredictionExecutor {
         if (current) await this.cancel(current, "normal exit awaits fresh evaluation");
         return;
       }
+    }
+    if (phase === "taker" && p.crossingAt !== undefined && current) {
+      // The crossing remainder rests at the bound until the window closes; it is never chased.
+      if (current.intent.limitPrice > p.maximumPrice + EPS) await this.cancel(current, "price bound moved below the crossing remainder");
+      return;
     }
     let price: number;
     if (p.side === "BUY" && crossing && this.commodities) {
@@ -897,7 +900,7 @@ export class PredictionExecutor {
   }
 
   /** Recheck portfolio caps without mistaking a delayed public position for free risk. */
-  private async entryHeadroom(parent: Parent, market: PredictionExecutionMarket, snapshot: PortfolioSnapshot): Promise<number> {
+  private async entryHeadroom(parent: Pick<Parent, "id" | "marketRef" | "sportsSignal" | "provenance">, market: PredictionExecutionMarket, snapshot: PortfolioSnapshot): Promise<number> {
     const c = this.checkpoint!;
     const { cash, positions } = snapshot;
     const exposure = new Map<string, number>();
@@ -928,11 +931,15 @@ export class PredictionExecutor {
     const cfg = this.d.config.strategy.config;
     const mode = cfg.allocationMode ?? ("dailyBudgetUsd" in cfg || "positionBudgetPct" in cfg ? "daily-budget" : "portfolio-kelly");
     let headroom = Math.max(0, cash - otherReserved);
+    const equity = cash + positionValue;
+    if (parent.sportsSignal) {
+      const capPct = Math.min(this.strategyNumber("marketCapPct", Infinity), SPORTS_POSITION_CAP_PCT);
+      headroom = Math.min(headroom, Math.max(0, equity * capPct / 100 - (exposure.get(parent.marketRef) ?? 0)));
+    }
     if (mode === "daily-budget") {
       const today = new Date(this.now()).toISOString().slice(0, 10);
       return Math.min(headroom, Math.max(0, this.strategyNumber("dailyBudgetUsd", 100) - (c.dailySpentUsd[today] ?? 0) - otherReserved));
     }
-    const equity = cash + positionValue;
     if (this.commodities) {
       const asset = parent.provenance?.asset, direction = parent.provenance?.direction;
       const allowed = ["oil", "gold", "btc", "copper", "silver"];

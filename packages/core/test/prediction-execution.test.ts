@@ -218,6 +218,57 @@ describe("adaptive prediction execution", () => {
     expect(h.submissions).toContainEqual(expect.objectContaining({ postOnly: false, limitPrice: .6 }));
   });
 
+  it.each(["portfolio-kelly", "daily-budget", "fixed-notional"])("caps sports orders at 1%% of current equity in %s mode", async allocationMode => {
+    const h = harness({ allocationMode, marketCapPct: null }); h.setCash(1000);
+    const signal: Signal = { id: "sports", marketRef: "yes", venue: "polymarket", side: "YES", sleeve: "sports",
+      sports: { kickoffAt: NOW + 86_400_000 }, prob: .76, ts: new Date(NOW).toISOString(), ttlSec: 10800 };
+    await h.executor.supervise({ signals: [signal], refreshedAt: h.now() });
+    await h.executor.admit(enter(), []);
+    expect(h.submissions).toHaveLength(1);
+    expect(h.submissions[0]!.size * .6).toBeLessThanOrEqual(10);
+    expect(h.submissions[0]!.size * .6).toBeGreaterThan(9.99);
+    expect((await h.executor.snapshot()).parents[0]!.reservedNotionalUsd).toBeLessThanOrEqual(10);
+  });
+
+  it.each(["YES", "NO"] as const)("includes held cost basis when capping sports %s top-ups", async side => {
+    const h = harness(); h.setCash(996); h.setHeld(8, side === "YES" ? "yes" : "no");
+    const signal: Signal = { id: "sports", marketRef: "yes", venue: "polymarket", side, sleeve: "sports",
+      sports: { kickoffAt: NOW + 86_400_000 }, prob: .76, ts: new Date(NOW).toISOString(), ttlSec: 10800 };
+    await h.executor.supervise({ signals: [signal], refreshedAt: h.now() });
+    await h.executor.admit(enter({ side }), h.positions());
+    expect(h.submissions).toHaveLength(1);
+    const total = 8 * .51 + h.submissions[0]!.size * .6;
+    expect(total).toBeLessThanOrEqual(10);
+    expect(total).toBeGreaterThan(9.99);
+  });
+
+  it("refuses sports entries when the cap is below the venue minimum", async () => {
+    const h = harness(); h.setCash(100);
+    await h.executor.supervise({ signals: [{ id: "sports", marketRef: "yes", venue: "polymarket", side: "YES", sleeve: "sports",
+      sports: { kickoffAt: NOW + 86_400_000 }, prob: .76, ts: new Date(NOW).toISOString() }], refreshedAt: h.now() });
+    await h.executor.admit(enter(), []);
+    expect(h.submissions).toEqual([]);
+  });
+
+  it.each([false, true])("cancels sports commitments above 1%% after an equity drop and restart (crossing %s)", async crossing => {
+    const h = harness(); h.setCash(1000);
+    const signal: Signal = { id: "sports", marketRef: "yes", venue: "polymarket", side: "YES", sleeve: "sports",
+      sports: { kickoffAt: NOW + 86_400_000 }, prob: .76, ts: new Date(NOW).toISOString(), ttlSec: 10800 };
+    await h.executor.supervise({ signals: [signal], refreshedAt: h.now() });
+    await h.executor.admit(enter(), []);
+    if (crossing) {
+      h.setBook(.5, .6, 5); h.advance(120000);
+      await h.executor.supervise(); await h.settleCancel();
+      expect(h.submissions.at(-1)!.postOnly).toBe(false);
+      h.setBook(.5, .61);
+    }
+    expect(h.orders.size).toBe(1);
+    h.setCash(100); h.restart(); h.advance(5000);
+    await h.executor.supervise({ signals: [signal], refreshedAt: h.now() });
+    expect(h.adapter.cancelOrderChecked).toHaveBeenCalled();
+    expect((await h.executor.snapshot()).parents[0]!.cancelReason).toMatch(/portfolio capacity/);
+  });
+
   it("does not accept sports provenance as a substitute for a published sports signal", async () => {
     const h = harness({ entrySpreadPp: 15 });
     await h.executor.supervise({ signals: [{ id: "plain", marketRef: "yes", venue: "polymarket", side: "YES", prob: .58,
