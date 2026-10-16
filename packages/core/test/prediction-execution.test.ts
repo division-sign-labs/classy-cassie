@@ -130,6 +130,36 @@ function harness(strategy: Record<string, unknown> = {}, execution?: Record<stri
 describe("adaptive prediction execution", () => {
   afterEach(() => { vi.useRealTimers(); });
 
+  it("refuses disabled category entries at execution admission", async () => {
+    const h = harness({ excludedCategories: ["sports"] });
+    await h.ready();
+    expect(await h.executor.admit(enter({ provenance: { qHeld: .76, signalSleeve: "sports" } }), [])).toEqual({ placed: false });
+    expect(h.submissions).toHaveLength(0);
+    expect(h.log.warn.mock.calls.flat().join(" ")).toContain("signal category disabled: sports");
+  });
+
+  it("cancels a saved entry after its category is disabled, without needing an active signal", async () => {
+    const h = harness(); await h.ready();
+    await h.executor.admit(enter({ provenance: { qHeld: .76, signalSleeve: "rates", signalSleeveGroup: "macro" } }), []);
+    expect(h.orders.size).toBe(1);
+    h.config.strategy.config.excludedCategories = ["macro"];
+    await h.restart().recover();
+    expect(h.orders.size).toBe(0);
+    await h.executor.supervise({ signals: [] });
+    expect(h.submissions).toHaveLength(1);
+  });
+
+  it("keeps sports exits active when sports entries are disabled", async () => {
+    const h = harness({ excludedCategories: ["sports"] }); h.setHeld(96);
+    await h.executor.supervise({ signals: [{ id: "sports", venue: "polymarket", marketRef: "yes", side: "YES", sleeve: "sports",
+      sports: { kickoffAt: NOW + 3_600_000 }, prob: .76, refPrice: .55, ts: new Date(NOW).toISOString(), ttlSec: 10800 }] });
+    await h.executor.admit({ kind: "exit", marketRef: "yes" }, h.positions());
+    expect(h.submissions).toHaveLength(1);
+    expect(h.submissions[0]?.side).toBe("SELL");
+    await h.restart().recover();
+    expect(h.orders.size).toBe(1);
+  });
+
   it("cancels a resting sports SELL at kickoff and does not replace it after restart", async () => {
     const h = harness(); h.setHeld(96);
     const sports: Signal = { id: "sports", venue: "polymarket", marketRef: "yes", side: "YES", sleeve: "sports", sports: { kickoffAt: NOW + 5000 }, prob: .76, refPrice: .55, ts: new Date(NOW).toISOString(), ttlSec: 10800 };

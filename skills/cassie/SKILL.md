@@ -280,6 +280,10 @@ cassie fund <botId> [--from splits]          # run/re-run the venue funding flow
 cassie withdraw <botId> <amount|all> --to <address>   # send collateral out (signs locally)
 cassie run <botId> [--debug]
 cassie strategy <botId>                      # view/tune position cap, allocation, guardrails
+cassie strategy <botId> --sports off          # exclude sports entries on Polymarket or Kalshi
+cassie strategy <botId> --sports on           # enable sports entries again
+cassie strategy <botId> --exclude-categories sports,politics  # replace the exclusion list
+cassie strategy <botId> --exclude-categories none            # enable all categories
 cassie strategy <botId> --kelly-fraction .25 --market-cap-pct 2.5 --event-cap-pct 5
 cassie strategy <botId> --near-resolution-days 3 --near-resolution-size-cut-pct 25
 cassie strategy <botId> --min-exit-depth-2c-usd 2500 --max-hold-days unlimited
@@ -648,6 +652,16 @@ to the YES-token marketRef, `latest_q` becomes the side-adjusted model probabili
 `current_cost_cents` the reference price. Forecasts older than three hours fail entry
 freshness by default; `signals.maxAgeSec` can override that per bot. Freshness never
 suppresses an exit.
+
+For prediction-market `signals` bots, `--sports off` blocks new sports entries and
+top-ups; `--sports on` enables them again. Setup offers **Sports signals**. Existing
+bots can choose **Signal categories** in `cassie strategy <botId>` without changing
+allocation or exit settings. `--exclude-categories <comma-separated names>` replaces
+the exclusions; `none` clears them. Names match published sleeves or sleeve groups,
+ignoring case. Sports metadata also counts as the sports category.
+The list is saved in `strategy.config.excludedCategories` and defaults to empty.
+Presets preserve it. Existing positions keep their exit rules, sports holds, and
+redemption. Restart a local bot or redeploy a deployed bot to apply the change.
 
 Sports positions hold to settlement from scheduled kickoff by default
 (`--sports-hold-after-start on`). Q exits, time stops, synthetic triggers, and queued

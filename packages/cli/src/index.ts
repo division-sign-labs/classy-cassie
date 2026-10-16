@@ -225,6 +225,8 @@ alerts
 program
   .command("strategy <botId>")
   .description("view or change strategy settings")
+  .option("--sports <on|off>", "include or exclude sports signals for prediction-market entries (default on)")
+  .option("--exclude-categories <list|none>", "replace excluded signal categories (comma-separated); none enables all")
   .option("--preset <recommended|hold>", "replace settings: recommended (quarter-Kelly, 5% per event) or hold (fixed lot, 15pp+ edge, sell on a confirmed Q flip)")
   .option("--execution <adaptive|legacy>", "Polymarket signals: managed limits or legacy crossing limits")
   .option("--entry-deadline-seconds <seconds>", "Polymarket signals: post-only phase before the marketable limit (default 0: none)")

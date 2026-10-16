@@ -108,6 +108,14 @@ describe("LiveSignalSource (gateway contract, verified 2026-10-06)", () => {
     ],
   };
 
+  it("retains category groups for entry exclusions", async () => {
+    const fetcher = vi.fn(async (url: string | URL | Request) => new Response(JSON.stringify(
+      String(url).includes("/signals") ? { signals: [{ ...gatewayRow, sleeve: "rates", sleeve_group: "macro" }] } : clobMarket,
+    )));
+    const src = new LiveSignalSource({ baseUrl: "https://gateway.test", path: "/signals" }, "test", fetcher as typeof fetch);
+    expect(await src.latest({})).toMatchObject([{ sleeve: "rates", sleeveGroup: "macro" }]);
+  });
+
   /** Routes gateway vs CLOB token-resolution requests. */
   function routedFetch(rows: unknown[] = [gatewayRow], market = clobMarket) {
     return vi.fn(async (url: string | URL | Request) => {

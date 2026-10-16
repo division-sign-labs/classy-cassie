@@ -10,6 +10,16 @@ first. Quotient's published signals determine entry eligibility. There is no add
 entry-edge band by default; Kelly sizing still requires a positive edge at the live price.
 Optional local edge limits compare the Q forecast with the market price, not the bid/ask spread.
 
+On Polymarket and Kalshi, `cassie strategy <botId> --sports off` excludes sports from
+new entries and top-ups. `--sports on` enables it again. The interactive strategy
+settings offer **Signal categories**, and setup offers **Sports signals**.
+`--exclude-categories sports,politics` replaces `strategy.config.excludedCategories`;
+`--exclude-categories none` clears it. Matching uses published sleeves and sleeve groups,
+ignoring case and treating spaces, underscores, and hyphens alike. Sports metadata also
+identifies sports signals. Unclassified signals remain eligible.
+Exits and redemption continue. Allocation presets preserve the exclusions.
+Restart a local bot or redeploy with `cassie deploy <botId>` to apply the settings.
+
 The default prediction-market allocator targets quarter Kelly using current portfolio
 equity, subject to a 5% cap across markets in the same parent event. The separate market
 cap and near-resolution size cut are off by default. Same-side repeat signals can top up

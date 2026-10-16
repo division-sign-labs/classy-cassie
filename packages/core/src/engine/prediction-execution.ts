@@ -11,6 +11,7 @@ import { derivePredictionExecutionMetrics, type PredictionExecutionMetrics } fro
 import { positionMarketValue } from "../portfolio.js";
 import { RefusalLog } from "./refusal-log.js";
 import { SPORTS_HOLD_REASON, type SportsHoldGuard } from "./sports-hold.js";
+import { ExcludedSignalCategoriesSchema, excludedSignalCategory } from "../signals/categories.js";
 
 export const PREDICTION_EXECUTION_KEY = "prediction:execution:v1";
 
@@ -248,6 +249,7 @@ export class PredictionExecutor {
   private portfolio?: PortfolioSnapshot;
   private deferral?: { since: number; until: number; stage: string; reason: string; loggedAt: number };
   private readonly refusals: RefusalLog;
+  private readonly excludedCategories: string[];
   /** Resting orders this executor did not place, and the markets they sit in. In memory: a restart re-observes them. */
   private unownedOrderIds = new Set<string>();
   private unownedMarkets = new Set<string>();
@@ -258,6 +260,8 @@ export class PredictionExecutor {
   constructor(private readonly d: PredictionExecutorDeps) {
     this.now = d.now ?? Date.now; this.startedAt = this.now();
     this.refusals = new RefusalLog(d.log, this.now);
+    this.excludedCategories = ["signals", "flip-flat"].includes(d.config.strategy.id)
+      ? ExcludedSignalCategoriesSchema.parse(d.config.strategy.config.excludedCategories) : [];
   }
 
   private serial<T>(fn: () => Promise<T>): Promise<T> {
@@ -315,6 +319,17 @@ export class PredictionExecutor {
     if (!latest || !Number.isFinite(Date.parse(latest.ts))) return undefined;
     if (candidates.some(signal => signal.ts === latest.ts && signal.side !== latest.side)) return undefined;
     return latest;
+  }
+  private excludedEntryReason(marketRef: string, provenance?: Record<string, unknown>, sportsSignal = false): string | undefined {
+    const signal = this.latestSignal(marketRef);
+    const saved = {
+      sleeve: typeof provenance?.signalSleeve === "string" ? provenance.signalSleeve : undefined,
+      sleeveGroup: typeof provenance?.signalSleeveGroup === "string" ? provenance.signalSleeveGroup : undefined,
+      ...(sportsSignal || provenance?.sports ? { sports: {} } : {}),
+    };
+    const category = (signal && excludedSignalCategory(signal, this.excludedCategories))
+      || excludedSignalCategory(saved, this.excludedCategories);
+    return category ? `signal category disabled: ${category}` : undefined;
   }
   private get entryDuration(): number { return (this.d.config.execution?.entryDeadlineSec ?? (this.commodities ? this.strategyNumber("entryDeadlineSec", 20) : 0)) * 1000; }
   private get exitDuration(): number { return (this.d.config.execution?.exitPassiveSec ?? (this.commodities ? this.strategyNumber("exitPassiveSec", 20) : 60)) * 1000; }
@@ -407,6 +422,8 @@ export class PredictionExecutor {
       await this.save();
       await this.reconcile(COLD_START_TIMEOUT_MS);
       for (const p of Object.values(c.parents).filter(active)) {
+        const categoryReason = p.side === "BUY" && this.excludedEntryReason(p.marketRef, p.provenance, p.sportsSignal);
+        if (categoryReason) { await this.stopParent(p, categoryReason); continue; }
         if (p.side === "BUY" && this.now() >= (this.crossingClosesAt(p) ?? p.deadlineAt)) {
           await this.stopParent(p, p.crossingDeadlineAt === undefined ? "entry deadline elapsed during restart" : "entry crossing window elapsed during restart");
         }
@@ -428,6 +445,8 @@ export class PredictionExecutor {
   private async admitInternal(action: DirectionalAction, positions: Position[], exitEvaluatedAt = this.now()): Promise<StrategyActionResult> {
       this.requireSupport();
       const c = await this.load();
+      const categoryReason = action.kind === "enter" && this.excludedEntryReason(action.marketRef, action.provenance);
+      if (categoryReason) return this.refuse(action, categoryReason);
       await this.d.sportsHold?.refresh([action.marketRef], this.signals);
       if (this.d.sportsHold?.isHeld(action.marketRef)) return this.refuse(action, SPORTS_HOLD_REASON);
       // A supervision pass moments ago already applied every settlement; admission reuses it.
@@ -692,6 +711,8 @@ export class PredictionExecutor {
   }
 
   private async workParent(p: Parent, supplied?: PredictionExecutionMarket, snapshot?: PortfolioSnapshot): Promise<void> {
+    const categoryReason = p.side === "BUY" && this.excludedEntryReason(p.marketRef, p.provenance, p.sportsSignal);
+    if (categoryReason) { await this.stopParent(p, categoryReason); return; }
     if (this.d.sportsHold?.isHeld(p.marketRef)) { await this.stopParent(p, SPORTS_HOLD_REASON); return; }
     const children = this.children(p);
     const current = children.find(working);

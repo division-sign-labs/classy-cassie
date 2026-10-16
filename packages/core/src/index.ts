@@ -11,6 +11,7 @@ export * from "./risk/capacity.js";
 export * from "./risk/passive.js";
 export * from "./risk/sports.js";
 export * from "./signals/index.js";
+export * from "./signals/categories.js";
 export * from "./alerts/index.js";
 export * from "./llm/surplus.js";
 export * from "./quotient/research.js";

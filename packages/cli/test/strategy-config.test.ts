@@ -7,6 +7,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { parseBotConfig } from "@quotient-forecasting/cassie-core";
 import { loadBotConfig, saveBotConfig } from "../src/paths.js";
 import * as context from "../src/context.js";
+import { elicitSignalCategories, parseExcludedCategories } from "../src/signal-categories.js";
 import {
   RECOMMENDED_STRATEGY,
   elicitRecommendedStrategyConfig,
@@ -26,6 +27,74 @@ afterEach(() => {
 });
 
 describe("signals recommended allocation", () => {
+  it.each(["polymarket", "kalshi"])("turns sports off and back on for %s without resetting other settings", async venue => {
+    const root = mkdtempSync(join(tmpdir(), "cassie-categories-")); roots.push(root); process.env.CASSIE_HOME = root;
+    saveBotConfig(parseBotConfig({ id: "categories", venue, strategy: { id: "signals", config: { excludedCategories: ["politics"], flipConfirmations: 2, sportsHoldAfterStart: false } } }));
+    const log = vi.spyOn(console, "log").mockImplementation(() => {});
+    await runStrategy("categories", { sports: "OFF" });
+    expect(loadBotConfig("categories").strategy.config).toMatchObject({ excludedCategories: ["politics", "sports"], flipConfirmations: 2, sportsHoldAfterStart: false });
+    expect(log.mock.calls.flat().join("\n")).toMatch(/sports signals:\s+off/);
+    expect(log.mock.calls.flat().join("\n")).toContain("restart with: cassie run categories");
+    await runStrategy("categories", { sports: "on" });
+    expect(loadBotConfig("categories").strategy.config.excludedCategories).toEqual(["politics"]);
+    await expect(runStrategy("categories", { sports: "maybe" })).rejects.toThrow(/on or off/);
+    await expect(runStrategy("categories", { sports: "on", excludeCategories: "sports" })).rejects.toThrow(/conflicts/);
+  });
+
+  it("replaces or clears exclusions and preserves them across both presets", async () => {
+    const root = mkdtempSync(join(tmpdir(), "cassie-categories-")); roots.push(root); process.env.CASSIE_HOME = root;
+    saveBotConfig(parseBotConfig({ id: "categories", venue: "polymarket", strategy: { id: "signals" } }));
+    vi.spyOn(console, "log").mockImplementation(() => {});
+    await runStrategy("categories", { excludeCategories: " Sports, POLITICS, sports " });
+    for (const preset of ["hold", "recommended"]) {
+      await runStrategy("categories", { preset });
+      expect(loadBotConfig("categories").strategy.config.excludedCategories).toEqual(["sports", "politics"]);
+    }
+    await runStrategy("categories", { excludeCategories: "none" });
+    expect(loadBotConfig("categories").strategy.config.excludedCategories).toEqual([]);
+  });
+
+  it("offers category-only editing with the current sports choice selected", async () => {
+    const root = mkdtempSync(join(tmpdir(), "cassie-categories-")); roots.push(root); process.env.CASSIE_HOME = root;
+    const strategy = { excludedCategories: ["sports", "politics"], kellyFraction: .1, flipConfirmations: 2 };
+    saveBotConfig(parseBotConfig({ id: "categories", venue: "kalshi", strategy: { id: "signals", config: strategy } }));
+    const select = vi.spyOn(context, "select").mockResolvedValueOnce("categories").mockResolvedValueOnce("on");
+    vi.spyOn(context, "ask").mockResolvedValue("politics");
+    const confirm = vi.spyOn(context, "confirm");
+    vi.spyOn(console, "log").mockImplementation(() => {});
+    await runStrategy("categories");
+    expect(select.mock.calls[1]?.[1][0]?.value).toBe("off");
+    expect(confirm).not.toHaveBeenCalled();
+    expect(loadBotConfig("categories").strategy.config).toEqual({ ...strategy, excludedCategories: ["politics"] });
+  });
+
+  it("preserves exclusions when resetting allocation interactively", async () => {
+    const root = mkdtempSync(join(tmpdir(), "cassie-categories-")); roots.push(root); process.env.CASSIE_HOME = root;
+    saveBotConfig(parseBotConfig({ id: "categories", venue: "polymarket", strategy: { id: "signals", config: { excludedCategories: ["sports"] } } }));
+    vi.spyOn(context, "select").mockResolvedValue("allocation");
+    vi.spyOn(context, "confirm").mockResolvedValue(true);
+    vi.spyOn(console, "log").mockImplementation(() => {});
+    await runStrategy("categories");
+    expect(loadBotConfig("categories").strategy.config.excludedCategories).toEqual(["sports"]);
+  });
+
+  it("keeps other exclusions in setup and defaults new bots to sports on", async () => {
+    const select = vi.spyOn(context, "select").mockResolvedValue("off");
+    const ask = vi.spyOn(context, "ask");
+    expect(await elicitSignalCategories(["politics"], false)).toEqual(["politics", "sports"]);
+    expect(select.mock.calls[0]?.[1][0]?.value).toBe("on");
+    expect(ask).not.toHaveBeenCalled();
+    select.mockResolvedValue("on");
+    expect(await elicitSignalCategories(undefined, false)).toEqual([]);
+  });
+
+  it("rejects empty category names and category controls on perps", async () => {
+    for (const raw of ["", "sports,", ",sports", "sports,,politics"]) expect(() => parseExcludedCategories(raw)).toThrow(/category names/);
+    const root = mkdtempSync(join(tmpdir(), "cassie-categories-")); roots.push(root); process.env.CASSIE_HOME = root;
+    saveBotConfig(parseBotConfig({ id: "perps", venue: "hyperliquid", strategy: { id: "signals" } }));
+    await expect(runStrategy("perps", { sports: "off" })).rejects.toThrow(/prediction-market/);
+  });
+
   it("saves and displays the sports hold policy without changing the Q exit settings", async () => {
     const root = mkdtempSync(join(tmpdir(), "cassie-sports-hold-")); roots.push(root); process.env.CASSIE_HOME = root;
     saveBotConfig(parseBotConfig({ id: "sports", venue: "polymarket", strategy: { id: "signals", config: { scenarioExitEnabled: true, flipConfirmations: 2 } } }));

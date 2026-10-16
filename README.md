@@ -212,6 +212,23 @@ Configure the cadences with
 
 ### Signal allocation
 
+For Polymarket and Kalshi signals bots, turn sports off with:
+
+```sh
+cassie strategy <botId> --sports off
+```
+
+Use `--sports on` to enable it again. Setup also offers a **Sports signals** choice.
+For an existing bot, run `cassie strategy <botId>` and select **Signal categories**.
+Use `--exclude-categories sports,politics` to replace the exclusion list, or
+`--exclude-categories none` to enable all categories. Names match the published signal
+category or category group, ignoring case. All categories are enabled by default.
+
+Exclusions block new entries and top-ups. Existing positions keep their exit rules,
+including sports holds after kickoff and redemption. Changing allocation presets keeps
+the exclusion list. Restart a local bot or run `cassie deploy <botId>` to apply changes
+to a deployed bot.
+
 The signal strategy has no position-count cap by default and evaluates competing new
 signals from widest to narrowest eligible edge. Published Quotient signals determine entry
 eligibility; there is no additional entry-edge band by default. Kelly sizing still requires

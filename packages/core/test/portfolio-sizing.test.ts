@@ -144,6 +144,46 @@ describe("portfolio Kelly target", () => {
 });
 
 describe("flip-flat portfolio allocation", () => {
+  it.each(["portfolio-kelly", "daily-budget", "fixed-notional"])("excludes sports entries in %s on both prediction venues", async allocationMode => {
+    for (const venue of ["polymarket", "kalshi"] as const) {
+      const ctx = context({ config: { allocationMode, excludedCategories: [" Sports "] }, signals: [
+        signal("sport", 20, { venue, sleeve: "sports" }),
+        signal("metadata", 20, { venue, sports: { kickoffAt: NOW + DAY_MS } }),
+        signal("group", 20, { venue, sleeve: "baseball", sleeveGroup: "sports" }),
+        signal("politics", 20, { venue, sleeve: "politics" }),
+        signal("unclassified", 20, { venue }),
+      ] });
+      ctx.venueId = venue;
+      expect((await entries(ctx)).map(action => action.marketRef)).toEqual(["politics", "unclassified"]);
+    }
+  });
+
+  it("excludes sports top-ups and supports other categories and groups", async () => {
+    const ctx = context({ config: { excludedCategories: ["sports", "politics", "macro"] }, signals: [
+      signal("held", 20, { sleeve: "sports" }), signal("election", 20, { sleeve: "politics" }),
+      signal("rates", 20, { sleeve: "rates", sleeveGroup: "macro" }), signal("crypto", 20, { sleeve: "crypto" }),
+    ], positions: [{ marketRef: "held", side: "YES", size: 8, avgPrice: .5 }] });
+    expect((await entries(ctx)).map(action => action.marketRef)).toEqual(["crypto"]);
+  });
+
+  it("keeps excluded signals available for Q exits and redemption", async () => {
+    const ctx = context({ config: { excludedCategories: ["sports"] }, signals: [signal("held", 20, { sleeve: "sports", side: "NO", prob: .8 })],
+      positions: [{ marketRef: "held", side: "YES", size: 8, avgPrice: .5 },
+        { marketRef: "resolved", side: "YES", size: 8, avgPrice: .5, redeemable: true }] });
+    const actions = await new FlipFlatStrategy().tick(ctx);
+    expect(actions).toContainEqual(expect.objectContaining({ kind: "exit", marketRef: "held" }));
+    expect(actions).toContainEqual(expect.objectContaining({ kind: "redeem", marketRef: "resolved" }));
+    expect(actions.some(action => action.kind === "enter")).toBe(false);
+  });
+
+  it("cancels excluded resting buys while retaining sell orders", async () => {
+    const ctx = context({ config: { excludedCategories: ["sports"] }, signals: [signal("sport", 20, { sleeve: "sports" })], openOrders: [
+      { id: "buy", marketRef: "sport", side: "BUY", size: 10, filledSize: 0, price: .5, status: "open" },
+      { id: "sell", marketRef: "sport", side: "SELL", size: 10, filledSize: 0, price: .5, status: "open" },
+    ] });
+    expect(await new FlipFlatStrategy().tick(ctx)).toEqual([{ kind: "cancel", orderId: "buy", marketRef: "sport", reason: "signal category disabled: sports" }]);
+  });
+
   it("uses quarter Kelly and the event cap without a market cap, resolution cut, or exit-depth floor", async () => {
     const ctx = context({ signals: [signal("near", 8, { endsAt: NOW + DAY_MS })] });
     ctx.config = {};

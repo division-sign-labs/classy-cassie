@@ -349,6 +349,8 @@ export interface Signal {
   side: PositionSide;
   /** Published signal sleeve. Sports entry edges are screened by the publisher. */
   sleeve?: string;
+  /** Broader published category, retained for entry exclusions. */
+  sleeveGroup?: string;
   sports?: SportsGameMetadata;
   /** Model probability (prediction markets). */
   prob?: number;

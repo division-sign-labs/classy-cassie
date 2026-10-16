@@ -18,6 +18,7 @@ import {
 import { ask, confirm, getPassphrase, keystore, makeSetupContext, select, withOperatorRpc } from "../context.js";
 import { clearInitState, loadInitState, saveInitState, type InitState } from "../init-state.js";
 import { botConfigPath, loadBotConfig, saveBotConfig } from "../paths.js";
+import { elicitSignalCategories } from "../signal-categories.js";
 import { createSplitsTreasury } from "../splits-init.js";
 import { discoverQuotientToken } from "../quotient-token.js";
 import { describeTelegramFailure, localTelegramSettings } from "../telegram-settings.js";
@@ -651,6 +652,10 @@ export async function runInit(): Promise<void> {
       ? await elicitRecommendedStrategyConfig(existingStrategy, venue)
       : await elicitStrategyConfig(existingStrategy, venue);
     tickIntervalMin = Number(strategyConfig.tickIntervalMin ?? 1);
+  }
+
+  if (isPredictionVenue(venue) && (strategyId === "signals" || strategyId === "flip-flat")) {
+    strategyConfig.excludedCategories = await elicitSignalCategories(existingStrategy.excludedCategories, false);
   }
 
   // Alerts: Telegram only in MVP.

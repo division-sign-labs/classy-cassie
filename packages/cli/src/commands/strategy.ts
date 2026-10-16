@@ -4,11 +4,14 @@
 import pc from "picocolors";
 import {
   PredictionExecutionConfigSchema,
+  ExcludedSignalCategoriesSchema,
   polymarketFeeMode,
+  type BotConfig,
   type PredictionExecutionConfig,
 } from "@quotient-forecasting/cassie-core";
-import { ask, confirm } from "../context.js";
+import { ask, confirm, select } from "../context.js";
 import { loadBotConfig, saveBotConfig } from "../paths.js";
+import { elicitSignalCategories, parseExcludedCategories, setSportsSignals } from "../signal-categories.js";
 
 export const RECOMMENDED_STRATEGY = {
   topN: null,
@@ -214,6 +217,8 @@ export async function elicitStrategyConfig(
 }
 
 export interface StrategyOptions {
+  sports?: string;
+  excludeCategories?: string;
   preset?: string;
   execution?: string;
   entryDeadlineSeconds?: string;
@@ -272,6 +277,9 @@ export const SCENARIO_EXIT_DEFAULTS = {
 /** `cassie strategy <botId>`: view and tune the bot's strategy and signal guardrails. */
 export async function runStrategy(botId: string, opts: StrategyOptions = {}): Promise<void> {
   const cfg = loadBotConfig(botId);
+  const predictionVenue = cfg.venue === "polymarket" || cfg.venue === "kalshi";
+  const hasCategoryOptions = opts.sports !== undefined || opts.excludeCategories !== undefined;
+  if (hasCategoryOptions && !predictionVenue) throw new Error("signal categories are supported only for prediction-market bots");
   const executionOptions = ["execution", "entryDeadlineSeconds", "entryCrossingSeconds", "exitPassiveSeconds"] as const;
   const hasExecutionOptions = executionOptions.some((name) => opts[name] !== undefined);
   if (hasExecutionOptions && (cfg.venue !== "polymarket" || !["signals", "flip-flat"].includes(cfg.strategy.id))) {
@@ -295,6 +303,11 @@ export async function runStrategy(botId: string, opts: StrategyOptions = {}): Pr
   }
   if (cfg.strategy.id !== "signals" && cfg.strategy.id !== "flip-flat") {
     throw new Error(`bot "${botId}" runs the unsupported "${cfg.strategy.id}" strategy`);
+  }
+  const excludedCategories = hasCategoryOptions ? configuredExcludedCategories(cfg.strategy.config, opts) : undefined;
+  if (hasCategoryOptions && Object.entries(opts).every(([name, value]) => value === undefined || name === "sports" || name === "excludeCategories")) {
+    saveSignalCategories(cfg, excludedCategories!);
+    return;
   }
   const directUpdate = Object.values(opts).some((value) => value !== undefined);
   if (directUpdate) {
@@ -324,7 +337,11 @@ export async function runStrategy(botId: string, opts: StrategyOptions = {}): Pr
       }
     }
     let strategyConfig = normalizeStrategyConfig(cfg.strategy.config as Record<string, unknown>);
-    if (opts.preset !== undefined) strategyConfig = presetStrategyConfig(parsePreset(opts.preset), cfg.venue);
+    if (opts.preset !== undefined) strategyConfig = {
+      ...presetStrategyConfig(parsePreset(opts.preset), cfg.venue),
+      ...(strategyConfig.excludedCategories === undefined ? {} : { excludedCategories: strategyConfig.excludedCategories }),
+    };
+    if (excludedCategories !== undefined) strategyConfig.excludedCategories = excludedCategories;
     let tickIntervalMin = cfg.tickIntervalMin;
     if (opts.top !== undefined) strategyConfig.topN = positionLimit(opts.top);
     const requestedMode = requestedAllocationMode(opts);
@@ -418,10 +435,18 @@ export async function runStrategy(botId: string, opts: StrategyOptions = {}): Pr
     });
     console.log(pc.green(`saved strategy settings for ${botId}`));
     printStrategy(strategyConfig, maxAgeSec, risk, tickIntervalMin, cfg.venue, execution);
+    if (hasCategoryOptions) printCategoryActivation(botId, Boolean(cfg.deployment));
     return;
   }
   console.log(pc.bold(`strategy: signals`));
   printStrategy(cfg.strategy.config as Record<string, unknown>, cfg.signals.maxAgeSec, cfg.risk, cfg.tickIntervalMin, cfg.venue, cfg.execution);
+  if (predictionVenue && await select("Settings", [
+    { value: "categories", title: "Signal categories", description: "Turn sports or other categories on or off" },
+    { value: "allocation", title: "Allocation and exits", description: "Change sizing, entry rules, and exit rules" },
+  ]) === "categories") {
+    saveSignalCategories(cfg, await elicitSignalCategories(cfg.strategy.config.excludedCategories));
+    return;
+  }
   const recommendedSummary = recommendedStrategySummary(cfg.venue);
   console.log(`Recommended: ${recommendedSummary}`);
   if (await confirm("Reset to recommended settings?", false)) {
@@ -437,6 +462,38 @@ function onOff(label: string, raw: string): boolean {
   if (["on", "true", "yes", "1", "enabled"].includes(normalized)) return true;
   if (["off", "false", "no", "0", "disabled"].includes(normalized)) return false;
   throw new Error(`${label} must be on or off`);
+}
+
+function printCategoryActivation(botId: string, deployed: boolean): void {
+  console.log("Category exclusions block new entries and top-ups. Existing positions keep their exit rules.");
+  console.log(deployed ? `Apply to the deployed bot: cassie deploy ${botId}` : `If the bot is running, stop it and restart with: cassie run ${botId}`);
+}
+
+function configuredExcludedCategories(config: Record<string, unknown>, opts: StrategyOptions): string[] {
+  let excluded = opts.excludeCategories === undefined
+    ? ExcludedSignalCategoriesSchema.parse(config.excludedCategories)
+    : parseExcludedCategories(opts.excludeCategories);
+  if (opts.sports !== undefined) {
+    const enabled = onOff("sports signals", opts.sports);
+    if (enabled && opts.excludeCategories !== undefined && excluded.includes("sports")) {
+      throw new Error("--sports on conflicts with sports in --exclude-categories");
+    }
+    excluded = setSportsSignals(excluded, enabled);
+  }
+  return excluded;
+}
+
+function printSignalCategories(categories: unknown): void {
+  const excluded = ExcludedSignalCategoriesSchema.parse(categories);
+  console.log(`  sports signals:       ${excluded.includes("sports") ? "off" : "on"}`);
+  console.log(`  excluded categories:  ${excluded.join(", ") || "none"}`);
+}
+
+function saveSignalCategories(cfg: BotConfig, excludedCategories: string[]): void {
+  saveBotConfig({ ...cfg, strategy: { ...cfg.strategy, config: { ...cfg.strategy.config, excludedCategories } } });
+  console.log(pc.green(`saved signal categories for ${cfg.id}`));
+  printSignalCategories(excludedCategories);
+  printCategoryActivation(cfg.id, Boolean(cfg.deployment));
 }
 
 function signedNumber(label: string, raw: string): number {
@@ -622,6 +679,9 @@ function printStrategy(
         : LEGACY_DAILY_BUDGET_STRATEGY;
   const current = { ...defaults, ...normalized, allocationMode } as Record<string, unknown>;
   const positionLimit = current.topN === null ? "unlimited" : String(current.topN);
+  if (venue === "polymarket" || venue === "kalshi") {
+    printSignalCategories(current.excludedCategories);
+  }
   console.log(`  position limit:       ${positionLimit} (widest eligible edges first)`);
   console.log(`  allocation mode:      ${allocationMode}`);
   if (allocationMode === "portfolio-kelly") {
@@ -712,7 +772,10 @@ function compactNumber(value: number): string {
 
 function saveStrategy(botId: string, config: Record<string, unknown>): void {
   const cfg = loadBotConfig(botId);
-  const normalized = normalizeStrategyConfig(config);
+  const normalized = normalizeStrategyConfig({
+    ...(cfg.strategy.config.excludedCategories === undefined ? {} : { excludedCategories: cfg.strategy.config.excludedCategories }),
+    ...config,
+  });
   validateEntryEdgeRange(normalized);
   const tickIntervalMin = Number(normalized.tickIntervalMin ?? cfg.tickIntervalMin);
   saveBotConfig({

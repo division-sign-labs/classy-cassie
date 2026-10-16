@@ -11,6 +11,8 @@ import { z } from "zod";
 import {
   INVENTORY_DUST_SHARES,
   SPORTS_POSITION_CAP_PCT,
+  ExcludedSignalCategoriesSchema,
+  excludedSignalCategory,
   isSignalFresh,
   marketForecastFromSignal,
   mirrorBookForNo,
@@ -80,6 +82,8 @@ const FlipFlatConfigObjectSchema = z.object({
   maxHoldDays: z.number().positive().nullable().default(null),
   /** Hold sports positions to settlement from kickoff; unknown kickoff defers automatic trading. */
   sportsHoldAfterStart: z.boolean().default(true),
+  /** Prediction-market categories excluded from new entries and top-ups. */
+  excludedCategories: ExcludedSignalCategoriesSchema,
 
   // ---- Signal-exit state machine ------------------------------------------
   /**
@@ -671,6 +675,11 @@ export class FlipFlatStrategy implements Strategy {
     );
     for (const order of ctx.openOrders) {
       if (ctx.sportsHolds?.includes(order.marketRef)) actions.push({ kind: "cancel", orderId: order.id, marketRef: order.marketRef, reason: "sports hold after start; hold to settlement" });
+      else if ((ctx.venueId === "polymarket" || ctx.venueId === "kalshi") && order.side === "BUY" && !managedIds.has(order.id)) {
+        const signal = latestByMarket.get(order.marketRef);
+        const category = signal && excludedSignalCategory(signal, cfg.excludedCategories);
+        if (category) actions.push({ kind: "cancel", orderId: order.id, marketRef: order.marketRef, reason: `signal category disabled: ${category}` });
+      }
     }
     if (cfg.scenarioExitEnabled) {
       const scenario = await this.scenarioExits(
@@ -700,6 +709,7 @@ export class FlipFlatStrategy implements Strategy {
 
     if (ctx.execution?.blocked && ranked.length) ctx.log.info(`entries paused: ${ctx.execution.haltReason ?? "operator pause"}`);
     for (const [marketRef, sig] of ranked) {
+      if ((ctx.venueId === "polymarket" || ctx.venueId === "kalshi") && excludedSignalCategory(sig, cfg.excludedCategories)) continue;
       if (ctx.sportsHolds?.includes(marketRef)) continue;
       if (ctx.execution?.blocked) continue;
       if (entryBlockedMarkets.has(marketRef)) continue;
@@ -755,6 +765,7 @@ export class FlipFlatStrategy implements Strategy {
             signalId: sig.id,
             signalTs: sig.ts,
             ...(sig.sleeve ? { signalSleeve: sig.sleeve } : {}),
+            ...(sig.sleeveGroup ? { signalSleeveGroup: sig.sleeveGroup } : {}),
             ...(sig.sports ? { sports: sig.sports } : {}),
             side: sig.side,
             ...(sig.prob !== undefined ? { qHeld: sig.prob } : {}),
@@ -787,6 +798,7 @@ export class FlipFlatStrategy implements Strategy {
             signalId: sig.id,
             signalTs: sig.ts,
             ...(sig.sleeve ? { signalSleeve: sig.sleeve } : {}),
+            ...(sig.sleeveGroup ? { signalSleeveGroup: sig.sleeveGroup } : {}),
             ...(sig.sports ? { sports: sig.sports } : {}),
             side: sig.side,
             ...(sig.prob !== undefined ? { qHeld: sig.prob } : {}),
@@ -1778,6 +1790,7 @@ export class FlipFlatStrategy implements Strategy {
       signalId: sig.id,
       signalTs: sig.ts,
       ...(sig.sleeve ? { signalSleeve: sig.sleeve } : {}),
+      ...(sig.sleeveGroup ? { signalSleeveGroup: sig.sleeveGroup } : {}),
       ...(sig.sports ? { sports: sig.sports } : {}),
       side: sig.side,
       qHeld: sig.prob,
