@@ -84,6 +84,21 @@ describe("swing Quotient identity and outlook normalization", () => {
     expect(o).not.toHaveProperty("audit");
   });
 
+  it("keeps the series mode only when the group's own venue list agrees with it", () => {
+    const modeFor = (seriesMode: string, venues?: unknown) => {
+      const input = wire([48]) as { series: Array<{ mode: string; basis_groups: Array<Record<string, unknown>> }> };
+      input.series[0]!.mode = seriesMode;
+      if (venues !== undefined) input.series[0]!.basis_groups[0]!.contributing_venues = venues;
+      return normalizeSwingOutlooks(input, normalizeSwingAssets(directory()), NOW).outlooks[0]!.mode;
+    };
+    expect(modeFor("signal", ["kalshi"])).toBe("signal");
+    expect(modeFor("projection", [])).toBe("projection");
+    expect(modeFor("signal")).toBe("signal");
+    expect(modeFor("signal", [])).toBeNull();
+    expect(modeFor("signal", [7, ""])).toBeNull();
+    expect(modeFor("projection", ["kalshi"])).toBeNull();
+  });
+
   it("leaves optional take fields null and ignores an audit object entirely", () => {
     const input = wire([48]);
     const take = input.series[0]!.basis_groups[0]!.outlook.directional_take;

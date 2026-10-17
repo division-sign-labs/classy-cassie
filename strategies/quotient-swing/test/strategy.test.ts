@@ -93,6 +93,20 @@ describe("outlook eligibility", () => {
     expect(entryProblem(outlook({ medianPrice: 97, spotGapSigma: -0.3 }), cfg)).toBe("gap_side_mismatch");
     expect(entryProblem(outlook(), cfg)).toBeUndefined();
   });
+  it("opens only from signal-mode outlooks unless projection is configured", () => {
+    expect(cfg.entryModes).toEqual(["signal"]);
+    expect(entryProblem(outlook({ mode: "projection" }), cfg)).toBe("outlook_mode");
+    expect(entryProblem(outlook({ mode: "coverage" }), cfg)).toBe("outlook_mode");
+    expect(entryProblem(outlook({ mode: null }), cfg)).toBe("outlook_mode");
+    const both = QuotientSwingConfigSchema.parse({ entryModes: ["signal", "projection"] });
+    expect(entryProblem(outlook({ mode: "projection" }), both)).toBeUndefined();
+    expect(() => QuotientSwingConfigSchema.parse({ entryModes: [] })).toThrow();
+    expect(() => QuotientSwingConfigSchema.parse({ entryModes: ["coverage"] })).toThrow();
+    const s = snapshot({ markets: [market({ outlooks: [outlook({ mode: "projection" })] })] });
+    const r = reduceSwing(s, createSwingState(1000), cfg);
+    expect(r.decisions).toEqual([]);
+    expect(r.rejected).toContainEqual({ marketRef: "xyz:NVDA", reason: "outlook_mode" });
+  });
   it("accepts clamped curves, rejects unknown ranges and stale or old publications", () => {
     expect(forecastProblem(outlook({ rangeStatus: "clamped" }), NOW, cfg)).toBeUndefined();
     expect(forecastProblem(outlook({ rangeStatus: "unknown" }), NOW, cfg)).toBe("incomplete_curve");
@@ -264,6 +278,14 @@ describe("position exits", () => {
     const r = reduceSwing(snapshot({ positions: [position] }), heldState(), cfg);
     expect(r.decisions).toEqual([]);
     expect(r.state.entries["xyz:NVDA"]).toMatchObject({ status: "held", size: position.size, targetPrice: 107 });
+  });
+  it("keeps managing a held position when its outlook revises to projection mode", () => {
+    const projection = market({ outlooks: [outlook({ mode: "projection", medianPrice: 106 })] });
+    const r = reduceSwing(snapshot({ markets: [projection], positions: [position] }), heldState(), cfg);
+    expect(r.decisions).toEqual([{ kind: "target", marketRef: "xyz:NVDA", targetPrice: 106, reason: "forecast_revision" }]);
+    const flipped = market({ outlooks: [outlook({ mode: "projection", directionalSide: "bearish", medianPrice: 97, p25: 95, spotGapSigma: -0.3 })] });
+    expect(reduceSwing(snapshot({ markets: [flipped], positions: [position] }), heldState(), cfg).decisions
+      .find(d => d.kind === "exit")).toMatchObject({ reason: "forecast_reversal" });
   });
   it("moves the target with the latest median in either direction", () => {
     const lower = market({ outlooks: [outlook({ medianPrice: 106 })] });

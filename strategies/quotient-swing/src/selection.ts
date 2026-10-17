@@ -32,6 +32,7 @@ export function forecastProblem(o: SwingOutlook, now: number, config: QuotientSw
 
 /** Direction and signal-size requirements that apply to a new entry only. */
 export function entryProblem(o: SwingOutlook, config: QuotientSwingConfig): string | undefined {
+  if (!o.mode || !(config.entryModes as readonly string[]).includes(o.mode)) return "outlook_mode";
   if (o.directionalSide !== "bullish" && o.directionalSide !== "bearish") return "neutral_horizon";
   const gap = Math.abs(o.spotGapSigma);
   if (gap < config.minGapSigma) return "gap_below_min";

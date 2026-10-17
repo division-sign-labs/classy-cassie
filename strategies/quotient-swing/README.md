@@ -43,7 +43,9 @@ Optional diagnostics: `cassie swing dry-run q-swing` reports proposed decisions 
 
 ## Decisions
 
-The strategy intersects Quotient-covered equities and commodities with active `xyz` instruments, and `crypto:btc` / `crypto:eth` with native `BTC` / `ETH`. It considers every exact Hyperliquid outlook with 24–120 hours remaining. An outlook is eligible when it is active with an accepted freshness state (`freshnessStates`, default `fresh`), published within `maxPublicationAgeHours` (2; outlooks publish hourly), carries a full quantile curve, has a bullish or bearish directional take, and its `spot_gap_sigma` (median distance from spot in units of the outlook’s uncertainty) lies inside `[minGapSigma, maxGapSigma]` (defaults 0.30–1.0) on the published side. The backtest in `research/swing-perps/report.md` found trades below 0.30σ carry no edge after costs.
+The strategy intersects Quotient-covered equities and commodities with active `xyz` instruments, and `crypto:btc` / `crypto:eth` with native `BTC` / `ETH`. It considers every exact Hyperliquid outlook with 24–120 hours remaining. An outlook is eligible when it is active with an accepted freshness state (`freshnessStates`, default `fresh`), was built in an accepted mode (`entryModes`, default `signal`), published within `maxPublicationAgeHours` (2; outlooks publish hourly), carries a full quantile curve, has a bullish or bearish directional take, and its `spot_gap_sigma` (median distance from spot in units of the outlook’s uncertainty) lies inside `[minGapSigma, maxGapSigma]` (defaults 0.30–1.0) on the published side. The backtest in `research/swing-perps/report.md` found trades below 0.30σ carry no edge after costs.
+
+A `signal` outlook is built against a prediction-market price ladder that settles on the outlook's own date. A `projection` outlook has no ladder for that date and extends Q forecasts from other dates. On outlooks that settled between August 15 and October 16, 2026, inside the entry gap window, the median was on the correct side of the settlement for 63% of signal outlooks and 41% of projection outlooks. Set `entryModes` to `["signal", "projection"]` to restore entries from both. The mode applies to new entries only; a held position follows its own outlook's revisions whatever their mode.
 
 For each eligible outlook the entry is a crossing IOC order bounded by `maxSlippageBps`; the target is the median; the stop is `stopSigmaMultiple` (3.0) × `sigma_total`, scaled by the square root of the remaining horizon fraction. The backtest in `research/swing-perps/report.md` found stops only subtract expectancy, so the stop is a wide safety net. Net edge is the log return from entry to target after two taker fees, the spread, twice the slippage bound and an adverse funding reserve (`fundingReserveMultiple` × current hourly rate × remaining hours). Outlooks whose median the market has already crossed, or whose edge is inside costs, are rejected. Candidates are ranked by net edge, then by nearer anchor; one position per underlying; up to `maxPositions` (4). Assets in `reservedAssets` (default `commodity:wti`) always keep one slot available: other candidates leave that slot free until the reserved asset holds a position. After any exit the asset waits `postExitCooldownHours` (1) and the next hourly revision can re-enter it as a new trade.
 
@@ -65,6 +67,20 @@ Venue risk checks remain authoritative; stop execution can incur gaps and slippa
 ## Exits
 
 The engine owns two resting orders per position: a native stop and a reduce-only take-profit limit at the median. The target follows the latest revision’s median in either direction. Exits also occur when the latest revision flips against the position with at least `minGapSigma`, when the latest median crosses the entry price, at the original forecast anchor or `maxHoldHours` (48) after the fill (the backtest found trades still open after 48 hours average a loss), and after `staleExitHours` without a usable forecast. Stops remain active independently of forecast availability. Non-urgent exits rest post-only for `exitRetryMin` and then cross within the execution limits.
+
+## Upgrading to 0.4.36
+
+0.4.36 opens positions only from `signal` outlooks. No configuration change is needed; existing bots receive the new default. Open positions keep their stops, targets and exit rules.
+
+Install the release, then redeploy each swing bot:
+
+```sh
+npm install --global @quotient-forecasting/cassie@0.4.36
+cassie deploy q-swing
+cassie swing status q-swing
+```
+
+A bot deployed with `--from-workspace` redeploys from an updated checkout with `cassie deploy q-swing --from-workspace`. Status reports `outlook_mode` among the rejection reasons when a projection outlook is skipped. To keep the earlier behavior, add `"entryModes": ["signal", "projection"]` to the bot's strategy configuration before redeploying.
 
 ## Offline replay
 

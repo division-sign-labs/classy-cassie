@@ -15,6 +15,13 @@ const LiveSwingConfigSchema = z.object({
   /** Entry requires |spot_gap_sigma| inside [minGapSigma, maxGapSigma] on the published side. */
   minGapSigma: z.number().positive().default(0.30),
   maxGapSigma: z.number().positive().default(1.0),
+  /**
+   * Outlook modes that may open a position. `signal` outlooks are built against a prediction-market price ladder
+   * that settles on the same date; `projection` outlooks extend Q forecasts from other dates. Settled outlooks
+   * through 2026-10-16 found the median on the correct side of the settlement for 63% of signal outlooks and
+   * 41% of projection outlooks. Held positions follow their own outlook whatever its mode.
+   */
+  entryModes: z.array(z.enum(["signal", "projection"])).min(1).default(["signal"]),
   /** Native stop distance as a multiple of the outlook's own horizon uncertainty. Backtest: stops only subtract, so this is a safety net. */
   stopSigmaMultiple: z.number().positive().default(3.0),
   /** Maximum hold after the fill; the backtest found trades still open after 48h average a loss. */

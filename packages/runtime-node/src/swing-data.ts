@@ -135,12 +135,17 @@ export function normalizeSwingOutlooks(value: unknown, assets: SwingCoveredAsset
       if (curveProblems.length) {
         reject(id, `missing-full-curve-values: ${curveProblems.map(field => `outlook.${field}`).join(", ")}`); continue;
       }
+      // The series mode is copied from one basis row. Each group's own venue list shows whether a venue
+      // ladder backs this exact outlook; a disagreement leaves the mode unknown, which no entry accepts.
+      const venues = Array.isArray(group.contributing_venues)
+        ? group.contributing_venues.filter((v: unknown) => typeof v === "string" && v.length > 0) : null;
+      const outlookMode = venues === null || (venues.length > 0) === (mode === "signal") ? mode : null;
       const probability = num(take.probability_above_spot);
       const ref = row(group.resolution_reference)!;
       outlooks.push({
         id, assetKey: asset.assetKey, marketRef: asset.marketRef, basisId, targetFamilyKey: family,
         anchorAt, publishedAt, observedAt, status: String(o.status), freshnessState: String(o.freshness_state),
-        freshnessReason: str(o.freshness_reason), mode,
+        freshnessReason: str(o.freshness_reason), mode: outlookMode,
         basisVerified: true, provider: "hyperliquid", priceField: String(ref.price_field), window: String(ref.window),
         candleInterval: null, groundingStatus: String(group.grounding_status),
         rangeStatus: take.range_status as SwingOutlook["rangeStatus"], method: "full_quantile_curve",
